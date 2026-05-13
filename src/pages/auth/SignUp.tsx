@@ -166,9 +166,7 @@ export default function SignUp() {
 
   return (
     <AuthLayout>
-      <AuthTitle subtitle="Start with $1,000 virtual balance. Bet on real-life challenges.">
-        Create account
-      </AuthTitle>
+      <AuthTitle>Create account</AuthTitle>
 
       <form onSubmit={handleSignUp} className="mt-6 space-y-4">
         <div className="space-y-2">
