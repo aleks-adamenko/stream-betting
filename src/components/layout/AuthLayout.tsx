@@ -79,13 +79,9 @@ export function AuthTitle({ children, subtitle }: AuthTitleProps) {
   return (
     <div className="text-center">
       <Crown className="mx-auto -mb-1 h-7 w-auto" />
-      <div className="flex items-center justify-center gap-3">
-        <SparkBurst className="h-5 w-5 opacity-80" rotate={-15} />
-        <h1 className="font-heading text-3xl font-bold tracking-tight sm:text-4xl">
-          {children}
-        </h1>
-        <SparkBurst className="h-5 w-5 opacity-80" rotate={15} flip />
-      </div>
+      <h1 className="font-heading text-3xl font-bold tracking-tight sm:text-4xl">
+        {children}
+      </h1>
       {subtitle && <p className="mt-2 text-sm text-white/75">{subtitle}</p>}
     </div>
   );
@@ -120,31 +116,3 @@ function Crown({ className }: { className?: string }) {
   );
 }
 
-function SparkBurst({
-  className,
-  rotate = 0,
-  flip = false,
-}: {
-  className?: string;
-  rotate?: number;
-  flip?: boolean;
-}) {
-  return (
-    <svg
-      viewBox="0 0 40 40"
-      className={className}
-      style={{
-        transform: `${flip ? "scaleX(-1) " : ""}rotate(${rotate}deg)`,
-        filter: "drop-shadow(0 0 4px rgba(254, 229, 58, 0.4))",
-      }}
-      aria-hidden
-    >
-      <g stroke="#FEE53A" strokeWidth="2.5" strokeLinecap="round" fill="none">
-        <line x1="20" y1="2" x2="20" y2="10" />
-        <line x1="32" y1="6" x2="28" y2="12" />
-        <line x1="38" y1="16" x2="30" y2="18" />
-        <line x1="36" y1="28" x2="30" y2="24" />
-      </g>
-    </svg>
-  );
-}
