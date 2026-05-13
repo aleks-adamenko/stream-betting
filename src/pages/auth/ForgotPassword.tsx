@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, Mail } from "lucide-react";
+import { Loader2, Mail, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AuthLayout } from "@/components/layout/AuthLayout";
+import { AuthLayout, AuthTitle } from "@/components/layout/AuthLayout";
 import { supabase } from "@/integrations/supabase/client";
 
 export default function ForgotPassword() {
@@ -32,19 +32,12 @@ export default function ForgotPassword() {
   }
 
   return (
-    <AuthLayout
-      title="Forgot password"
-      subtitle="Enter your email and we'll send you a 6-digit code to reset it."
-      footer={
-        <>
-          Remembered it?{" "}
-          <Link to="/auth/sign-in" className="font-semibold text-white underline-offset-4 hover:underline">
-            Sign in
-          </Link>
-        </>
-      }
-    >
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <AuthLayout>
+      <AuthTitle subtitle="Enter your email and we'll send you a 6-digit code to reset it.">
+        Forgot password
+      </AuthTitle>
+
+      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div className="space-y-2">
           <label htmlFor="email" className="text-sm font-medium">
             Email
@@ -71,13 +64,26 @@ export default function ForgotPassword() {
         <Button
           type="submit"
           size="lg"
-          className="w-full text-base text-[#1F2679] ring-0 hover:text-[#1F2679]"
+          className="w-full gap-2 text-base text-[#1F2679] ring-0 hover:text-[#1F2679]"
           style={{ backgroundColor: "#FEE53A", backgroundImage: "none" }}
           disabled={submitting}
         >
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send reset code"}
+          {submitting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <>
+              Send reset code <Zap className="h-4 w-4 fill-current" />
+            </>
+          )}
         </Button>
       </form>
+
+      <p className="mt-6 text-center text-sm text-white/75">
+        Remembered it?{" "}
+        <Link to="/auth/sign-in" className="font-bold text-[#FEE53A] underline-offset-4 hover:underline">
+          Sign in
+        </Link>
+      </p>
     </AuthLayout>
   );
 }
