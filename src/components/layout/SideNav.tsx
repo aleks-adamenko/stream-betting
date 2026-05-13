@@ -28,7 +28,7 @@ export function SideNav() {
   const liveCount = events?.filter((e) => e.status === "live").length ?? 0;
 
   return (
-    <aside className="relative hidden h-[100dvh] flex-shrink-0 flex-col overflow-hidden bg-gradient-to-r from-[#498AFF] to-[#493BFF] text-white lg:flex lg:w-60 xl:w-64">
+    <aside className="relative hidden h-[100dvh] flex-shrink-0 flex-col overflow-hidden bg-gradient-to-r from-[#1973FF] to-[#5048FF] text-white lg:flex lg:w-60 xl:w-64">
       {/* Decorative bolt watermark */}
       <Zap
         aria-hidden
@@ -56,7 +56,7 @@ export function SideNav() {
                   cn(
                     "flex items-center gap-3 rounded-2xl px-4 py-3 text-base font-semibold transition-colors",
                     isActive
-                      ? "bg-white text-foreground shadow-lg"
+                      ? "bg-white text-[#5048FF] shadow-lg"
                       : "text-white/90 hover:bg-white/10",
                   )
                 }
@@ -66,7 +66,7 @@ export function SideNav() {
                     <item.icon
                       className={cn(
                         "h-5 w-5 flex-shrink-0",
-                        isActive ? "text-primary" : "text-white",
+                        isActive ? "text-[#5048FF]" : "text-white",
                       )}
                     />
                     <span className="flex-1 truncate">{item.label}</span>
@@ -75,7 +75,7 @@ export function SideNav() {
                         className={cn(
                           "inline-flex h-6 min-w-[2rem] items-center justify-center rounded-full px-2 text-xs font-bold tabular-nums",
                           isActive
-                            ? "bg-primary text-primary-foreground"
+                            ? "bg-[#5048FF] text-white"
                             : "bg-[#2A1FCF] text-white",
                         )}
                       >
@@ -97,14 +97,18 @@ export function SideNav() {
           }}
         >
           <div className="mb-2 flex items-center gap-2">
-            <h3 className="font-heading text-base font-bold">Ready to bet?</h3>
-            <Zap className="h-4 w-4 fill-accent text-accent" />
+            <h3 className="font-heading text-xl font-bold leading-tight">Ready to bet?</h3>
+            <Zap className="h-5 w-5 fill-accent text-accent" />
           </div>
           <p className="text-sm text-white/75">
             Watch any stream without an account. Create one to place bets.
           </p>
           <div className="mt-4 flex flex-col gap-2">
-            <Button asChild className="w-full">
+            <Button
+              asChild
+              className="w-full text-[#5048FF] ring-0 hover:text-[#5048FF]"
+              style={{ background: "#ffffff" }}
+            >
               <Link to="/auth/sign-up">
                 <UserPlus className="h-4 w-4" /> Sign up
               </Link>

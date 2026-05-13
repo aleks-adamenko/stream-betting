@@ -18,7 +18,7 @@ export function MobileTopBar() {
 
   return (
     <header
-      className="lg:hidden z-30 flex-shrink-0 bg-gradient-to-r from-[#498AFF] to-[#493BFF] text-white"
+      className="lg:hidden z-30 flex-shrink-0 bg-gradient-to-r from-[#1973FF] to-[#5048FF] text-white"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <div className="flex h-14 items-center gap-2 pl-3 pr-2">
