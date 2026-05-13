@@ -1,5 +1,6 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -9,6 +10,7 @@ import {
   Trophy,
   Clock,
   Wallet,
+  LogIn,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,9 @@ import { HlsPlayer } from "@/components/stream/HlsPlayer";
 import { RoundStatus } from "@/components/stream/RoundStatus";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useEvent } from "@/hooks/useEvents";
-import { useBalance } from "@/hooks/useBalance";
+import { useAuth } from "@/contexts/AuthContext";
+import { placeBet } from "@/services/betsService";
+import { betsKeys } from "@/hooks/useMyBets";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 
@@ -203,19 +207,39 @@ export default function EventDetails() {
 function BetPanel({ event }: { event: StreamEvent }) {
   const [selected, setSelected] = useState<BetOutcome | null>(null);
   const [stake, setStake] = useState<string>("10");
-  const { dollars, deduct, isLow } = useBalance();
+  const [submitting, setSubmitting] = useState(false);
+  const { user, profile, refreshProfile } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
+  const balanceDollars = (profile?.balance_cents ?? 0) / 100;
+  const isLow = balanceDollars < 10;
   const stakeNum = Math.max(0, Number(stake) || 0);
   const potentialPayout = selected ? (stakeNum * selected.odds).toFixed(2) : "0.00";
-  const stakeExceedsBalance = stakeNum > dollars;
-  const canPlace = !!selected && stakeNum > 0 && !stakeExceedsBalance;
+  const stakeExceedsBalance = !!user && stakeNum > balanceDollars;
+  const canPlace = !!selected && stakeNum > 0 && (!user || !stakeExceedsBalance) && !submitting;
 
-  function placeBet() {
+  async function handlePlaceBet() {
     if (!selected || !canPlace) return;
-    deduct(Math.round(stakeNum * 100));
-    toast.success(`Bet placed: $${stakeNum.toFixed(2)} on "${selected.label}"`, {
-      description: `Potential payout $${potentialPayout}. Balance updated. Real settlement comes with auth in phase 5.`,
-    });
+    if (!user) {
+      navigate(`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await placeBet(event.id, selected.id, Math.round(stakeNum * 100));
+      await refreshProfile();
+      queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
+      toast.success(`Bet placed: $${stakeNum.toFixed(2)} on "${selected.label}"`, {
+        description: `Potential payout $${potentialPayout}. See My Bets for status.`,
+      });
+      setSelected(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to place bet";
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -230,18 +254,30 @@ function BetPanel({ event }: { event: StreamEvent }) {
         </span>
       </div>
 
-      {/* Balance pill */}
-      <div className="mb-4 flex items-center justify-between rounded-xl border border-border/40 bg-muted/40 px-3 py-2">
-        <span className="text-xs font-medium text-muted-foreground">Your balance</span>
-        <span
-          className={cn(
-            "font-heading text-base font-bold tabular-nums",
-            isLow ? "text-destructive" : "text-foreground",
-          )}
+      {/* Balance pill / sign-in CTA */}
+      {user ? (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-border/40 bg-muted/40 px-3 py-2">
+          <span className="text-xs font-medium text-muted-foreground">Your balance</span>
+          <span
+            className={cn(
+              "font-heading text-base font-bold tabular-nums",
+              isLow ? "text-destructive" : "text-foreground",
+            )}
+          >
+            ${balanceDollars.toFixed(2)}
+          </span>
+        </div>
+      ) : (
+        <Link
+          to={`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`}
+          className="mb-4 flex items-center justify-between rounded-xl border border-primary/30 bg-primary/[0.04] px-3 py-2 text-sm font-medium text-primary hover:bg-primary/[0.08]"
         >
-          ${dollars.toFixed(2)}
-        </span>
-      </div>
+          <span className="flex items-center gap-2">
+            <LogIn className="h-4 w-4" /> Sign in to use your balance
+          </span>
+          <span className="text-xs text-muted-foreground">$1000 on signup</span>
+        </Link>
+      )}
 
       <ul className="space-y-2">
         {event.outcomes.map((o) => {
@@ -314,15 +350,19 @@ function BetPanel({ event }: { event: StreamEvent }) {
         </p>
       )}
 
-      <Button onClick={placeBet} size="lg" className="mt-4 w-full" disabled={!canPlace}>
-        {!selected
+      <Button onClick={handlePlaceBet} size="lg" className="mt-4 w-full" disabled={!canPlace && !!user}>
+        {!user
+          ? "Sign in to place bet"
+          : submitting
+          ? "Placing…"
+          : !selected
           ? "Pick an outcome"
           : stakeExceedsBalance
             ? "Insufficient balance"
             : "Place bet"}
       </Button>
       <p className="mt-2 text-center text-[11px] text-muted-foreground">
-        Virtual balance only. Real wagering arrives with auth in phase 5.
+        Virtual balance only. Bets settle once the round ends.
       </p>
     </section>
   );

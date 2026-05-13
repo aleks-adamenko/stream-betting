@@ -12,6 +12,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { useEvents } from "@/hooks/useEvents";
+import { useAuth } from "@/contexts/AuthContext";
+import { SideNavUserCard } from "./SideNavUserCard";
 import { cn } from "@/lib/utils";
 import logoUrl from "@/assets/live-rush-white-logo.png";
 
@@ -25,6 +27,7 @@ const mainNav = [
 
 export function SideNav() {
   const { data: events } = useEvents();
+  const { user } = useAuth();
   const liveCount = events?.filter((e) => e.status === "live").length ?? 0;
 
   return (
@@ -99,6 +102,9 @@ export function SideNav() {
           ))}
         </ul>
 
+        {user ? (
+          <SideNavUserCard />
+        ) : (
         <div
           className="mt-6 rounded-2xl border border-white/15 bg-white/[0.06] p-5 text-white backdrop-blur-sm"
           style={{
@@ -158,6 +164,7 @@ export function SideNav() {
             </Button>
           </div>
         </div>
+        )}
       </nav>
 
       <div className="relative px-5 py-4">

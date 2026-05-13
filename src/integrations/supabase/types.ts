@@ -78,8 +78,74 @@ export interface Database {
           },
         ];
       };
+      profiles: {
+        Row: {
+          id: string;
+          role: "user" | "influencer" | "super_admin";
+          display_name: string | null;
+          avatar_url: string | null;
+          balance_cents: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          role?: "user" | "influencer" | "super_admin";
+          display_name?: string | null;
+          avatar_url?: string | null;
+          balance_cents?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
+        Relationships: [];
+      };
+      bets: {
+        Row: {
+          id: string;
+          user_id: string;
+          event_id: string;
+          outcome_id: string;
+          amount_cents: number;
+          odds_decimal: number;
+          status: "open" | "won" | "lost" | "refunded";
+          payout_cents: number | null;
+          placed_at: string;
+          settled_at: string | null;
+        };
+        Insert: Omit<Database["public"]["Tables"]["bets"]["Row"], "id" | "placed_at"> & {
+          id?: string;
+          placed_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["bets"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "bets_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bets_event_id_fkey";
+            columns: ["event_id"];
+            referencedRelation: "events";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bets_outcome_id_fkey";
+            columns: ["outcome_id"];
+            referencedRelation: "event_outcomes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      place_bet: {
+        Args: { p_event_id: string; p_outcome_id: string; p_amount_cents: number };
+        Returns: { bet_id: string; new_balance_cents: number; odds: number };
+      };
+    };
   };
 }

@@ -2,11 +2,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster as Sonner } from "sonner";
 
+import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Home from "@/pages/user/Home";
 import Feed from "@/pages/user/Feed";
 import Following from "@/pages/user/Following";
 import EventDetails from "@/pages/user/EventDetails";
+import MyBets from "@/pages/user/MyBets";
+import SignUp from "@/pages/auth/SignUp";
+import SignIn from "@/pages/auth/SignIn";
+import ForgotPassword from "@/pages/auth/ForgotPassword";
+import ResetPassword from "@/pages/auth/ResetPassword";
+import AuthCallback from "@/pages/auth/AuthCallback";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -18,21 +26,36 @@ const queryClient = new QueryClient({
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <BrowserRouter>
-      <Sonner position="top-right" richColors closeButton />
-      <Routes>
-        <Route element={<AppLayout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/live" element={<Home />} />
-          <Route path="/trending" element={<Home />} />
-          <Route path="/following" element={<Following />} />
-          <Route path="/discover" element={<Feed />} />
-          <Route path="/event/:id" element={<EventDetails />} />
-          {/* Auth routes (phase 5): /auth/sign-in, /auth/sign-up, ... */}
-          {/* Studio routes (phase 6): /studio/* */}
-          {/* Admin routes (phase 7): /admin/* */}
-          <Route path="*" element={<NotFound />} />
-        </Route>
-      </Routes>
+      <AuthProvider>
+        <Sonner position="top-right" richColors closeButton />
+        <Routes>
+          {/* Auth routes — own layout, no sidebar/top-bar */}
+          <Route path="/auth/sign-up" element={<SignUp />} />
+          <Route path="/auth/sign-in" element={<SignIn />} />
+          <Route path="/auth/forgot-password" element={<ForgotPassword />} />
+          <Route path="/auth/reset-password" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
+
+          {/* Main app layout */}
+          <Route element={<AppLayout />}>
+            <Route path="/" element={<Home />} />
+            <Route path="/live" element={<Home />} />
+            <Route path="/trending" element={<Home />} />
+            <Route path="/following" element={<Following />} />
+            <Route path="/discover" element={<Feed />} />
+            <Route path="/event/:id" element={<EventDetails />} />
+            <Route
+              path="/my-bets"
+              element={
+                <ProtectedRoute>
+                  <MyBets />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<NotFound />} />
+          </Route>
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   </QueryClientProvider>
 );
