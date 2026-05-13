@@ -114,11 +114,7 @@ export function SideNav() {
             Watch any stream without an account. Create one to place bets.
           </p>
           <div className="mt-4 flex flex-col gap-2">
-            <Button
-              asChild
-              className="w-full text-[#5048FF] ring-0 hover:text-[#5048FF]"
-              style={{ background: "#ffffff" }}
-            >
+            <Button asChild variant="accent" className="w-full">
               <Link to="/auth/sign-up">
                 <UserPlus className="h-4 w-4" /> Sign up
               </Link>
