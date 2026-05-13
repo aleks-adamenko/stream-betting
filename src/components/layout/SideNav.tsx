@@ -117,7 +117,7 @@ export function SideNav() {
             <div className="relative">
               <Button
                 asChild
-                className="w-full text-[#1F2679] ring-0 hover:text-[#1F2679]"
+                className="w-full text-base text-[#1F2679] ring-0 hover:text-[#1F2679]"
                 style={{ backgroundColor: "#FEE53A", backgroundImage: "none" }}
               >
                 <Link to="/auth/sign-up">
@@ -150,7 +150,7 @@ export function SideNav() {
             <Button
               asChild
               variant="outline"
-              className="w-full border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white"
+              className="w-full border-white/40 bg-transparent text-base text-white hover:bg-white/10 hover:text-white"
             >
               <Link to="/auth/sign-in">
                 <LogIn className="h-4 w-4" /> Sign in
