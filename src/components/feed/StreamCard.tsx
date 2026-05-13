@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, MessageCircle, Share2, Bookmark, Users, Calendar, ArrowRight } from "lucide-react";
+import { Heart, MessageCircle, Share2, Bookmark, Users, Calendar, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { LiveBadge } from "./LiveBadge";
@@ -114,7 +114,7 @@ export function StreamCard({ event }: StreamCardProps) {
           <Button asChild size="lg" className="w-full gap-2">
             <Link to={primaryHref}>
               {isLive ? "Watch & bet" : isScheduled ? "Notify me" : "View result"}
-              <ArrowRight className="h-4 w-4" />
+              <Zap className="h-4 w-4 fill-current" />
             </Link>
           </Button>
         </div>
