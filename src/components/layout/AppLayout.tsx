@@ -13,17 +13,20 @@ export function AppLayout() {
   const isFeedRoute = FEED_PATHS.has(pathname);
 
   return (
-    <div
-      className="flex h-[100dvh] overflow-hidden bg-background"
-      style={{
-        backgroundImage: `url(${bgUrl})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      }}
-    >
+    <div className="relative flex h-[100dvh] overflow-hidden bg-background">
+      {/* Doodle-pattern background image at 80% opacity */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-80"
+        style={{
+          backgroundImage: `url(${bgUrl})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+        }}
+      />
       <SideNav />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <MobileTopBar />
         <main
           className={cn(
