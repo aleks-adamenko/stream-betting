@@ -1,17 +1,16 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, Mail, Lock, Eye, EyeOff, Zap } from "lucide-react";
+import { Loader2, Mail, Lock, Eye, EyeOff, Zap, MailCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthLayout, AuthTitle, AuthDivider } from "@/components/layout/AuthLayout";
 import { supabase } from "@/integrations/supabase/client";
 
-type Step = "form" | "verify";
+type Step = "form" | "check-email";
 
 export default function SignUp() {
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = params.get("next") ?? "/";
 
@@ -22,7 +21,6 @@ export default function SignUp() {
   const [accept, setAccept] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +42,13 @@ export default function SignUp() {
     }
 
     setSubmitting(true);
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
+    });
     setSubmitting(false);
 
     if (error) {
@@ -52,45 +56,27 @@ export default function SignUp() {
       return;
     }
     toast.success("Check your inbox", {
-      description: "We sent you a 6-digit code to confirm your email.",
+      description: "Click the confirm link in the email we sent.",
     });
-    setStep("verify");
+    setStep("check-email");
   }
 
-  async function handleVerify(e: React.FormEvent) {
-    e.preventDefault();
+  async function resendEmail() {
     setError(null);
-    if (code.length !== 6) {
-      setError("Enter the 6-digit code from your email.");
-      return;
-    }
     setSubmitting(true);
-    const { error } = await supabase.auth.verifyOtp({
+    const { error } = await supabase.auth.resend({
       email,
-      token: code,
-      type: "email",
+      type: "signup",
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
     });
-    setSubmitting(false);
-
-    if (error) {
-      console.error("verifyOtp error", error);
-      setError(error.message);
-      return;
-    }
-    toast.success("Welcome to LiveRush ⚡");
-    navigate(next, { replace: true });
-  }
-
-  async function resendCode() {
-    setError(null);
-    setSubmitting(true);
-    const { error } = await supabase.auth.resend({ email, type: "signup" });
     setSubmitting(false);
     if (error) {
       console.error("resend error", error);
       setError(error.message);
     } else {
-      toast.success("Code re-sent. Check your email.");
+      toast.success("Email re-sent. Check your inbox.");
     }
   }
 
@@ -100,63 +86,46 @@ export default function SignUp() {
     });
   }
 
-  if (step === "verify") {
+  if (step === "check-email") {
     return (
       <AuthLayout>
-        <AuthTitle subtitle={`We sent a 6-digit code to ${email}. Paste it below to finish signing up.`}>
-          Check your email
-        </AuthTitle>
+        <AuthTitle>Check your email</AuthTitle>
 
-        <form onSubmit={handleVerify} className="mt-6 space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="code" className="text-sm font-medium">
-              6-digit code
-            </label>
-            <Input
-              id="code"
-              inputMode="numeric"
-              pattern="\d{6}"
-              maxLength={6}
-              autoComplete="one-time-code"
-              autoFocus
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-              className="border-white/20 bg-white/10 text-center text-2xl font-bold tracking-[0.5em] text-white placeholder:text-white/40"
-              placeholder="000000"
-              required
-            />
+        <div className="mt-6 flex flex-col items-center text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#FEE53A]/15 ring-2 ring-[#FEE53A]/30">
+            <MailCheck className="h-8 w-8 text-[#FEE53A]" />
           </div>
-          {error && (
-            <p className="rounded-lg bg-destructive/30 px-3 py-2 text-sm text-destructive-foreground">
-              {error}
-            </p>
-          )}
-          <Button
-            type="submit"
-            size="lg"
-            className="w-full gap-2 text-base text-[#1F2679] ring-0 hover:text-[#1F2679]"
-            style={{ backgroundColor: "#FEE53A", backgroundImage: "none" }}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <>
-                Confirm email <Zap className="h-4 w-4 fill-current" />
-              </>
-            )}
-          </Button>
-          <button
-            type="button"
-            onClick={resendCode}
-            disabled={submitting}
-            className="block w-full text-center text-sm text-white/75 hover:text-white"
-          >
-            Didn't get it? Resend code
-          </button>
-        </form>
+          <p className="mt-4 text-sm text-white/85">
+            We sent a confirmation link to
+          </p>
+          <p className="font-heading text-base font-bold text-white">{email}</p>
+          <p className="mt-3 text-sm text-white/75">
+            Open the email and click <span className="font-semibold">Confirm</span> to finish signing up.
+          </p>
+        </div>
 
-        <p className="mt-6 text-center text-sm text-white/75">
+        {error && (
+          <p className="mt-6 rounded-lg bg-destructive/30 px-3 py-2 text-sm text-destructive-foreground">
+            {error}
+          </p>
+        )}
+
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          onClick={resendEmail}
+          disabled={submitting}
+          className="mt-6 w-full gap-2 border-white/30 bg-white/[0.04] text-base text-white hover:bg-white/10 hover:text-white"
+        >
+          {submitting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            "Didn't get it? Resend email"
+          )}
+        </Button>
+
+        <p className="mt-4 text-center text-sm text-white/75">
           <button
             type="button"
             onClick={() => setStep("form")}
