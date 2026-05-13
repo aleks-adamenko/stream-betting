@@ -1,0 +1,172 @@
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { Heart, MessageCircle, Share2, Bookmark, Users, Calendar, ArrowRight } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { LiveBadge } from "./LiveBadge";
+import type { StreamEvent } from "@/domain/types";
+import { cn } from "@/lib/utils";
+
+interface StreamCardProps {
+  event: StreamEvent;
+}
+
+const numberFormatter = new Intl.NumberFormat("en-US");
+
+function formatScheduledAt(iso: string) {
+  const d = new Date(iso);
+  const diffH = Math.round((d.getTime() - Date.now()) / 3600_000);
+  if (diffH < 24) return `Starts in ${Math.max(diffH, 1)}h`;
+  return d.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function StreamCard({ event }: StreamCardProps) {
+  const isLive = event.status === "live";
+  const isScheduled = event.status === "scheduled";
+  const primaryHref = `/event/${event.id}`;
+  const [liked, setLiked] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  return (
+    <article className="relative mx-auto flex w-full max-w-[460px] snap-start scroll-mt-4 gap-3 sm:gap-4">
+      {/* Card body */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card shadow-lg">
+        {/* Cover — vertical phone-screen aspect, height-capped to keep card on screen */}
+        <Link
+          to={primaryHref}
+          className="group relative block aspect-[9/16] max-h-[calc(100dvh-300px)] min-h-[280px] overflow-hidden bg-muted"
+        >
+          <img
+            src={event.coverUrl}
+            alt={event.title}
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30" />
+
+          {/* Top-left badges */}
+          <div className="absolute left-3 top-3 flex items-center gap-2">
+            {isLive && <LiveBadge />}
+            <span className="rounded-full bg-black/40 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur">
+              {event.category}
+            </span>
+          </div>
+
+          {/* Top-right meta */}
+          <div className="absolute right-3 top-3 flex items-center gap-2">
+            {isLive ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-black/50 px-2.5 py-1 text-xs font-medium text-white backdrop-blur">
+                <Users className="h-3.5 w-3.5" /> {numberFormatter.format(event.viewersCount)}
+              </span>
+            ) : isScheduled ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-black/50 px-2.5 py-1 text-xs font-medium text-white backdrop-blur">
+                <Calendar className="h-3.5 w-3.5" /> {formatScheduledAt(event.scheduledAt)}
+              </span>
+            ) : null}
+          </div>
+
+          {/* Bottom: title + influencer */}
+          <div className="absolute inset-x-0 bottom-0 flex items-end gap-3 p-4">
+            <div className="min-w-0 flex-1 text-white">
+              <h3 className="font-heading text-lg font-bold leading-tight drop-shadow sm:text-xl">
+                {event.title}
+              </h3>
+              <div className="mt-1.5 flex items-center gap-2">
+                <img
+                  src={event.influencer.avatarUrl}
+                  alt={event.influencer.displayName}
+                  className="h-6 w-6 flex-shrink-0 rounded-full object-cover ring-1 ring-white/40"
+                />
+                <span className="truncate text-xs font-medium text-white/90">
+                  {event.influencer.displayName}
+                </span>
+                <span className="truncate text-xs text-white/60">{event.influencer.handle}</span>
+              </div>
+            </div>
+          </div>
+        </Link>
+
+        {/* Bet strip */}
+        <div className="flex flex-col gap-3 p-4">
+          <p className="line-clamp-2 text-sm text-muted-foreground">{event.description}</p>
+
+          <div className="-mx-1 flex gap-2 overflow-x-auto scrollbar-hide px-1">
+            {event.outcomes.slice(0, 4).map((o) => (
+              <Link
+                key={o.id}
+                to={primaryHref}
+                className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-xs font-medium transition-colors hover:border-primary/40 hover:bg-primary/5"
+              >
+                <span className="max-w-[140px] truncate text-foreground">{o.label}</span>
+                <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
+                  {o.odds.toFixed(2)}×
+                </span>
+              </Link>
+            ))}
+          </div>
+
+          <Button asChild size="lg" className="w-full gap-2">
+            <Link to={primaryHref}>
+              {isLive ? "Watch & bet" : isScheduled ? "Notify me" : "View result"}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      {/* Action rail (right side) */}
+      <div className="flex flex-shrink-0 flex-col items-center justify-end gap-3 pb-4 sm:gap-4 sm:pb-6">
+        <ActionButton
+          icon={Heart}
+          label={(event.viewersCount > 0 ? Math.round(event.viewersCount / 12) : 12).toString()}
+          active={liked}
+          onClick={() => setLiked((v) => !v)}
+          activeClassName="text-destructive"
+        />
+        <ActionButton icon={MessageCircle} label={isLive ? "Chat" : "Talk"} />
+        <ActionButton
+          icon={Bookmark}
+          label="Save"
+          active={saved}
+          onClick={() => setSaved((v) => !v)}
+          activeClassName="text-primary"
+        />
+        <ActionButton icon={Share2} label="Share" />
+      </div>
+    </article>
+  );
+}
+
+interface ActionButtonProps {
+  icon: typeof Heart;
+  label: string;
+  active?: boolean;
+  activeClassName?: string;
+  onClick?: () => void;
+}
+
+function ActionButton({ icon: Icon, label, active, activeClassName, onClick }: ActionButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <span
+        className={cn(
+          "flex h-10 w-10 items-center justify-center rounded-full bg-secondary/60 transition-colors group-hover:bg-secondary sm:h-11 sm:w-11",
+          active && activeClassName,
+        )}
+      >
+        <Icon className={cn("h-5 w-5", active && "fill-current")} />
+      </span>
+      <span className="text-[11px] font-semibold leading-none">{label}</span>
+    </button>
+  );
+}
