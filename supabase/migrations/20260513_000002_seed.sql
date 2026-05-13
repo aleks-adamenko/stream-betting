@@ -1,0 +1,164 @@
+-- LiveRush — Phase 4 seed
+-- 8 creators, 8 challenge events, all bet outcomes.
+-- Timestamps relative to now() so data stays "fresh" whenever seed runs.
+
+-- =========================================================================
+-- Influencers
+-- =========================================================================
+
+insert into public.influencers (id, handle, display_name, avatar_url, followers, socials) values
+  ('inf_vibe', '@vibe.queen778', 'Vibe Queen',
+    'https://images.unsplash.com/photo-1517022812141-23620dba5c23?auto=format&fit=crop&w=200&q=80',
+    1482000,
+    '{"tiktok": "https://tiktok.com/", "instagram": "https://instagram.com/"}'::jsonb),
+  ('inf_smily', '@thesmilyfam', 'The Smily Fam',
+    'https://images.unsplash.com/photo-1542596594-649edbc13630?auto=format&fit=crop&w=200&q=80',
+    2310000,
+    '{"youtube": "https://youtube.com/", "instagram": "https://instagram.com/"}'::jsonb),
+  ('inf_mochi', '@midnight.mochi', 'Midnight Mochi',
+    'https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=200&q=80',
+    612000,
+    '{"tiktok": "https://tiktok.com/"}'::jsonb),
+  ('inf_angelo', '@_angelomaras', 'Angelo Maras',
+    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80',
+    894000,
+    '{"tiktok": "https://tiktok.com/", "x": "https://x.com/"}'::jsonb),
+  ('inf_stunt', '@stunt.boys.live', 'Stunt Boys',
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+    1120000,
+    '{"youtube": "https://youtube.com/", "instagram": "https://instagram.com/"}'::jsonb),
+  ('inf_daily', '@daily.dares', 'Daily Dares',
+    'https://images.unsplash.com/photo-1488161628813-04466f872be2?auto=format&fit=crop&w=200&q=80',
+    438000,
+    '{"tiktok": "https://tiktok.com/", "instagram": "https://instagram.com/"}'::jsonb),
+  ('inf_kim', '@kim.tries', 'Kim Tries',
+    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=80',
+    281000,
+    '{"instagram": "https://instagram.com/"}'::jsonb),
+  ('inf_grandpa', '@grandpa.ranks', 'Grandpa Ranks',
+    'https://images.unsplash.com/photo-1559548331-f9cb98001426?auto=format&fit=crop&w=200&q=80',
+    706000,
+    '{"tiktok": "https://tiktok.com/", "youtube": "https://youtube.com/"}'::jsonb)
+on conflict (id) do nothing;
+
+-- =========================================================================
+-- Events
+-- =========================================================================
+
+insert into public.events
+  (id, influencer_id, title, description, cover_url, category, rules,
+   round_format, round_duration_sec, status, scheduled_at, started_at, viewers_count, total_pool)
+values
+  ('evt_blindfold_cup', 'inf_vibe',
+    'Filling cups blindfolded… this got ugly fast 😭',
+    'Two pairs, blindfolds on, jugs of water in hand. First to fill the cup without spilling wins.',
+    '/covers/03-challenge-blinded-water.jpg',
+    'Challenges',
+    'Each team has one pourer (blindfolded) and one guide (no touching the pourer). First team to fill the 500ml cup to the line wins. Spills don''t count toward the line.',
+    'event', null, 'live',
+    now() - interval '22 minutes', now() - interval '22 minutes', 14280, 38420),
+
+  ('evt_balloon_box', 'inf_smily',
+    'Don''t Pop The Balloon Challenge 🎈',
+    'Twelve balloons crammed in a box. Pull the strings, dodge the pop, only one survivor in this round.',
+    '/covers/01-challenge-balloons.jpg',
+    'Challenges',
+    'Players take turns pulling one string per round. If the balloon pops, that player is out. Last player standing without popping a balloon wins the round.',
+    'event', null, 'live',
+    now() - interval '8 minutes', now() - interval '8 minutes', 42106, 92640),
+
+  ('evt_spicy_ramen', 'inf_mochi',
+    'She made it to tier 5… my mouth didn''t 🌶️🔥',
+    'Five bowls. Five heat levels. Get to level 5 without milk, and you win the round.',
+    '/covers/04-challenge-bowls.jpg',
+    'Food',
+    'Players eat one full bowl per heat tier. Asking for milk is forfeit. First to finish tier 5 wins. If everyone forfeits, the bowl with the most spoons wins.',
+    'time', 240, 'live',
+    now() - interval '4 minutes', now() - interval '4 minutes', 7842, 19310),
+
+  ('evt_try_not_laugh', 'inf_angelo',
+    'He tried not to laugh… but the meme broke him 😂',
+    'Three friends. One folder of cursed memes. Crack a smile, lose your seat.',
+    'https://images.unsplash.com/photo-1543269865-cbf427effbad?auto=format&fit=crop&w=900&q=80',
+    'Comedy',
+    'Each round one player reads three memes aloud to the others. Any visible laugh or smile costs a life. First player to lose all three lives forfeits the round.',
+    'event', null, 'scheduled',
+    now() + interval '3 hours', null, 612, 0),
+
+  ('evt_egg_drop', 'inf_stunt',
+    'Dropped an egg from the 4th floor… yolk is praying 🥚',
+    'Three engineering hopefuls. Three containers. Will the yolk survive a four-story drop?',
+    '/covers/02-challenge-eggs-drop.jpg',
+    'Skills',
+    'Each contestant builds a protective container with the same kit. Drop from the 4th floor balcony. Winner: egg intact + smallest container by volume.',
+    'event', null, 'scheduled',
+    now() + interval '21 hours', null, 0, 0),
+
+  ('evt_whisper_chain', 'inf_daily',
+    '7 strangers, 1 sentence, absolute chaos 🎧',
+    'Seven strangers, headphones on white noise, one sentence travels the line. What comes out the other side?',
+    '/covers/05-challenge-one-sentence.jpg',
+    'Comedy',
+    'Phrase passed through 7 people wearing noise-cancelling headphones. Round winner: closest end-of-chain reproduction to the original phrase, judged by audience vote.',
+    'event', null, 'scheduled',
+    now() + interval '2 days', null, 0, 0),
+
+  ('evt_card_tower', 'inf_kim',
+    '90 seconds to build the tallest card tower ⏱️',
+    'Two builders. 90 seconds. Tallest free-standing card tower takes the round.',
+    '/covers/06-challenge-cards-tower.jpg',
+    'Skills',
+    'Each builder has 90 seconds and a fresh deck. Tower must stand on its own for 5 seconds after the timer. Tallest wins. Collapse = forfeit.',
+    'time', 90, 'finished',
+    now() - interval '1 day', null, 0, 12840),
+
+  ('evt_hot_sauce_roulette', 'inf_grandpa',
+    'One of these wings has Carolina Reaper… good luck 🔥',
+    'Six identical wings. One is dipped in the world''s hottest sauce. Pick one. Smile.',
+    'https://images.unsplash.com/photo-1599487488170-d11ec9c172f0?auto=format&fit=crop&w=900&q=80',
+    'Food',
+    'Six wings on a plate. One brushed with Carolina Reaper extract. Players take turns picking and eating one wing without sniffing. Player who gets the spicy wing loses.',
+    'event', null, 'finished',
+    now() - interval '5 days', null, 0, 27490)
+on conflict (id) do nothing;
+
+-- =========================================================================
+-- Event outcomes (globally unique ids = event_id + '_o' + index)
+-- =========================================================================
+
+insert into public.event_outcomes (id, event_id, label, odds, sort_order) values
+  ('evt_blindfold_cup_o1', 'evt_blindfold_cup', 'Team Sky finishes first', 1.95, 0),
+  ('evt_blindfold_cup_o2', 'evt_blindfold_cup', 'Team Mango finishes first', 2.10, 1),
+  ('evt_blindfold_cup_o3', 'evt_blindfold_cup', 'Both teams spill out', 6.50, 2),
+
+  ('evt_balloon_box_o1', 'evt_balloon_box', 'Leo survives', 2.40, 0),
+  ('evt_balloon_box_o2', 'evt_balloon_box', 'Sara survives', 2.20, 1),
+  ('evt_balloon_box_o3', 'evt_balloon_box', 'Mike survives', 3.00, 2),
+  ('evt_balloon_box_o4', 'evt_balloon_box', 'Box empties first', 12.00, 3),
+
+  ('evt_spicy_ramen_o1', 'evt_spicy_ramen', 'Mochi reaches tier 5', 1.80, 0),
+  ('evt_spicy_ramen_o2', 'evt_spicy_ramen', 'Yumi reaches tier 5', 2.60, 1),
+  ('evt_spicy_ramen_o3', 'evt_spicy_ramen', 'Both forfeit', 4.40, 2),
+
+  ('evt_try_not_laugh_o1', 'evt_try_not_laugh', 'Diego cracks first', 2.00, 0),
+  ('evt_try_not_laugh_o2', 'evt_try_not_laugh', 'Maya cracks first', 2.50, 1),
+  ('evt_try_not_laugh_o3', 'evt_try_not_laugh', 'Pat cracks first', 2.20, 2),
+  ('evt_try_not_laugh_o4', 'evt_try_not_laugh', 'Nobody breaks', 9.00, 3),
+
+  ('evt_egg_drop_o1', 'evt_egg_drop', 'Red container survives', 1.90, 0),
+  ('evt_egg_drop_o2', 'evt_egg_drop', 'Blue container survives', 2.30, 1),
+  ('evt_egg_drop_o3', 'evt_egg_drop', 'Green container survives', 2.10, 2),
+  ('evt_egg_drop_o4', 'evt_egg_drop', 'All three crack', 5.50, 3),
+
+  ('evt_whisper_chain_o1', 'evt_whisper_chain', 'Phrase survives ≥80%', 4.80, 0),
+  ('evt_whisper_chain_o2', 'evt_whisper_chain', 'Phrase 40-79% intact', 2.10, 1),
+  ('evt_whisper_chain_o3', 'evt_whisper_chain', 'Phrase <40%', 1.70, 2),
+
+  ('evt_card_tower_o1', 'evt_card_tower', 'Kim wins', 1.80, 0),
+  ('evt_card_tower_o2', 'evt_card_tower', 'Ravi wins', 2.00, 1),
+  ('evt_card_tower_o3', 'evt_card_tower', 'Both collapse', 5.00, 2),
+
+  ('evt_hot_sauce_roulette_o1', 'evt_hot_sauce_roulette', 'Pat gets the wing', 2.40, 0),
+  ('evt_hot_sauce_roulette_o2', 'evt_hot_sauce_roulette', 'Lina gets the wing', 2.40, 1),
+  ('evt_hot_sauce_roulette_o3', 'evt_hot_sauce_roulette', 'Marc gets the wing', 2.40, 2)
+on conflict (id) do nothing;
