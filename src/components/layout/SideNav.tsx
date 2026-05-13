@@ -28,7 +28,7 @@ export function SideNav() {
   const liveCount = events?.filter((e) => e.status === "live").length ?? 0;
 
   return (
-    <aside className="relative hidden h-[100dvh] flex-shrink-0 flex-col overflow-hidden bg-gradient-to-b from-[#498AFF] to-[#493BFF] text-white lg:flex lg:w-64 xl:w-72">
+    <aside className="relative hidden h-[100dvh] flex-shrink-0 flex-col overflow-hidden bg-gradient-to-r from-[#498AFF] to-[#493BFF] text-white lg:flex lg:w-60 xl:w-64">
       {/* Decorative bolt watermark */}
       <Zap
         aria-hidden
@@ -89,12 +89,18 @@ export function SideNav() {
           ))}
         </ul>
 
-        <div className="mt-6 rounded-2xl bg-white/95 p-5 text-foreground shadow-xl backdrop-blur">
+        <div
+          className="mt-6 rounded-2xl border border-white/15 bg-white/[0.06] p-5 text-white backdrop-blur-sm"
+          style={{
+            boxShadow:
+              "0 24px 48px -16px rgba(0, 0, 0, 0.35), 0 8px 24px -12px rgba(0, 0, 0, 0.25)",
+          }}
+        >
           <div className="mb-2 flex items-center gap-2">
             <h3 className="font-heading text-base font-bold">Ready to bet?</h3>
             <Zap className="h-4 w-4 fill-accent text-accent" />
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-white/75">
             Watch any stream without an account. Create one to place bets.
           </p>
           <div className="mt-4 flex flex-col gap-2">
@@ -103,7 +109,11 @@ export function SideNav() {
                 <UserPlus className="h-4 w-4" /> Sign up
               </Link>
             </Button>
-            <Button asChild variant="outline" className="w-full">
+            <Button
+              asChild
+              variant="outline"
+              className="w-full border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white"
+            >
               <Link to="/auth/sign-in">
                 <LogIn className="h-4 w-4" /> Sign in
               </Link>
