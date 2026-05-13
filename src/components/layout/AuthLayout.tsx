@@ -57,13 +57,8 @@ export function AuthLayout({ children, className }: AuthLayoutProps) {
       </main>
 
       {/* Bottom footer */}
-      <footer className="relative flex items-center justify-center gap-3 px-4 pb-6 text-[11px] text-white/70 sm:pb-8 sm:text-xs">
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15">
-          <Zap className="h-3.5 w-3.5 fill-accent text-accent" />
-        </span>
+      <footer className="relative flex items-center justify-center px-4 pb-6 text-[11px] text-white/70 sm:pb-8 sm:text-xs">
         <span>© {new Date().getFullYear()} LiveRush</span>
-        <span className="text-white/40">|</span>
-        <span>Human-only content</span>
       </footer>
     </div>
   );
