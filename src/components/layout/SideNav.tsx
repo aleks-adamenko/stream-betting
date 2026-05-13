@@ -42,7 +42,7 @@ export function SideNav() {
       {/* Decorative bolt watermark behind nav items */}
       <Zap
         aria-hidden
-        className="pointer-events-none absolute right-[-90px] top-[18%] h-56 w-56 -rotate-12 fill-white/[0.08] stroke-none translate-y-[30px]"
+        className="pointer-events-none absolute right-[-60px] top-[18%] h-44 w-44 -rotate-12 fill-white/[0.08] stroke-none translate-y-[30px]"
       />
 
       <div className="relative flex h-16 items-center px-5">
