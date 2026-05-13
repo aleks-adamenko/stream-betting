@@ -68,11 +68,12 @@ export default function SignUp() {
     const { error } = await supabase.auth.verifyOtp({
       email,
       token: code,
-      type: "signup",
+      type: "email",
     });
     setSubmitting(false);
 
     if (error) {
+      console.error("verifyOtp error", error);
       setError(error.message);
       return;
     }
@@ -85,8 +86,12 @@ export default function SignUp() {
     setSubmitting(true);
     const { error } = await supabase.auth.resend({ email, type: "signup" });
     setSubmitting(false);
-    if (error) setError(error.message);
-    else toast.success("Code re-sent. Check your email.");
+    if (error) {
+      console.error("resend error", error);
+      setError(error.message);
+    } else {
+      toast.success("Code re-sent. Check your email.");
+    }
   }
 
   function handleGoogle() {
