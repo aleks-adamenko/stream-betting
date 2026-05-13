@@ -40,13 +40,13 @@ export function StreamCard({ event }: StreamCardProps) {
         {/* Cover — vertical phone-screen aspect, height-capped to keep card on screen */}
         <Link
           to={primaryHref}
-          className="group relative block aspect-[9/16] max-h-[calc(100dvh-300px)] min-h-[280px] overflow-hidden bg-muted"
+          className="group relative block aspect-[9/16] max-h-[calc(100dvh-300px)] min-h-[280px] w-full overflow-hidden bg-muted"
         >
           <img
             src={event.coverUrl}
             alt={event.title}
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30" />
 
@@ -121,7 +121,7 @@ export function StreamCard({ event }: StreamCardProps) {
       </div>
 
       {/* Action rail (right side) */}
-      <div className="flex flex-shrink-0 flex-col items-center justify-end gap-3 pb-4 sm:gap-4 sm:pb-6">
+      <div className="flex flex-shrink-0 flex-col items-center justify-center gap-3 sm:gap-4">
         <ActionButton
           icon={Heart}
           label={(event.viewersCount > 0 ? Math.round(event.viewersCount / 12) : 12).toString()}
