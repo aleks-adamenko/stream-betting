@@ -114,11 +114,36 @@ export function SideNav() {
             Watch any stream without an account. Create one to place bets.
           </p>
           <div className="mt-4 flex flex-col gap-2">
-            <Button asChild variant="accent" className="w-full">
-              <Link to="/auth/sign-up">
-                <UserPlus className="h-4 w-4" /> Sign up
-              </Link>
-            </Button>
+            <div className="relative">
+              <Button
+                asChild
+                className="w-full text-[#0F1543] ring-0 hover:text-[#0F1543]"
+                style={{ background: "#F5E876" }}
+              >
+                <Link to="/auth/sign-up">
+                  <UserPlus className="h-4 w-4" /> Sign up
+                </Link>
+              </Button>
+              {/* Decorative spark burst at top-right corner */}
+              <svg
+                aria-hidden
+                viewBox="0 0 40 40"
+                className="pointer-events-none absolute -right-3 -top-3 h-10 w-10"
+              >
+                <g
+                  stroke="#F5C72A"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  fill="none"
+                >
+                  <line x1="20" y1="2" x2="20" y2="9" />
+                  <line x1="30" y1="5" x2="27" y2="11" />
+                  <line x1="37" y1="13" x2="31" y2="16" />
+                  <line x1="38" y1="24" x2="32" y2="23" />
+                  <line x1="34" y1="33" x2="29" y2="29" />
+                </g>
+              </svg>
+            </div>
             <Button
               asChild
               variant="outline"
