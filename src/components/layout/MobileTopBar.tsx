@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Search, UserCircle } from "lucide-react";
 
-import logoUrl from "@/assets/live-rush-logo-2.png";
+import logoUrl from "@/assets/live-rush-white-logo-2.png";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -18,7 +18,7 @@ export function MobileTopBar() {
 
   return (
     <header
-      className="lg:hidden z-30 flex-shrink-0 border-b border-border/40 bg-background/85 backdrop-blur-xl"
+      className="lg:hidden z-30 flex-shrink-0 bg-gradient-to-r from-[#498AFF] to-[#493BFF] text-white"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <div className="flex h-14 items-center gap-2 pl-3 pr-2">
@@ -41,14 +41,12 @@ export function MobileTopBar() {
                     onClick={() => navigate(t.to)}
                     className={cn(
                       "relative inline-flex h-10 items-center whitespace-nowrap rounded-md px-2.5 text-sm font-semibold transition-colors",
-                      isActive
-                        ? "text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
+                      isActive ? "text-white" : "text-white/70 hover:text-white",
                     )}
                   >
                     {t.label}
                     {isActive && (
-                      <span className="absolute inset-x-2.5 bottom-0 h-0.5 rounded-full bg-primary" />
+                      <span className="absolute inset-x-2.5 bottom-0 h-0.5 rounded-full bg-white" />
                     )}
                   </button>
                 </li>
@@ -61,14 +59,14 @@ export function MobileTopBar() {
           <button
             type="button"
             aria-label="Search"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-secondary/60"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10"
           >
             <Search className="h-5 w-5" />
           </button>
           <Link
             to="/auth/sign-in"
             aria-label="Profile"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-foreground hover:bg-secondary/60"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10"
           >
             <UserCircle className="h-6 w-6" />
           </Link>
