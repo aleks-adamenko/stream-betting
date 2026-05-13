@@ -4,6 +4,7 @@ import { Outlet } from "react-router-dom";
 import { SideNav } from "./SideNav";
 import { MobileTopBar } from "./MobileTopBar";
 import { cn } from "@/lib/utils";
+import bgUrl from "@/assets/live-rush-bg.jpg";
 
 const FEED_PATHS = new Set(["/", "/live", "/trending"]);
 
@@ -12,7 +13,15 @@ export function AppLayout() {
   const isFeedRoute = FEED_PATHS.has(pathname);
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-background">
+    <div
+      className="flex h-[100dvh] overflow-hidden bg-background"
+      style={{
+        backgroundImage: `url(${bgUrl})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      }}
+    >
       <SideNav />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileTopBar />
