@@ -29,10 +29,20 @@ export function SideNav() {
 
   return (
     <aside className="relative hidden h-[100dvh] flex-shrink-0 flex-col overflow-hidden bg-gradient-to-r from-[#1973FF] to-[#5048FF] text-white lg:flex lg:w-60 xl:w-64">
-      {/* Decorative bolt watermark */}
+      {/* Dotted radial pattern overlay */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            "radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px)",
+          backgroundSize: "14px 14px",
+        }}
+      />
+      {/* Decorative bolt watermark behind nav items */}
       <Zap
         aria-hidden
-        className="pointer-events-none absolute -right-12 top-1/3 h-72 w-72 -rotate-12 fill-white/5 stroke-none"
+        className="pointer-events-none absolute -right-10 top-[18%] h-80 w-80 -rotate-12 fill-white/[0.08] stroke-none"
       />
 
       <div className="relative flex h-16 items-center px-5">
@@ -93,7 +103,7 @@ export function SideNav() {
           className="mt-6 rounded-2xl border border-white/15 bg-white/[0.06] p-5 text-white backdrop-blur-sm"
           style={{
             boxShadow:
-              "0 24px 48px -16px rgba(0, 0, 0, 0.35), 0 8px 24px -12px rgba(0, 0, 0, 0.25)",
+              "0 12px 24px -16px rgba(0, 0, 0, 0.35), 0 4px 12px -12px rgba(0, 0, 0, 0.25)",
           }}
         >
           <div className="mb-2 flex items-center gap-2">
@@ -126,10 +136,7 @@ export function SideNav() {
         </div>
       </nav>
 
-      <div className="relative flex items-center gap-2 px-5 py-4">
-        <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white/15 backdrop-blur">
-          <Zap className="h-3.5 w-3.5 fill-accent text-accent" />
-        </span>
+      <div className="relative px-5 py-4">
         <p className="text-[11px] leading-tight text-white/75">
           © {new Date().getFullYear()} LiveRush · Human-only content
         </p>
