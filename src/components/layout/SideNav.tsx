@@ -117,21 +117,25 @@ export function SideNav() {
             <div className="relative">
               <Button
                 asChild
-                className="w-full text-[#0F1543] ring-0 hover:text-[#0F1543]"
-                style={{ background: "#F5E876" }}
+                className="w-full text-[#1F2679] ring-0 hover:text-[#1F2679]"
+                style={{ backgroundColor: "#FEE53A", backgroundImage: "none" }}
               >
                 <Link to="/auth/sign-up">
                   <UserPlus className="h-4 w-4" /> Sign up
                 </Link>
               </Button>
-              {/* Decorative spark burst at top-right corner */}
+              {/* Decorative spark burst at top-right corner (4 strokes, 3px up) */}
               <svg
                 aria-hidden
                 viewBox="0 0 40 40"
                 className="pointer-events-none absolute -right-3 -top-3 h-10 w-10"
+                style={{
+                  transform: "translateY(-3px)",
+                  filter: "drop-shadow(0 0 6px rgba(254, 229, 58, 0.7))",
+                }}
               >
                 <g
-                  stroke="#F5C72A"
+                  stroke="#FEE53A"
                   strokeWidth="2.5"
                   strokeLinecap="round"
                   fill="none"
@@ -140,7 +144,6 @@ export function SideNav() {
                   <line x1="30" y1="5" x2="27" y2="11" />
                   <line x1="37" y1="13" x2="31" y2="16" />
                   <line x1="38" y1="24" x2="32" y2="23" />
-                  <line x1="34" y1="33" x2="29" y2="29" />
                 </g>
               </svg>
             </div>
