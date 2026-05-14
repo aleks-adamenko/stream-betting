@@ -3,6 +3,8 @@ import { Outlet } from "react-router-dom";
 
 import { SideNav } from "./SideNav";
 import { MobileTopBar } from "./MobileTopBar";
+import { EventMobileTopBar } from "./EventMobileTopBar";
+import { MobileFooter } from "./MobileFooter";
 import { cn } from "@/lib/utils";
 import bgUrl from "@/assets/live-rush-bg.jpg";
 
@@ -11,6 +13,7 @@ const FEED_PATHS = new Set(["/", "/live", "/trending"]);
 export function AppLayout() {
   const { pathname } = useLocation();
   const isFeedRoute = FEED_PATHS.has(pathname);
+  const isEventRoute = pathname.startsWith("/event/");
 
   return (
     <div className="relative flex h-[100dvh] overflow-hidden bg-background">
@@ -27,7 +30,7 @@ export function AppLayout() {
       />
       <SideNav />
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <MobileTopBar />
+        {isEventRoute ? <EventMobileTopBar /> : <MobileTopBar />}
         <main
           className={cn(
             "flex-1 overflow-y-auto",
@@ -35,6 +38,7 @@ export function AppLayout() {
           )}
         >
           <Outlet />
+          <MobileFooter />
         </main>
       </div>
     </div>

@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart, MessageCircle, Share2, Bookmark, Users, Calendar, Zap } from "lucide-react";
+import { Heart, MessageCircle, Share2, Bookmark, Users, Calendar } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { LiveBadge } from "./LiveBadge";
 import type { StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
@@ -34,13 +33,12 @@ export function StreamCard({ event }: StreamCardProps) {
   const [saved, setSaved] = useState(false);
 
   return (
-    <article className="relative mx-auto flex w-full max-w-[460px] snap-start scroll-mt-4 gap-3 sm:gap-4">
-      {/* Card body */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card shadow-lg">
-        {/* Cover — vertical phone-screen aspect, height-capped to keep card on screen */}
+    <article className="relative mx-auto w-full max-w-[520px] snap-start scroll-mt-4">
+      <div className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card shadow-lg">
+        {/* Cover — vertical phone-screen aspect, taller now that the CTA is gone */}
         <Link
           to={primaryHref}
-          className="group relative block aspect-[9/16] max-h-[calc(100dvh-300px)] min-h-[280px] w-full overflow-hidden bg-muted"
+          className="group relative block aspect-[9/16] max-h-[calc(100dvh-220px)] min-h-[320px] w-full overflow-hidden bg-muted"
         >
           <img
             src={event.coverUrl}
@@ -71,8 +69,28 @@ export function StreamCard({ event }: StreamCardProps) {
             ) : null}
           </div>
 
+          {/* Right-side action rail, vertically centered */}
+          <div className="absolute right-3 top-1/2 flex -translate-y-1/2 flex-col items-center gap-3 sm:gap-4">
+            <ActionButton
+              icon={Heart}
+              label={(event.viewersCount > 0 ? Math.round(event.viewersCount / 12) : 12).toString()}
+              active={liked}
+              onClick={() => setLiked((v) => !v)}
+              activeClassName="text-destructive"
+            />
+            <ActionButton icon={MessageCircle} label={isLive ? "Chat" : "Talk"} />
+            <ActionButton
+              icon={Bookmark}
+              label="Save"
+              active={saved}
+              onClick={() => setSaved((v) => !v)}
+              activeClassName="text-accent"
+            />
+            <ActionButton icon={Share2} label="Share" />
+          </div>
+
           {/* Bottom: title + influencer */}
-          <div className="absolute inset-x-0 bottom-0 flex items-end gap-3 p-4">
+          <div className="absolute inset-x-0 bottom-0 flex items-end gap-3 p-4 pr-16">
             <div className="min-w-0 flex-1 text-white">
               <h3 className="font-heading text-lg font-bold leading-tight drop-shadow sm:text-xl">
                 {event.title}
@@ -92,7 +110,7 @@ export function StreamCard({ event }: StreamCardProps) {
           </div>
         </Link>
 
-        {/* Bet strip */}
+        {/* Bet strip — description + outcome chips (no big CTA, the cover is the click target) */}
         <div className="flex flex-col gap-3 p-4">
           <p className="line-clamp-2 text-sm text-muted-foreground">{event.description}</p>
 
@@ -110,34 +128,7 @@ export function StreamCard({ event }: StreamCardProps) {
               </Link>
             ))}
           </div>
-
-          <Button asChild size="lg" className="w-full gap-2">
-            <Link to={primaryHref}>
-              {isLive ? "Watch & bet" : isScheduled ? "Notify me" : "View result"}
-              <Zap className="h-4 w-4 fill-current" />
-            </Link>
-          </Button>
         </div>
-      </div>
-
-      {/* Action rail (right side) */}
-      <div className="flex flex-shrink-0 flex-col items-center justify-center gap-3 sm:gap-4">
-        <ActionButton
-          icon={Heart}
-          label={(event.viewersCount > 0 ? Math.round(event.viewersCount / 12) : 12).toString()}
-          active={liked}
-          onClick={() => setLiked((v) => !v)}
-          activeClassName="text-destructive"
-        />
-        <ActionButton icon={MessageCircle} label={isLive ? "Chat" : "Talk"} />
-        <ActionButton
-          icon={Bookmark}
-          label="Save"
-          active={saved}
-          onClick={() => setSaved((v) => !v)}
-          activeClassName="text-primary"
-        />
-        <ActionButton icon={Share2} label="Share" />
       </div>
     </article>
   );
@@ -152,21 +143,26 @@ interface ActionButtonProps {
 }
 
 function ActionButton({ icon: Icon, label, active, activeClassName, onClick }: ActionButtonProps) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick?.();
+  };
   return (
     <button
       type="button"
-      onClick={onClick}
-      className="flex flex-col items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+      onClick={handleClick}
+      className="flex flex-col items-center gap-1 text-white transition-colors"
     >
       <span
         className={cn(
-          "flex h-10 w-10 items-center justify-center rounded-full bg-secondary/60 transition-colors group-hover:bg-secondary sm:h-11 sm:w-11",
+          "flex h-10 w-10 items-center justify-center rounded-full bg-black/40 backdrop-blur-sm transition-colors hover:bg-black/55 sm:h-11 sm:w-11",
           active && activeClassName,
         )}
       >
         <Icon className={cn("h-5 w-5", active && "fill-current")} />
       </span>
-      <span className="text-[11px] font-semibold leading-none">{label}</span>
+      <span className="text-[11px] font-semibold leading-none drop-shadow">{label}</span>
     </button>
   );
 }

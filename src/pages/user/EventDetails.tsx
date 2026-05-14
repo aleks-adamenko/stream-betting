@@ -3,7 +3,6 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   Bell,
   Calendar,
   Users,
@@ -69,13 +68,6 @@ export default function EventDetails() {
 
   return (
     <PageContainer>
-      <Link
-        to="/discover"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back
-      </Link>
-
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
         <div className="space-y-6">
           {/* Stream / cover slot — phone-screen vertical aspect, fully fits viewport height */}
