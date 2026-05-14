@@ -1,16 +1,17 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Search, UserCircle } from "lucide-react";
+import { Search, UserCircle, Home, Radio, TrendingUp, Heart, Compass } from "lucide-react";
 
 import logoUrl from "@/assets/live-rush-white-logo-2.png";
 import { useAuth } from "@/contexts/AuthContext";
+import { NavBrushBg } from "./NavBrushBg";
 import { cn } from "@/lib/utils";
 
 const tabs = [
-  { to: "/", label: "For you", exact: true },
-  { to: "/live", label: "Live" },
-  { to: "/trending", label: "Trending" },
-  { to: "/following", label: "Following" },
-  { to: "/discover", label: "Discover" },
+  { to: "/", label: "For you", icon: Home, exact: true },
+  { to: "/live", label: "Live", icon: Radio },
+  { to: "/trending", label: "Trending", icon: TrendingUp },
+  { to: "/following", label: "Following", icon: Heart },
+  { to: "/discover", label: "Discover", icon: Compass },
 ];
 
 export function MobileTopBar() {
@@ -33,22 +34,34 @@ export function MobileTopBar() {
         </Link>
 
         <nav className="-mx-2 min-w-0 flex-1 overflow-x-auto scrollbar-hide">
-          <ul className="flex gap-0.5 px-2 [justify-content:safe_center]">
+          <ul className="flex items-center gap-1 px-2 [justify-content:safe_center]">
             {tabs.map((t) => {
-              const isActive = t.exact ? pathname === t.to : pathname === t.to;
+              const isActive = pathname === t.to;
+              const Icon = t.icon;
               return (
                 <li key={t.to}>
                   <button
                     type="button"
                     onClick={() => navigate(t.to)}
+                    aria-label={t.label}
                     className={cn(
-                      "relative inline-flex h-10 items-center whitespace-nowrap rounded-md px-2.5 text-sm font-semibold transition-colors",
-                      isActive ? "text-white" : "text-white/70 hover:text-white",
+                      "relative inline-flex h-10 items-center whitespace-nowrap rounded-2xl transition-colors",
+                      isActive
+                        ? "gap-1.5 px-3 text-[#5048FF]"
+                        : "h-10 w-10 justify-center text-white/85 hover:text-white",
                     )}
                   >
-                    {t.label}
+                    {isActive && <NavBrushBg className="text-white" />}
+                    <Icon
+                      className={cn(
+                        "relative h-5 w-5 flex-shrink-0",
+                        isActive ? "text-[#5048FF]" : "text-white",
+                      )}
+                    />
                     {isActive && (
-                      <span className="absolute inset-x-2.5 bottom-0 h-0.5 rounded-full bg-white" />
+                      <span className="relative text-sm font-bold">
+                        {t.label}
+                      </span>
                     )}
                   </button>
                 </li>

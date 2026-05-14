@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { useEvents } from "@/hooks/useEvents";
 import { useAuth } from "@/contexts/AuthContext";
 import { SideNavUserCard } from "./SideNavUserCard";
+import { NavBrushBg } from "./NavBrushBg";
 import { cn } from "@/lib/utils";
 import logoUrl from "@/assets/live-rush-white-logo.png";
 
@@ -67,26 +68,32 @@ export function SideNav() {
                 end={item.exact}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 rounded-2xl px-3 py-2 text-base font-semibold transition-colors",
-                    isActive
-                      ? "bg-white text-[#5048FF] shadow-lg"
-                      : "text-white/90 hover:bg-white/10",
+                    "group relative flex items-center gap-3 rounded-2xl px-3 py-2 text-base font-semibold transition-colors",
+                    isActive ? "text-[#5048FF]" : "text-white/90",
                   )
                 }
               >
                 {({ isActive }) => (
                   <>
+                    <NavBrushBg
+                      className={cn(
+                        "transition-opacity duration-200",
+                        isActive
+                          ? "opacity-100"
+                          : "opacity-0 group-hover:opacity-10",
+                      )}
+                    />
                     <item.icon
                       className={cn(
-                        "h-5 w-5 flex-shrink-0",
+                        "relative h-5 w-5 flex-shrink-0",
                         isActive ? "text-[#5048FF]" : "text-white",
                       )}
                     />
-                    <span className="flex-1 truncate">{item.label}</span>
+                    <span className="relative flex-1 truncate">{item.label}</span>
                     {item.withLiveCount && liveCount > 0 && (
                       <span
                         className={cn(
-                          "inline-flex h-6 min-w-[2rem] items-center justify-center rounded-full px-2 text-xs font-bold tabular-nums",
+                          "relative inline-flex h-6 min-w-[2rem] items-center justify-center rounded-full px-2 text-xs font-bold tabular-nums",
                           isActive
                             ? "bg-[#5048FF] text-white"
                             : "bg-[#2A1FCF] text-white",
