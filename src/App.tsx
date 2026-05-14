@@ -13,6 +13,7 @@ import MyBets from "@/pages/user/MyBets";
 import Profile from "@/pages/user/Profile";
 import Notifications from "@/pages/user/Notifications";
 import TopUp from "@/pages/user/TopUp";
+import Company from "@/pages/user/Company";
 import SignUp from "@/pages/auth/SignUp";
 import SignIn from "@/pages/auth/SignIn";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
@@ -47,6 +48,7 @@ const App = () => (
             <Route path="/following" element={<Following />} />
             <Route path="/discover" element={<Feed />} />
             <Route path="/event/:id" element={<EventDetails />} />
+            <Route path="/company" element={<Company />} />
             <Route
               path="/my-bets"
               element={
