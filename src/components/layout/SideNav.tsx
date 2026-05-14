@@ -67,7 +67,7 @@ export function SideNav() {
                 end={item.exact}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 rounded-2xl px-4 py-3 text-base font-semibold transition-colors",
+                    "flex items-center gap-3 rounded-2xl px-3 py-2 text-base font-semibold transition-colors",
                     isActive
                       ? "bg-white text-[#5048FF] shadow-lg"
                       : "text-white/90 hover:bg-white/10",
@@ -165,6 +165,23 @@ export function SideNav() {
           </div>
         </div>
         )}
+
+        <ul className="mt-4 space-y-0.5 px-3">
+          {[
+            { to: "/studio", label: "Creator Studio" },
+            { to: "/company", label: "Company" },
+            { to: "/terms", label: "Terms & Policies" },
+          ].map((item) => (
+            <li key={item.to}>
+              <Link
+                to={item.to}
+                className="block py-1 text-sm font-bold text-white/85 transition-colors hover:text-white"
+              >
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
       </nav>
 
       <div className="relative px-5 py-4">

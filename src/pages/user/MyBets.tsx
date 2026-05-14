@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Trophy, Wallet, Clock, X } from "lucide-react";
 
 import { PageContainer } from "@/components/layout/PageContainer";
+import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMyBets } from "@/hooks/useMyBets";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,7 @@ export default function MyBets() {
 
   return (
     <PageContainer className="lg:pt-[18px]">
+      <UserPageTabs />
       <h1 className="font-heading text-2xl font-bold sm:text-3xl">My bets</h1>
       <p className="mt-1 text-sm text-muted-foreground sm:text-base">
         Track your stakes, wins, and current balance.

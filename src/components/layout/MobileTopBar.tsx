@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Search, UserCircle } from "lucide-react";
 
 import logoUrl from "@/assets/live-rush-white-logo-2.png";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -15,6 +16,7 @@ const tabs = [
 export function MobileTopBar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
 
   return (
     <header
@@ -64,11 +66,19 @@ export function MobileTopBar() {
             <Search className="h-5 w-5" />
           </button>
           <Link
-            to="/auth/sign-in"
-            aria-label="Profile"
+            to={user ? "/profile" : "/auth/sign-in"}
+            aria-label={user ? "Profile" : "Sign in"}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10"
           >
-            <UserCircle className="h-6 w-6" />
+            {user && profile?.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt=""
+                className="h-8 w-8 rounded-full object-cover ring-2 ring-white/40"
+              />
+            ) : (
+              <UserCircle className="h-6 w-6" />
+            )}
           </Link>
         </div>
       </div>

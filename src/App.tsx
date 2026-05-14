@@ -10,6 +10,9 @@ import Feed from "@/pages/user/Feed";
 import Following from "@/pages/user/Following";
 import EventDetails from "@/pages/user/EventDetails";
 import MyBets from "@/pages/user/MyBets";
+import Profile from "@/pages/user/Profile";
+import Notifications from "@/pages/user/Notifications";
+import TopUp from "@/pages/user/TopUp";
 import SignUp from "@/pages/auth/SignUp";
 import SignIn from "@/pages/auth/SignIn";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
@@ -49,6 +52,30 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <MyBets />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute>
+                  <Notifications />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/balance/top-up"
+              element={
+                <ProtectedRoute>
+                  <TopUp />
                 </ProtectedRoute>
               }
             />

@@ -139,12 +139,64 @@ export interface Database {
           },
         ];
       };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: "welcome" | "bet_won" | "bet_lost" | "event_starting" | "new_follower" | "top_up";
+          title: string;
+          body: string | null;
+          event_id: string | null;
+          read: boolean;
+          created_at: string;
+        };
+        Insert: Omit<Database["public"]["Tables"]["notifications"]["Row"], "id" | "created_at" | "read"> & {
+          id?: string;
+          created_at?: string;
+          read?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["notifications"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_event_id_fkey";
+            columns: ["event_id"];
+            referencedRelation: "events";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: {
       place_bet: {
         Args: { p_event_id: string; p_outcome_id: string; p_amount_cents: number };
         Returns: { bet_id: string; new_balance_cents: number; odds: number };
+      };
+      update_profile_display_name: {
+        Args: { p_name: string };
+        Returns: void;
+      };
+      update_profile_avatar_url: {
+        Args: { p_avatar_url: string | null };
+        Returns: void;
+      };
+      top_up_balance: {
+        Args: { p_amount_cents: number };
+        Returns: { new_balance_cents: number; amount_cents: number };
+      };
+      mark_notification_read: {
+        Args: { p_id: string };
+        Returns: void;
+      };
+      mark_all_notifications_read: {
+        Args: Record<string, never>;
+        Returns: void;
       };
     };
   };
