@@ -19,6 +19,7 @@ import { RoundStatus } from "@/components/stream/RoundStatus";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useEvent } from "@/hooks/useEvents";
 import { useAuth } from "@/contexts/AuthContext";
+import { ChatPanel } from "@/components/event/ChatPanel";
 import eventCtaImg from "@/assets/event-cta-1.png";
 import { placeBet } from "@/services/betsService";
 import { betsKeys } from "@/hooks/useMyBets";
@@ -188,7 +189,7 @@ export default function EventDetails() {
           <img
             src={eventCtaImg}
             alt=""
-            className="order-2 block h-auto w-full rounded-2xl lg:order-1"
+            className="order-3 block h-auto w-full rounded-2xl lg:order-1"
           />
           <div className="order-1 lg:order-2">
             {isLive ? (
@@ -198,6 +199,9 @@ export default function EventDetails() {
             ) : (
               <FinishedPanel event={event} />
             )}
+          </div>
+          <div className="order-2 lg:order-3">
+            <ChatPanel />
           </div>
         </aside>
       </div>
@@ -245,16 +249,20 @@ function BetPanel({ event }: { event: StreamEvent }) {
   }
 
   return (
-    <section className="card-elevated p-5 sm:p-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section className="card-elevated overflow-hidden">
+      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
         <div className="flex items-center gap-2">
-          <Trophy className="h-4 w-4 text-accent" />
-          <h2 className="font-heading text-base font-semibold">Place a bet</h2>
+          <Trophy className="h-5 w-5 fill-[#FED448] text-[#FED448]" />
+          <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
+            Place a bet
+          </h2>
         </div>
-        <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" /> Open
         </span>
       </div>
+
+      <div className="p-5 sm:p-6">
 
       {/* Balance pill / sign-in CTA */}
       {user ? (
@@ -368,6 +376,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
       <p className="mt-2 text-center text-[11px] text-muted-foreground">
         Virtual balance only. Bets settle once the round ends.
       </p>
+      </div>
     </section>
   );
 }
@@ -378,13 +387,20 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
   const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
 
   return (
-    <section className="card-elevated space-y-4 p-5 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h2 className="font-heading text-base font-semibold">Upcoming</h2>
-        <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-accent-foreground">
+    <section className="card-elevated overflow-hidden">
+      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-5 w-5 text-[#FED448]" />
+          <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
+            Upcoming
+          </h2>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
           {diffH < 24 ? `in ${Math.max(diffH, 1)}h` : startsAt.toLocaleDateString()}
         </span>
       </div>
+
+      <div className="space-y-4 p-5 sm:p-6">
 
       <div className="rounded-xl bg-muted/50 p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -433,6 +449,7 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
       >
         <Bell className="h-4 w-4" /> Notify me when live
       </Button>
+      </div>
     </section>
   );
 }
@@ -440,13 +457,20 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
 function FinishedPanel({ event }: { event: StreamEvent }) {
   const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
   return (
-    <section className="card-elevated space-y-4 p-5 sm:p-6">
-      <div className="flex items-center justify-between">
-        <h2 className="font-heading text-base font-semibold">Final result</h2>
-        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <section className="card-elevated overflow-hidden">
+      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
+        <div className="flex items-center gap-2">
+          <Trophy className="h-5 w-5 text-[#FED448]" />
+          <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
+            Final result
+          </h2>
+        </div>
+        <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
           Ended
         </span>
       </div>
+
+      <div className="space-y-4 p-5 sm:p-6">
 
       <div className="rounded-xl bg-muted/50 p-4 text-center">
         <Trophy className="mx-auto mb-2 h-6 w-6 text-accent" />
@@ -484,6 +508,7 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
       <Button asChild variant="secondary" size="lg" className="w-full">
         <Link to="/discover">Discover upcoming events</Link>
       </Button>
+      </div>
     </section>
   );
 }
