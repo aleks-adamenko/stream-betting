@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { Outlet } from "react-router-dom";
 
@@ -14,6 +15,11 @@ export function AppLayout() {
   const { pathname } = useLocation();
   const isFeedRoute = FEED_PATHS.has(pathname);
   const isEventRoute = pathname.startsWith("/event/");
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [pathname]);
 
   return (
     <div className="relative flex h-[100dvh] overflow-hidden bg-background">
@@ -32,6 +38,7 @@ export function AppLayout() {
       <div className="relative flex min-w-0 flex-1 flex-col">
         {isEventRoute ? <EventMobileTopBar /> : <MobileTopBar />}
         <main
+          ref={mainRef}
           className={cn(
             "flex-1 overflow-y-auto",
             isFeedRoute && "snap-y snap-mandatory scroll-pt-4 scroll-pb-4",
