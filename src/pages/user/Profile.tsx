@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { Camera, LogOut, Wallet, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 export default function Profile() {
   const { user, profile, refreshProfile, signOut } = useAuth();
+  const navigate = useNavigate();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [nameDraft, setNameDraft] = useState<string>(profile?.display_name ?? "");
@@ -127,17 +128,12 @@ export default function Profile() {
           <div className="mt-5 flex items-center gap-2 rounded-2xl bg-muted/50 p-2.5">
             <Wallet className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">Balance</span>
-            <span className="ml-auto font-heading text-base font-bold tabular-nums text-foreground">
+            <span className="font-heading text-base font-bold tabular-nums text-foreground">
               {dollars(balance)}
             </span>
-            <Button
-              asChild
-              size="sm"
-              variant="accent"
-              className="ml-1 h-8 px-3 text-xs"
-            >
+            <Button asChild size="lg" variant="accent" className="ml-auto">
               <Link to="/balance/top-up">
-                <Plus className="h-3.5 w-3.5" strokeWidth={3} /> Top up
+                <Plus className="h-4 w-4" strokeWidth={3} /> Top up
               </Link>
             </Button>
           </div>
@@ -206,11 +202,14 @@ export default function Profile() {
         </div>
 
         {/* Mobile-only sign out */}
-        <div className="mt-6 flex justify-center lg:hidden">
+        <div className="mt-6 flex justify-center">
           <Button
             type="button"
             variant="outline"
-            onClick={() => void signOut()}
+            onClick={async () => {
+              await signOut();
+              navigate("/", { replace: true });
+            }}
           >
             <LogOut className="h-4 w-4" />
             Sign out

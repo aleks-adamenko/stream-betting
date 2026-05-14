@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Wallet, Sparkles } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -147,7 +147,6 @@ export default function TopUp() {
           disabled={!canSubmit}
           onClick={() => mutation.mutate()}
         >
-          <Sparkles className="h-4 w-4" />
           {mutation.isPending
             ? "Adding…"
             : amountCents > 0

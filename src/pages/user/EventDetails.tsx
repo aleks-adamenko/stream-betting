@@ -232,7 +232,6 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const queryClient = useQueryClient();
 
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
-  const isLow = balanceDollars < 10;
   const stakeNum = Math.max(0, Number(stake) || 0);
   const potentialPayout = selected ? (stakeNum * selected.odds).toFixed(2) : "0.00";
   const stakeExceedsBalance = !!user && stakeNum > balanceDollars;
@@ -278,20 +277,8 @@ function BetPanel({ event }: { event: StreamEvent }) {
 
       <div className="p-5 sm:p-6">
 
-      {/* Balance pill / sign-in CTA */}
-      {user ? (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-border/40 bg-muted/40 px-3 py-2">
-          <span className="text-xs font-medium text-muted-foreground">Your balance</span>
-          <span
-            className={cn(
-              "font-heading text-base font-bold tabular-nums",
-              isLow ? "text-destructive" : "text-foreground",
-            )}
-          >
-            ${balanceDollars.toFixed(2)}
-          </span>
-        </div>
-      ) : (
+      {/* Sign-in CTA when unauthenticated */}
+      {!user && (
         <Link
           to={`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`}
           className="mb-4 flex items-center justify-between rounded-xl border border-primary/30 bg-primary/[0.04] px-3 py-2 text-sm font-medium text-primary hover:bg-primary/[0.08]"

@@ -1,17 +1,20 @@
 import { Link } from "react-router-dom";
-import { LogOut, Wallet, ListChecks, UserRound, Plus, Bell } from "lucide-react";
+import { Wallet, ListChecks, Plus, Bell } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { useMyBets } from "@/hooks/useMyBets";
 
 export function SideNavUserCard() {
-  const { profile, user, signOut } = useAuth();
+  const { profile, user } = useAuth();
+  const { data: bets } = useMyBets();
+  const openBetsCount = bets?.filter((b) => b.status === "open").length ?? 0;
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
   const handle = profile?.display_name ?? user?.email?.split("@")[0] ?? "you";
   const initials = handle.slice(0, 2).toUpperCase();
 
   return (
     <div
-      className="relative mt-6 overflow-visible rounded-2xl border border-white/15 bg-black/[0.06] px-2.5 pt-5 pb-2.5 text-white backdrop-blur-sm"
+      className="relative mt-[19px] overflow-visible rounded-2xl border border-white/15 bg-black/[0.06] px-2.5 pt-5 pb-2.5 text-white backdrop-blur-sm"
       style={{
         boxShadow:
           "0 12px 24px -16px rgba(0, 0, 0, 0.35), 0 4px 12px -12px rgba(0, 0, 0, 0.25)",
@@ -19,15 +22,15 @@ export function SideNavUserCard() {
     >
       {/* Decorative bolt outside on the right */}
       <BoltDecor className="pointer-events-none absolute -right-3 top-6 h-9 w-9" />
-      {/* Decorative doodle star near top-right */}
-      <DoodleStar className="pointer-events-none absolute right-3 top-2 h-4 w-4" />
-      {/* Decorative star near profile row */}
-      <DoodleStar className="pointer-events-none absolute -right-2 bottom-20 h-5 w-5 rotate-12" />
       {/* Decorative small bolt near My bets icon */}
-      <SmallBolt className="pointer-events-none absolute left-2 top-32 h-4 w-4 -rotate-12" />
+      <SmallBolt className="pointer-events-none absolute right-[14px] top-[19px] h-4 w-4 -rotate-12" />
 
-      {/* Header: avatar with crown + handle */}
-      <div className="relative flex items-center gap-3">
+      {/* Header: avatar with crown + handle — clickable, goes to /profile */}
+      <Link
+        to="/profile"
+        aria-label="Profile"
+        className="relative flex items-center gap-3 rounded-2xl transition-colors hover:opacity-90"
+      >
         <div className="relative flex-shrink-0">
           {/* Crown above avatar */}
           <Crown className="pointer-events-none absolute -top-3 -left-1 h-5 w-auto -rotate-12" />
@@ -46,23 +49,37 @@ export function SideNavUserCard() {
           <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-[#3057FF] bg-success" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-heading text-base font-bold">{handle}</p>
+          <p className="truncate font-heading text-base font-bold hover:underline">
+            {handle}
+          </p>
         </div>
-      </div>
+      </Link>
 
-      {/* Balance pill with + button */}
-      <div className="relative mt-4 flex items-center gap-2 rounded-2xl bg-white/[0.08] p-1.5">
-        <Wallet className="h-4 w-4 text-white/70" />
-        <span className="text-xs text-white/75">Balance</span>
-        <span className="ml-auto font-heading text-sm font-bold tabular-nums">
-          ${balanceDollars.toFixed(2)}
-        </span>
+      {/* Balance card with + button */}
+      <div className="relative mt-4 rounded-2xl bg-white/[0.08] p-3 pr-14 ring-1 ring-white/15">
+        {/* Top row: icon + label */}
+        <div className="relative flex items-center gap-1.5">
+          <Wallet className="h-3.5 w-3.5 text-white/80" />
+          <span className="text-[11px] font-bold uppercase tracking-wider text-white/85">
+            Balance
+          </span>
+        </div>
+
+        {/* Amount */}
+        <div className="relative mt-2">
+          <span className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white">
+            ${balanceDollars.toFixed(2)}
+          </span>
+        </div>
+
+        {/* Plus button — accent variant, vertically centered to the whole container */}
         <Link
           to="/balance/top-up"
           aria-label="Add funds"
-          className="ml-1 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white text-[#5048FF] transition-transform hover:scale-105"
+          className="absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[hsl(227_47%_21%)] shadow-lg ring-4 ring-[#FED448]/40 transition-all duration-200 hover:-translate-y-1/2 hover:scale-105 hover:shadow-xl"
+          style={{ backgroundImage: "linear-gradient(90deg,#FFDD49,#FFBE3B)" }}
         >
-          <Plus className="h-3.5 w-3.5" strokeWidth={3} />
+          <Plus className="h-4 w-4" strokeWidth={3} />
         </Link>
       </div>
 
@@ -74,13 +91,11 @@ export function SideNavUserCard() {
         >
           <ListChecks className="h-4 w-4" />
           <span className="flex-1">My bets</span>
-        </Link>
-        <Link
-          to="/profile"
-          className="flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium text-white/90 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <UserRound className="h-4 w-4" />
-          <span className="flex-1">Profile</span>
+          {openBetsCount > 0 && (
+            <span className="ml-auto inline-flex items-center rounded-md bg-[#2A1FCF] px-1.5 py-0 text-[11px] font-black uppercase tracking-wide tabular-nums text-white">
+              {openBetsCount}
+            </span>
+          )}
         </Link>
         <Link
           to="/notifications"
@@ -88,15 +103,10 @@ export function SideNavUserCard() {
         >
           <Bell className="h-4 w-4" />
           <span className="flex-1">Notifications</span>
+          <span className="ml-auto inline-flex items-center rounded-md bg-[#2A1FCF] px-1.5 py-0 text-[11px] font-black uppercase tracking-wide text-white">
+            New
+          </span>
         </Link>
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-white/90 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <LogOut className="h-4 w-4" />
-          <span className="flex-1">Sign out</span>
-        </button>
       </div>
     </div>
   );

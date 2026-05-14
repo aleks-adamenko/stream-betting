@@ -173,11 +173,10 @@ export function SideNav() {
         </div>
         )}
 
-        <ul className="mt-4 space-y-0.5 px-3">
+        <ul className="mt-[11px] space-y-0.5 px-3">
           {[
             { to: "/studio", label: "Creator Studio" },
             { to: "/company", label: "Company" },
-            { to: "/terms", label: "Terms & Policies" },
           ].map((item) => (
             <li key={item.to}>
               <Link
@@ -193,7 +192,13 @@ export function SideNav() {
 
       <div className="relative px-5 py-4">
         <p className="text-[11px] leading-tight text-white/75">
-          © {new Date().getFullYear()} LiveRush · Human-only content
+          © {new Date().getFullYear()} LiveRush ·{" "}
+          <Link
+            to="/terms"
+            className="underline underline-offset-2 transition-colors hover:text-white"
+          >
+            Terms & Policies
+          </Link>
         </p>
       </div>
     </aside>
