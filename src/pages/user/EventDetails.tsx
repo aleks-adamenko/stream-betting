@@ -21,6 +21,7 @@ import { useEvent } from "@/hooks/useEvents";
 import { useAuth } from "@/contexts/AuthContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
 import eventCtaImg from "@/assets/event-cta-1.png";
+import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
 import { placeBet } from "@/services/betsService";
 import { betsKeys } from "@/hooks/useMyBets";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
@@ -182,6 +183,19 @@ export default function EventDetails() {
             <h2 className="mb-2 font-heading text-lg font-semibold">Rules</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">{event.rules}</p>
           </section>
+
+          {/* Rewards banner — placeholder for future click-through */}
+          <button
+            type="button"
+            aria-label="Rewards"
+            className="block w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <img
+              src={rewardsBannerImg}
+              alt=""
+              className="block h-auto w-full"
+            />
+          </button>
         </div>
 
         {/* Right-side / bottom panel */}
