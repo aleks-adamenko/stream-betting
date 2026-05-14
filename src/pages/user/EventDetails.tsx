@@ -19,10 +19,12 @@ import { RoundStatus } from "@/components/stream/RoundStatus";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useEvent } from "@/hooks/useEvents";
 import { useAuth } from "@/contexts/AuthContext";
+import eventCtaImg from "@/assets/event-cta-1.png";
 import { placeBet } from "@/services/betsService";
 import { betsKeys } from "@/hooks/useMyBets";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
+import { oddsPillClasses, oddsRange } from "@/lib/odds";
 
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
@@ -67,7 +69,7 @@ export default function EventDetails() {
   const isScheduled = event.status === "scheduled";
 
   return (
-    <PageContainer>
+    <PageContainer className="lg:pt-[18px]">
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
         <div className="space-y-6">
           {/* Stream / cover slot — phone-screen vertical aspect, fully fits viewport height */}
@@ -182,14 +184,21 @@ export default function EventDetails() {
         </div>
 
         {/* Right-side / bottom panel */}
-        <aside className="space-y-4">
-          {isLive ? (
-            <BetPanel event={event} />
-          ) : isScheduled ? (
-            <UpcomingPanel event={event} />
-          ) : (
-            <FinishedPanel event={event} />
-          )}
+        <aside className="flex flex-col gap-4">
+          <img
+            src={eventCtaImg}
+            alt=""
+            className="order-2 block h-auto w-full rounded-2xl lg:order-1"
+          />
+          <div className="order-1 lg:order-2">
+            {isLive ? (
+              <BetPanel event={event} />
+            ) : isScheduled ? (
+              <UpcomingPanel event={event} />
+            ) : (
+              <FinishedPanel event={event} />
+            )}
+          </div>
         </aside>
       </div>
     </PageContainer>
@@ -210,6 +219,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const potentialPayout = selected ? (stakeNum * selected.odds).toFixed(2) : "0.00";
   const stakeExceedsBalance = !!user && stakeNum > balanceDollars;
   const canPlace = !!selected && stakeNum > 0 && (!user || !stakeExceedsBalance) && !submitting;
+  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
 
   async function handlePlaceBet() {
     if (!selected || !canPlace) return;
@@ -289,8 +299,10 @@ function BetPanel({ event }: { event: StreamEvent }) {
                 <span className="truncate text-sm font-medium text-foreground">{o.label}</span>
                 <span
                   className={cn(
-                    "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-bold",
-                    active ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary",
+                    "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                    active
+                      ? "bg-primary text-primary-foreground"
+                      : oddsPillClasses(o.odds, oddsMin, oddsMax),
                   )}
                 >
                   {o.odds.toFixed(2)}×
@@ -363,6 +375,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
 function UpcomingPanel({ event }: { event: StreamEvent }) {
   const startsAt = new Date(event.scheduledAt);
   const diffH = Math.max(0, Math.round((startsAt.getTime() - Date.now()) / 3600_000));
+  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
 
   return (
     <section className="card-elevated space-y-4 p-5 sm:p-6">
@@ -400,7 +413,12 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
               className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-2"
             >
               <span className="truncate text-sm font-medium">{o.label}</span>
-              <span className="ml-3 inline-flex flex-shrink-0 items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
+              <span
+                className={cn(
+                  "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                  oddsPillClasses(o.odds, oddsMin, oddsMax),
+                )}
+              >
                 {o.odds.toFixed(2)}×
               </span>
             </li>
@@ -420,6 +438,7 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
 }
 
 function FinishedPanel({ event }: { event: StreamEvent }) {
+  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
   return (
     <section className="card-elevated space-y-4 p-5 sm:p-6">
       <div className="flex items-center justify-between">
@@ -449,7 +468,14 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
                 {i === 0 && <Trophy className="h-3.5 w-3.5 text-accent" />}
                 {o.label}
               </span>
-              <span className="text-xs font-bold text-muted-foreground">{o.odds.toFixed(2)}×</span>
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                  oddsPillClasses(o.odds, oddsMin, oddsMax),
+                )}
+              >
+                {o.odds.toFixed(2)}×
+              </span>
             </li>
           ))}
         </ul>

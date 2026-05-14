@@ -5,6 +5,7 @@ import { Heart, MessageCircle, Share2, Bookmark, Users, Calendar } from "lucide-
 import { LiveBadge } from "./LiveBadge";
 import type { StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
+import { oddsPillClasses, oddsRange } from "@/lib/odds";
 
 interface StreamCardProps {
   event: StreamEvent;
@@ -31,6 +32,7 @@ export function StreamCard({ event }: StreamCardProps) {
   const primaryHref = `/event/${event.id}`;
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
+  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
 
   return (
     <article className="relative mx-auto w-full max-w-[520px] snap-start scroll-mt-4">
@@ -122,7 +124,12 @@ export function StreamCard({ event }: StreamCardProps) {
                 className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-xs font-medium transition-colors hover:border-primary/40 hover:bg-primary/5"
               >
                 <span className="max-w-[140px] truncate text-foreground">{o.label}</span>
-                <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                    oddsPillClasses(o.odds, oddsMin, oddsMax),
+                  )}
+                >
                   {o.odds.toFixed(2)}×
                 </span>
               </Link>
