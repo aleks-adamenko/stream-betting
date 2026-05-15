@@ -25,7 +25,6 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { useEvent } from "@/hooks/useEvents";
 import { useAuth } from "@/contexts/AuthContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
-import eventCtaImg from "@/assets/event-cta-1.png";
 import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
 import { placeBet } from "@/services/betsService";
 import { betsKeys } from "@/hooks/useMyBets";
@@ -253,11 +252,6 @@ export default function EventDetails() {
 
         {/* Right-side / bottom panel */}
         <aside className="flex flex-col gap-4">
-          <img
-            src={eventCtaImg}
-            alt=""
-            className="order-4 block h-auto w-full rounded-2xl lg:order-1"
-          />
           <div ref={betPanelRef} className="order-1 scroll-mt-16 lg:order-2">
             {isLive ? (
               <BetPanel event={event} />
