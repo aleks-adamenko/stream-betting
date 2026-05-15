@@ -22,6 +22,7 @@ create table if not exists public.events (
   title text not null,
   description text,
   cover_url text,
+  video_url text,
   category text not null,
   rules text,
   round_format text not null check (round_format in ('time', 'event')),

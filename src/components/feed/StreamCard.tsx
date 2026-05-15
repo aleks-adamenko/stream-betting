@@ -53,9 +53,6 @@ export function StreamCard({ event }: StreamCardProps) {
           {/* Top-left badges */}
           <div className="absolute left-3 top-3 flex items-center gap-2">
             {isLive && <LiveBadge />}
-            <span className="rounded-full bg-black/40 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur">
-              {event.category}
-            </span>
           </div>
 
           {/* Top-right meta */}

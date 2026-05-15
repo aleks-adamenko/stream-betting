@@ -32,6 +32,7 @@ export interface Database {
           title: string;
           description: string | null;
           cover_url: string | null;
+          video_url: string | null;
           category: string;
           rules: string | null;
           round_format: "time" | "event";

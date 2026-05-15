@@ -26,6 +26,7 @@ export interface StreamEvent {
   title: string;
   description: string;
   coverUrl: string;
+  videoUrl?: string | null;
   status: EventStatus;
   category: string;
   rules: string;

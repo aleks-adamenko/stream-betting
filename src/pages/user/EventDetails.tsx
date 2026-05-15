@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -7,15 +7,20 @@ import {
   Calendar,
   Users,
   Trophy,
-  Clock,
   Wallet,
   LogIn,
+  BadgeCheck,
+  ChevronDown,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { LiveBadge } from "@/components/feed/LiveBadge";
 import { HlsPlayer } from "@/components/stream/HlsPlayer";
 import { RoundStatus } from "@/components/stream/RoundStatus";
+import {
+  SocialVideoEmbed,
+  resolveSocialEmbedUrl,
+} from "@/components/stream/SocialVideoEmbed";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useEvent } from "@/hooks/useEvents";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,10 +36,20 @@ import { oddsPillClasses, oddsRange } from "@/lib/odds";
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
 const numberFormatter = new Intl.NumberFormat("en-US");
+const compactFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 export default function EventDetails() {
   const { id } = useParams<{ id: string }>();
   const { data: event, isLoading } = useEvent(id);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const betPanelRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBetPanel = () => {
+    betPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   if (isLoading) {
     return (
@@ -71,13 +86,18 @@ export default function EventDetails() {
   const isScheduled = event.status === "scheduled";
 
   return (
-    <PageContainer className="lg:pt-[18px]">
-      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
-        <div className="space-y-6">
-          {/* Stream / cover slot — phone-screen vertical aspect, fully fits viewport height */}
-          <div className="relative mx-auto aspect-[9/16] max-h-[calc(100dvh-130px)] w-full max-w-[420px] overflow-hidden rounded-2xl border border-border/30 bg-black shadow-lg">
+    <PageContainer className="pt-4 lg:pt-[18px]">
+      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
+        <div className="space-y-4 lg:space-y-6">
+          <div className="space-y-3">
+          {/* Stream / cover slot — matches the IG embed's rendered video aspect so the frame fills the container */}
+          <div className="relative mx-auto aspect-[4/5] max-h-[calc(100dvh-200px)] w-full max-w-[420px] overflow-hidden rounded-2xl border border-border/30 bg-black shadow-lg">
             {isLive ? (
-              <HlsPlayer src={TEST_STREAM} poster={event.coverUrl} autoPlay muted />
+              event.videoUrl && resolveSocialEmbedUrl(event.videoUrl) ? (
+                <SocialVideoEmbed url={event.videoUrl} title={event.title} />
+              ) : (
+                <HlsPlayer src={TEST_STREAM} poster={event.coverUrl} autoPlay muted />
+              )
             ) : (
               <img
                 src={event.coverUrl}
@@ -95,9 +115,6 @@ export default function EventDetails() {
 
             <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-2">
               {isLive && <LiveBadge />}
-              <span className="rounded-full bg-black/40 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-white backdrop-blur">
-                {event.category}
-              </span>
             </div>
 
             {isLive && (
@@ -105,13 +122,6 @@ export default function EventDetails() {
                 <Users className="h-3.5 w-3.5" />
                 {numberFormatter.format(event.viewersCount)} watching
               </span>
-            )}
-
-            {isLive && (
-              <RoundStatus
-                durationSec={event.roundDurationSec ?? 30}
-                className="absolute left-3 right-14 bottom-3 sm:left-4 sm:right-16 sm:bottom-4"
-              />
             )}
 
             {isScheduled && (
@@ -130,65 +140,91 @@ export default function EventDetails() {
                 </span>
               </div>
             )}
-          </div>
 
-          {/* Title + meta */}
-          <div>
-            <h1 className="font-heading text-2xl font-bold sm:text-3xl">{event.title}</h1>
-            <p className="mt-2 text-sm text-muted-foreground sm:text-base">{event.description}</p>
-
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <img
-                  src={event.influencer.avatarUrl}
-                  alt={event.influencer.displayName}
-                  className="h-9 w-9 rounded-full object-cover ring-1 ring-border"
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold leading-tight">
-                    {event.influencer.displayName}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {event.influencer.handle} · {numberFormatter.format(event.influencer.followers)}{" "}
-                    followers
-                  </p>
+            {/* Title + organizer overlay — sits on top of the video with a bottom-up dark gradient */}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-4 pt-16">
+              <div className="flex items-end justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h1 className="font-heading text-base font-extrabold leading-tight text-white drop-shadow sm:text-lg">
+                    {event.title}
+                  </h1>
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <img
+                      src={event.influencer.avatarUrl}
+                      alt={event.influencer.displayName}
+                      className="h-6 w-6 flex-shrink-0 rounded-full object-cover ring-2 ring-white/40"
+                    />
+                    <span className="truncate text-sm font-semibold text-white">
+                      {event.influencer.displayName}
+                    </span>
+                    <BadgeCheck className="h-4 w-4 flex-shrink-0 fill-primary text-white" />
+                    <span className="truncate text-sm text-white/85">
+                      {compactFormatter.format(event.influencer.followers)} followers
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground">
-                <Clock className="h-3.5 w-3.5" />
-                {event.roundFormat === "time"
-                  ? `Timed rounds — ${event.roundDurationSec ?? 0}s`
-                  : "Event-triggered rounds"}
-              </span>
-              <div className="flex gap-1.5">
-                {Object.entries(event.influencer.socials).map(([key, url]) =>
-                  url ? (
-                    <a
-                      key={key}
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-border/50 bg-secondary/50 px-2.5 py-1 text-xs font-medium capitalize text-foreground transition-colors hover:bg-secondary"
-                    >
-                      {key}
-                    </a>
-                  ) : null,
+                {isLive && (
+                  <Button
+                    type="button"
+                    variant="accent"
+                    onClick={scrollToBetPanel}
+                    className="pointer-events-auto flex-shrink-0"
+                  >
+                    Place a bet
+                  </Button>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Rules */}
-          <section className="rounded-2xl border border-border/30 bg-card p-6">
-            <h2 className="mb-2 font-heading text-lg font-semibold">Rules</h2>
-            <p className="text-sm leading-relaxed text-muted-foreground">{event.rules}</p>
+          {/* Round status — sits below the video container */}
+          {isLive && (
+            <RoundStatus
+              durationSec={event.roundDurationSec ?? 30}
+              className="mx-auto w-full max-w-[420px]"
+            />
+          )}
+
+          {/* Description */}
+          <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
+            {event.description}
+          </p>
+          </div>
+
+          {/* Rules — collapsible on mobile, always expanded on desktop */}
+          <section
+            className={cn(
+              "overflow-hidden rounded-2xl bg-card",
+              "shadow-lg lg:border lg:border-border/30 lg:shadow-none",
+              !rulesOpen && "ring-1 ring-primary/15 lg:ring-0",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setRulesOpen((o) => !o)}
+              aria-expanded={rulesOpen}
+              className="flex w-full items-center justify-between p-6 text-left lg:cursor-default"
+            >
+              <h2 className="font-heading text-lg font-semibold">Rules</h2>
+              <ChevronDown
+                className={cn(
+                  "h-5 w-5 flex-shrink-0 text-muted-foreground transition-transform lg:hidden",
+                  rulesOpen && "rotate-180",
+                )}
+              />
+            </button>
+            <div className={cn("px-6 pb-6", !rulesOpen && "hidden lg:block")}>
+              <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+                {event.rules}
+              </p>
+            </div>
           </section>
 
-          {/* Rewards banner — placeholder for future click-through */}
+          {/* Rewards banner — desktop only; mobile renders this after the bet panel inside the aside */}
           <button
             type="button"
             aria-label="Rewards"
-            className="block w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="hidden w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:block"
           >
             <img
               src={rewardsBannerImg}
@@ -203,9 +239,9 @@ export default function EventDetails() {
           <img
             src={eventCtaImg}
             alt=""
-            className="order-3 block h-auto w-full rounded-2xl lg:order-1"
+            className="order-4 block h-auto w-full rounded-2xl lg:order-1"
           />
-          <div className="order-1 lg:order-2">
+          <div ref={betPanelRef} className="order-1 scroll-mt-16 lg:order-2">
             {isLive ? (
               <BetPanel event={event} />
             ) : isScheduled ? (
@@ -214,7 +250,15 @@ export default function EventDetails() {
               <FinishedPanel event={event} />
             )}
           </div>
-          <div className="order-2 lg:order-3">
+          {/* Mobile-only rewards banner — sits between bet panel and chat */}
+          <button
+            type="button"
+            aria-label="Rewards"
+            className="order-2 block w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:hidden"
+          >
+            <img src={rewardsBannerImg} alt="" className="block h-auto w-full" />
+          </button>
+          <div className="order-3 lg:order-3">
             <ChatPanel />
           </div>
         </aside>

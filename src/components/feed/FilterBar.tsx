@@ -8,7 +8,6 @@ export type StatusFilter = "all" | EventStatus;
 
 export interface FilterState {
   status: StatusFilter;
-  category: string | null;
   influencerId: string | null;
 }
 
@@ -26,10 +25,6 @@ const STATUS_OPTIONS: { id: StatusFilter; label: string }[] = [
 ];
 
 export function FilterBar({ events, value, onChange }: FilterBarProps) {
-  const categories = useMemo(
-    () => Array.from(new Set(events.map((e) => e.category))).sort(),
-    [events],
-  );
   const influencers = useMemo(() => {
     const map = new Map<string, Influencer>();
     events.forEach((e) => map.set(e.influencer.id, e.influencer));
@@ -38,8 +33,7 @@ export function FilterBar({ events, value, onChange }: FilterBarProps) {
     );
   }, [events]);
 
-  const hasActiveFilter =
-    value.status !== "all" || !!value.category || !!value.influencerId;
+  const hasActiveFilter = value.status !== "all" || !!value.influencerId;
 
   return (
     <div className="space-y-3 lg:flex lg:items-center lg:justify-between lg:gap-4 lg:space-y-0">
@@ -56,23 +50,8 @@ export function FilterBar({ events, value, onChange }: FilterBarProps) {
         ))}
       </div>
 
-      {/* Category + influencer dropdowns */}
+      {/* Creator dropdown */}
       <div className="flex flex-wrap gap-2 lg:flex-nowrap lg:justify-end">
-        <select
-          value={value.category ?? ""}
-          onChange={(e) =>
-            onChange({ ...value, category: e.target.value || null })
-          }
-          className="h-9 rounded-lg border border-border/50 bg-background px-3 text-sm font-medium focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        >
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-
         <select
           value={value.influencerId ?? ""}
           onChange={(e) =>
@@ -91,9 +70,7 @@ export function FilterBar({ events, value, onChange }: FilterBarProps) {
         {hasActiveFilter && (
           <button
             type="button"
-            onClick={() =>
-              onChange({ status: "all", category: null, influencerId: null })
-            }
+            onClick={() => onChange({ status: "all", influencerId: null })}
             className="inline-flex h-9 items-center gap-1 rounded-lg border border-border/50 bg-background px-3 text-sm font-medium text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
           >
             <X className="h-3.5 w-3.5" /> Clear
@@ -130,7 +107,6 @@ function Chip({ active, onClick, children }: ChipProps) {
 export function applyFilters(events: StreamEvent[], filter: FilterState) {
   return events.filter((e) => {
     if (filter.status !== "all" && e.status !== filter.status) return false;
-    if (filter.category && e.category !== filter.category) return false;
     if (filter.influencerId && e.influencer.id !== filter.influencerId) return false;
     return true;
   });

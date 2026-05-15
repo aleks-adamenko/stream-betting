@@ -9,7 +9,6 @@ export default function Feed() {
   const { data: events, isLoading } = useEvents();
   const [filter, setFilter] = useState<FilterState>({
     status: "all",
-    category: null,
     influencerId: null,
   });
 

@@ -45,9 +45,6 @@ export function EventCard({ event, className }: EventCardProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/10" />
         <div className="absolute left-3 top-3 flex items-center gap-2">
           {isLive && <LiveBadge size="sm" />}
-          <span className="rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur">
-            {event.category}
-          </span>
         </div>
         {isLive && (
           <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">

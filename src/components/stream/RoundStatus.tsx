@@ -34,33 +34,28 @@ export function RoundStatus({ durationSec, className, onRoundEnd }: RoundStatusP
     return () => window.clearInterval(id);
   }, [durationSec, roundIndex, onRoundEnd]);
 
-  const progress = ((durationSec - remaining) / durationSec) * 100;
+  const remainingPct = (remaining / durationSec) * 100;
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
-  const formatted = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  const formatted = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 
   return (
-    <div
-      className={cn(
-        "pointer-events-none rounded-xl border border-white/15 bg-black/55 px-3 py-2 text-white backdrop-blur",
-        className,
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-            Round {roundIndex}
-          </span>
-          <span className="text-xs font-medium text-white/80">Bets close in</span>
-        </div>
-        <span className="font-heading text-base font-bold tabular-nums">{formatted}</span>
-      </div>
-      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/15">
+    <div className={cn("flex items-center gap-3 py-1.5", className)}>
+      <span className="inline-flex items-center rounded-full bg-primary/15 px-3 py-1 text-xs font-bold uppercase tracking-wide text-primary">
+        Round {roundIndex}
+      </span>
+      <span className="whitespace-nowrap text-sm font-semibold text-foreground">
+        Bets close in
+      </span>
+      <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-accent to-destructive transition-[width] duration-500 ease-linear"
-          style={{ width: `${progress}%` }}
+          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[#F61527] to-[#584CFC] transition-[width] duration-500 ease-linear"
+          style={{ width: `${remainingPct}%` }}
         />
       </div>
+      <span className="font-heading text-base font-bold tabular-nums text-foreground">
+        {formatted}
+      </span>
     </div>
   );
 }
