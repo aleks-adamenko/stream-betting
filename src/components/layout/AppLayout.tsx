@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 import bgUrl from "@/assets/live-rush-bg.jpg";
 
 const FEED_PATHS = new Set(["/", "/live", "/trending"]);
-const BAR_HEIGHT = 56; // EventMobileTopBar (h-14)
+const BAR_HEIGHT = 56;
+const PULL_TAP_TOLERANCE = 6;
 
 export function AppLayout() {
   const { pathname } = useLocation();
@@ -22,9 +23,10 @@ export function AppLayout() {
     mainRef.current?.scrollTo({ top: 0, left: 0 });
   }, [pathname]);
 
-  // Mobile event reveal-on-scroll: top bar starts hidden, content sits
-  // flush with the top of the screen; first 56px of scroll slide the
-  // bar in (content shifts down in sync). Beyond 56px, normal scroll.
+  // Mobile event reveal-on-pull: top bar is rendered INSIDE main so it
+  // scrolls away with the content. Initially hidden (transform + negative
+  // margin collapse its slot). Swipe down at scrollTop === 0 drags the
+  // bar in 1:1 with the finger; release snaps to 0 or 56.
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -44,17 +46,14 @@ export function AppLayout() {
     setAnimateReveal(false);
   }, [revealActive, pathname]);
 
-  // Swipe-down to reveal: at scrollTop === 0, a downward swipe gesture
-  // triggers the top bar to animate in. Finger up / regular scroll is
-  // left untouched. Once revealed, stays revealed.
   useEffect(() => {
     if (!revealActive) return;
     const main = mainRef.current;
     if (!main) return;
 
-    const SWIPE_THRESHOLD_PX = 40;
     let startY: number | null = null;
-    let triggered = false;
+    let pulling = false;
+    let lastDelta = 0;
 
     const onTouchStart = (e: TouchEvent) => {
       if (main.scrollTop > 0) {
@@ -62,30 +61,46 @@ export function AppLayout() {
         return;
       }
       startY = e.touches[0].clientY;
-      triggered = false;
+      pulling = false;
+      lastDelta = 0;
+      setAnimateReveal(false);
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (startY === null || triggered) return;
+      if (startY === null) return;
       if (main.scrollTop > 0) {
         startY = null;
+        pulling = false;
         return;
       }
       const dy = e.touches[0].clientY - startY;
-      if (dy >= SWIPE_THRESHOLD_PX) {
-        triggered = true;
-        setAnimateReveal(true);
-        setRevealedPx(BAR_HEIGHT);
+      // Tap tolerance: small movement isn't a pull; let click events flow.
+      if (!pulling && dy < PULL_TAP_TOLERANCE) return;
+      if (dy <= 0) {
+        // Finger moved up — let the browser scroll.
+        startY = null;
+        pulling = false;
+        return;
       }
+      pulling = true;
+      lastDelta = dy;
+      if (e.cancelable) e.preventDefault();
+      setRevealedPx(Math.min(BAR_HEIGHT, dy));
     };
 
     const onTouchEnd = () => {
+      if (!pulling) {
+        startY = null;
+        return;
+      }
+      setAnimateReveal(true);
+      setRevealedPx(lastDelta >= BAR_HEIGHT / 2 ? BAR_HEIGHT : 0);
       startY = null;
-      triggered = false;
+      pulling = false;
     };
 
     main.addEventListener("touchstart", onTouchStart, { passive: true });
-    main.addEventListener("touchmove", onTouchMove, { passive: true });
+    main.addEventListener("touchmove", onTouchMove, { passive: false });
     main.addEventListener("touchend", onTouchEnd, { passive: true });
     main.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
@@ -99,14 +114,13 @@ export function AppLayout() {
 
   const hideDelta = BAR_HEIGHT - revealedPx;
   const applyReveal = revealActive && hideDelta > 0;
-  const transitionStyle = animateReveal
-    ? "transform 200ms ease-out, margin-bottom 200ms ease-out"
-    : undefined;
-  const topBarStyle = applyReveal
+  const topBarStyle = revealActive
     ? {
         transform: `translateY(-${hideDelta}px)`,
         marginBottom: `-${hideDelta}px`,
-        transition: transitionStyle,
+        transition: animateReveal
+          ? "transform 200ms ease-out, margin-bottom 200ms ease-out"
+          : "none",
       }
     : undefined;
 
@@ -125,11 +139,8 @@ export function AppLayout() {
       />
       <SideNav />
       <div className="relative flex min-w-0 flex-1 flex-col">
-        {isEventRoute ? (
-          <EventMobileTopBar style={topBarStyle} />
-        ) : (
-          <MobileTopBar />
-        )}
+        {/* Non-event routes: standard mobile top bar above main */}
+        {!isEventRoute && <MobileTopBar />}
         <main
           ref={mainRef}
           className={cn(
@@ -137,6 +148,8 @@ export function AppLayout() {
             isFeedRoute && "snap-y snap-mandatory scroll-pt-4 scroll-pb-4",
           )}
         >
+          {/* Event route: top bar is inside main so it scrolls with content */}
+          {isEventRoute && <EventMobileTopBar style={topBarStyle} />}
           <Outlet />
           <MobileFooter />
         </main>
