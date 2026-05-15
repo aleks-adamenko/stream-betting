@@ -45,6 +45,8 @@ const compactFormatter = new Intl.NumberFormat("en-US", {
 export default function EventDetails() {
   const { id } = useParams<{ id: string }>();
   const { data: event, isLoading } = useEvent(id);
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [rulesOpen, setRulesOpen] = useState(false);
   const betPanelRef = useRef<HTMLDivElement>(null);
 
@@ -58,7 +60,11 @@ export default function EventDetails() {
       : null,
   );
 
-  const scrollToBetPanel = () => {
+  const handleHeaderBet = () => {
+    if (!user) {
+      navigate(`/auth/sign-in?next=${encodeURIComponent(`/event/${id}`)}`);
+      return;
+    }
     betPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -178,10 +184,10 @@ export default function EventDetails() {
                   <Button
                     type="button"
                     variant="accent"
-                    onClick={scrollToBetPanel}
+                    onClick={handleHeaderBet}
                     className="pointer-events-auto flex-shrink-0"
                   >
-                    Place a bet
+                    {user ? "Place a bet" : "Sign in to bet"}
                   </Button>
                 )}
               </div>
@@ -294,11 +300,11 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
 
   async function handlePlaceBet() {
-    if (!selected || !canPlace) return;
     if (!user) {
       navigate(`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`);
       return;
     }
+    if (!selected || !canPlace) return;
     setSubmitting(true);
     try {
       await placeBet(event.id, selected.id, Math.round(stakeNum * 100));
