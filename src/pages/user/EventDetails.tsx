@@ -46,7 +46,19 @@ export default function EventDetails() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  const [overlaysHidden, setOverlaysHidden] = useState(false);
   const betPanelRef = useRef<HTMLDivElement>(null);
+
+  // Hide LIVE / viewers / title overlay once the user starts scrolling so the
+  // sticky video container looks like a clean fixed player while reading.
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (!main) return;
+    const onScroll = () => setOverlaysHidden(main.scrollTop > 0);
+    onScroll();
+    main.addEventListener("scroll", onScroll, { passive: true });
+    return () => main.removeEventListener("scroll", onScroll);
+  }, []);
 
   useSeo(
     event
@@ -105,8 +117,8 @@ export default function EventDetails() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
         <div className="min-w-0 space-y-4 lg:space-y-6">
           <div className="min-w-0 space-y-3">
-          {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop */}
-          <div className="relative -mx-4 -mt-4 aspect-[8/5] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30">
+          {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop. Sticky on mobile so it pins to the top of the viewport as the user scrolls. */}
+          <div className="sticky top-0 z-20 -mx-4 -mt-4 aspect-[8/5] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:static lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30">
             {isLive ? (
               event.videoUrl && resolveSocialEmbedUrl(event.videoUrl) ? (
                 <SocialVideoEmbed url={event.videoUrl} title={event.title} />
@@ -128,12 +140,22 @@ export default function EventDetails() {
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20" />
             )}
 
-            <div className="pointer-events-none absolute left-4 top-4 flex items-center gap-2">
+            <div
+              className={cn(
+                "pointer-events-none absolute left-4 top-4 flex items-center gap-2 transition-opacity duration-200",
+                overlaysHidden && "opacity-0 lg:opacity-100",
+              )}
+            >
               {isLive && <LiveBadge />}
             </div>
 
             {isLive && (
-              <span className="pointer-events-none absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+              <span
+                className={cn(
+                  "pointer-events-none absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur transition-opacity duration-200",
+                  overlaysHidden && "opacity-0 lg:opacity-100",
+                )}
+              >
                 <Users className="h-3.5 w-3.5" />
                 {numberFormatter.format(event.viewersCount)} watching
               </span>
@@ -157,7 +179,12 @@ export default function EventDetails() {
             )}
 
             {/* Title + organizer overlay — sits on top of the video with a bottom-up dark gradient */}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-4 pt-16">
+            <div
+              className={cn(
+                "pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-4 pt-16 transition-opacity duration-200",
+                overlaysHidden && "opacity-0 lg:opacity-100",
+              )}
+            >
               <div className="flex items-end justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <h1 className="font-heading text-base font-extrabold leading-tight text-white drop-shadow sm:text-lg">
