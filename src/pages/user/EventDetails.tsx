@@ -32,6 +32,7 @@ import { betsKeys } from "@/hooks/useMyBets";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { oddsPillClasses, oddsRange } from "@/lib/odds";
+import { useSeo } from "@/lib/useSeo";
 
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
@@ -46,6 +47,16 @@ export default function EventDetails() {
   const { data: event, isLoading } = useEvent(id);
   const [rulesOpen, setRulesOpen] = useState(false);
   const betPanelRef = useRef<HTMLDivElement>(null);
+
+  useSeo(
+    event
+      ? {
+          title: `${event.title} | LiveRush`,
+          description: event.description,
+          image: event.coverUrl,
+        }
+      : null,
+  );
 
   const scrollToBetPanel = () => {
     betPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
