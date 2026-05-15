@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -10,7 +10,6 @@ import {
   Wallet,
   LogIn,
   BadgeCheck,
-  ChevronDown,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -46,7 +45,7 @@ export default function EventDetails() {
   const { data: event, isLoading } = useEvent(id);
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [rulesOpen, setRulesOpen] = useState(false);
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const betPanelRef = useRef<HTMLDivElement>(null);
 
   useSeo(
@@ -103,11 +102,11 @@ export default function EventDetails() {
 
   return (
     <PageContainer className="pt-4 lg:pt-[18px]">
-      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
-        <div className="space-y-4 lg:space-y-6">
-          <div className="space-y-3">
-          {/* Stream / cover slot — matches the IG embed's rendered video aspect so the frame fills the container */}
-          <div className="relative mx-auto aspect-[4/5] max-h-[calc(100dvh-200px)] w-full max-w-[420px] overflow-hidden rounded-2xl border border-border/30 bg-black shadow-lg">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
+        <div className="min-w-0 space-y-4 lg:space-y-6">
+          <div className="min-w-0 space-y-3">
+          {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop */}
+          <div className="relative -mx-4 -mt-4 aspect-[8/5] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30">
             {isLive ? (
               event.videoUrl && resolveSocialEmbedUrl(event.videoUrl) ? (
                 <SocialVideoEmbed url={event.videoUrl} title={event.title} />
@@ -201,35 +200,28 @@ export default function EventDetails() {
             />
           )}
 
-          {/* Description */}
-          <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-            {event.description}
-          </p>
+          {/* Description (mobile: paired with the Rules button in the same row) */}
+          <div className="flex items-start gap-3 lg:block">
+            <p className="flex-1 text-sm leading-relaxed text-muted-foreground sm:text-base">
+              {event.description}
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setRulesModalOpen(true)}
+              className="flex-shrink-0 lg:hidden"
+            >
+              Rules
+            </Button>
+          </div>
           </div>
 
-          {/* Rules — collapsible on mobile, always expanded on desktop */}
-          <section
-            className={cn(
-              "overflow-hidden rounded-2xl bg-card",
-              "shadow-lg lg:border lg:border-border/30 lg:shadow-none",
-              !rulesOpen && "ring-1 ring-primary/15 lg:ring-0",
-            )}
-          >
-            <button
-              type="button"
-              onClick={() => setRulesOpen((o) => !o)}
-              aria-expanded={rulesOpen}
-              className="flex w-full items-center justify-between p-6 text-left lg:cursor-default"
-            >
+          {/* Rules — desktop only; mobile gets the bottom-sheet modal */}
+          <section className="hidden overflow-hidden rounded-2xl border border-border/30 bg-card lg:block">
+            <div className="px-6 pt-6">
               <h2 className="font-heading text-lg font-semibold">Rules</h2>
-              <ChevronDown
-                className={cn(
-                  "h-5 w-5 flex-shrink-0 text-muted-foreground transition-transform lg:hidden",
-                  rulesOpen && "rotate-180",
-                )}
-              />
-            </button>
-            <div className={cn("px-6 pb-6", !rulesOpen && "hidden lg:block")}>
+            </div>
+            <div className="px-6 pb-6 pt-3">
               <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
                 {event.rules}
               </p>
@@ -274,7 +266,100 @@ export default function EventDetails() {
           </div>
         </aside>
       </div>
+
+      {/* Mobile-only bottom-sheet modal for Rules */}
+      <RulesBottomSheet
+        open={rulesModalOpen}
+        onClose={() => setRulesModalOpen(false)}
+        rules={event.rules}
+      />
     </PageContainer>
+  );
+}
+
+function RulesBottomSheet({
+  open,
+  onClose,
+  rules,
+}: {
+  open: boolean;
+  onClose: () => void;
+  rules: string;
+}) {
+  const [dragY, setDragY] = useState(0);
+  const startY = useRef<number | null>(null);
+  const isDragging = useRef(false);
+
+  useEffect(() => {
+    if (open) setDragY(0);
+  }, [open]);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    startY.current = e.touches[0].clientY;
+    isDragging.current = true;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (startY.current === null) return;
+    const dy = e.touches[0].clientY - startY.current;
+    if (dy > 0) setDragY(dy);
+  };
+  const onTouchEnd = () => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    startY.current = null;
+    if (dragY > 80) {
+      onClose();
+    } else {
+      setDragY(0);
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "fixed inset-0 z-50 lg:hidden",
+        !open && "pointer-events-none",
+      )}
+      aria-hidden={!open}
+    >
+      {/* Backdrop */}
+      <button
+        type="button"
+        aria-label="Close rules"
+        onClick={onClose}
+        className={cn(
+          "absolute inset-0 bg-black/50 transition-opacity duration-200",
+          open ? "opacity-100" : "opacity-0",
+        )}
+      />
+      {/* Sheet */}
+      <div
+        className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-hidden rounded-t-3xl bg-card"
+        style={{
+          transform: open
+            ? `translateY(${dragY}px)`
+            : "translateY(100%)",
+          transition: isDragging.current
+            ? "none"
+            : "transform 240ms cubic-bezier(0.32, 0.72, 0, 1)",
+          boxShadow: "0 -10px 32px rgba(0, 0, 0, 0.28)",
+          paddingBottom: "max(env(safe-area-inset-bottom), 1.5rem)",
+        }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
+        {/* Drag handle */}
+        <div className="flex justify-center pb-2 pt-3">
+          <span className="h-1.5 w-12 rounded-full bg-muted-foreground/30" />
+        </div>
+        <h2 className="px-6 font-heading text-lg font-semibold">Rules</h2>
+        <p className="mt-2 max-h-[70vh] overflow-y-auto whitespace-pre-line px-6 pb-2 text-sm leading-relaxed text-muted-foreground">
+          {rules}
+        </p>
+      </div>
+    </div>
   );
 }
 

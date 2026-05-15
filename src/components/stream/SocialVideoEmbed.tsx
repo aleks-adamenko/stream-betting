@@ -1,12 +1,13 @@
 /**
  * Renders a third-party social video (Instagram reel, TikTok) inside an
  * iframe sized to the parent. The iframe is offset to hide the post
- * header, scaled up so the video portion fills the container height,
+ * header, scaled so the video portion matches the container height,
  * and a solid black mask covers anything left over at the bottom.
  *
  * Returns null if the URL can't be mapped to a known embed pattern so the
  * caller can fall back to its default player.
  */
+import { useEffect, useState } from "react";
 
 type Platform = "instagram" | "tiktok";
 
@@ -58,10 +59,29 @@ interface SocialVideoEmbedProps {
 
 export function SocialVideoEmbed({ url, title }: SocialVideoEmbedProps) {
   const cfg = instagramEmbed(url) ?? tiktokEmbed(url);
+  // Mobile/tablet container is half-height vs desktop, so the IG embed
+  // is scaled down to match — keeps the visible video portion sized
+  // to the container's height instead of overflowing.
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(max-width: 1023px)");
+    setIsCompactViewport(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsCompactViewport(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   if (!cfg) return null;
+  const scale =
+    cfg.platform === "instagram" && isCompactViewport ? 0.5 : cfg.scale;
   // Push the iframe up by the scaled header height so the post header
   // sits just above the visible area after scaling.
-  const topOffset = Math.round(cfg.headerPx * cfg.scale);
+  const topOffset = Math.round(cfg.headerPx * scale);
+  // After CSS transform: scale, the visual height is iframe_css_height * scale.
+  // To make the visual content reach the container bottom (i.e. the crop line
+  // sits at the very bottom of the container), the CSS height must be
+  // container/scale so that height*scale === container.
+  const heightPct = Math.round(100 / scale);
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
       <iframe
@@ -70,8 +90,8 @@ export function SocialVideoEmbed({ url, title }: SocialVideoEmbedProps) {
         className="absolute left-0 w-full border-0"
         style={{
           top: `-${topOffset}px`,
-          height: `calc(100% + ${topOffset}px)`,
-          transform: `scale(${cfg.scale})`,
+          height: `calc(${heightPct}% + ${cfg.headerPx}px)`,
+          transform: `scale(${scale})`,
           transformOrigin: "top center",
         }}
         allow="autoplay; encrypted-media; picture-in-picture; web-share"

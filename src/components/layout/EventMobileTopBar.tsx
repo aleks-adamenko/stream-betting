@@ -1,10 +1,15 @@
+import type { CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, UserCircle } from "lucide-react";
 
 import logoUrl from "@/assets/live-rush-logo-2.png";
 import { useAuth } from "@/contexts/AuthContext";
 
-export function EventMobileTopBar() {
+interface EventMobileTopBarProps {
+  style?: CSSProperties;
+}
+
+export function EventMobileTopBar({ style }: EventMobileTopBarProps) {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
@@ -12,7 +17,7 @@ export function EventMobileTopBar() {
   return (
     <header
       className="z-30 flex-shrink-0 bg-background lg:hidden"
-      style={{ paddingTop: "env(safe-area-inset-top)" }}
+      style={{ paddingTop: "env(safe-area-inset-top)", ...style }}
     >
       <div className="relative flex h-14 items-center px-2.5">
         {/* Back */}

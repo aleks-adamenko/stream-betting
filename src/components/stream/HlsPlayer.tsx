@@ -81,7 +81,9 @@ export function HlsPlayer({
         playsInline
         autoPlay={autoPlay}
         muted={muted}
-        className="h-full w-full object-cover"
+        loop
+        disablePictureInPicture
+        className="pointer-events-none h-full w-full object-cover"
       />
       {loading && !error && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
