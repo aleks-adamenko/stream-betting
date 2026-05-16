@@ -55,9 +55,12 @@ export function resolveSocialEmbedUrl(url: string): string | null {
 interface SocialVideoEmbedProps {
   url: string;
   title?: string;
+  /** When true (mobile fullscreen), the IG embed scale is bumped to fill the
+   *  viewport instead of the compact 0.45 used in the inline player. */
+  fullscreen?: boolean;
 }
 
-export function SocialVideoEmbed({ url, title }: SocialVideoEmbedProps) {
+export function SocialVideoEmbed({ url, title, fullscreen }: SocialVideoEmbedProps) {
   const cfg = instagramEmbed(url) ?? tiktokEmbed(url);
   // Mobile/tablet container is half-height vs desktop, so the IG embed
   // is scaled down to match — keeps the visible video portion sized
@@ -73,7 +76,11 @@ export function SocialVideoEmbed({ url, title }: SocialVideoEmbedProps) {
   }, []);
   if (!cfg) return null;
   const scale =
-    cfg.platform === "instagram" && isCompactViewport ? 0.5 : cfg.scale;
+    cfg.platform === "instagram" && isCompactViewport
+      ? fullscreen
+        ? 1
+        : 0.45
+      : cfg.scale;
   // Push the iframe up by the scaled header height so the post header
   // sits just above the visible area after scaling.
   const topOffset = Math.round(cfg.headerPx * scale);
@@ -104,7 +111,15 @@ export function SocialVideoEmbed({ url, title }: SocialVideoEmbedProps) {
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 bottom-0 bg-black"
-        style={{ height: `${cfg.bottomMask}px` }}
+        style={
+          fullscreen && cfg.platform === "instagram"
+            ? // In fullscreen, the IG reel renders the video at 9:16 of iframe
+              // width starting at the top, then IG chrome (caption, actions,
+              // likes) below. Mask everything below the natural video bottom
+              // so only the video frame is visible.
+              { height: `calc(100dvh - 100vw * 16 / 9)` }
+            : { height: `${cfg.bottomMask}px` }
+        }
       />
     </div>
   );

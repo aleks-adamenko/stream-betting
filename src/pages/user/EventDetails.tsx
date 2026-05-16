@@ -10,6 +10,7 @@ import {
   Wallet,
   LogIn,
   BadgeCheck,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ export default function EventDetails() {
   const navigate = useNavigate();
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const [overlaysHidden, setOverlaysHidden] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const betPanelRef = useRef<HTMLDivElement>(null);
 
   // Hide LIVE / viewers / title overlay once the user starts scrolling so the
@@ -77,6 +79,16 @@ export default function EventDetails() {
     }
     betPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  // Close fullscreen on Escape
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen]);
 
   if (isLoading) {
     return (
@@ -117,11 +129,21 @@ export default function EventDetails() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
         <div className="contents lg:block lg:min-w-0 lg:space-y-6">
           <div className="contents lg:block lg:min-w-0 lg:space-y-3">
-          {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop. Sticky on mobile so it pins to the top of the viewport as the user scrolls. */}
-          <div className="sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:static lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30">
+          {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop. Sticky on mobile so it pins to the top of the viewport as the user scrolls. Mobile only: tapping it expands to fullscreen (X close + bet overlay). */}
+          <div
+            className={cn(
+              isFullscreen
+                ? "fixed inset-0 z-[60] bg-black"
+                : "sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:static lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30",
+            )}
+          >
             {isLive ? (
               event.videoUrl && resolveSocialEmbedUrl(event.videoUrl) ? (
-                <SocialVideoEmbed url={event.videoUrl} title={event.title} />
+                <SocialVideoEmbed
+                  url={event.videoUrl}
+                  title={event.title}
+                  fullscreen={isFullscreen}
+                />
               ) : (
                 <HlsPlayer src={TEST_STREAM} poster={event.coverUrl} autoPlay muted />
               )
@@ -178,11 +200,21 @@ export default function EventDetails() {
               </div>
             )}
 
-            {/* Title + organizer overlay — sits on top of the video with a bottom-up dark gradient */}
+            {/* Tap-to-expand overlay — mobile only, non-fullscreen, sits below the title overlay so the Place a bet button stays clickable */}
+            {!isFullscreen && (
+              <button
+                type="button"
+                aria-label="Expand video"
+                onClick={() => setIsFullscreen(true)}
+                className="absolute inset-0 z-[5] lg:hidden"
+              />
+            )}
+
+            {/* Title + organizer overlay — sits on top of the video with a bottom-up dark gradient. Hidden in fullscreen (replaced by FullscreenBetOverlay). */}
             <div
               className={cn(
                 "pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-4 pt-16 transition-opacity duration-200",
-                overlaysHidden && "opacity-0 lg:opacity-100",
+                (overlaysHidden || isFullscreen) && "opacity-0 lg:opacity-100",
               )}
             >
               <div className="flex items-end justify-between gap-3">
@@ -217,6 +249,14 @@ export default function EventDetails() {
                 )}
               </div>
             </div>
+
+            {/* Fullscreen-only overlays: X close + bet controls + swipe-up */}
+            {isFullscreen && (
+              <FullscreenBetOverlay
+                event={event}
+                onClose={() => setIsFullscreen(false)}
+              />
+            )}
           </div>
 
           {/* Round status — sits below the video container */}
@@ -301,6 +341,181 @@ export default function EventDetails() {
         rules={event.rules}
       />
     </PageContainer>
+  );
+}
+
+function FullscreenBetOverlay({
+  event,
+  onClose,
+}: {
+  event: StreamEvent;
+  onClose: () => void;
+}) {
+  const { user, profile, refreshProfile } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<BetOutcome | null>(
+    event.outcomes[0] ?? null,
+  );
+  const [stake, setStake] = useState<string>("10");
+  const [submitting, setSubmitting] = useState(false);
+
+  const balanceDollars = (profile?.balance_cents ?? 0) / 100;
+  const stakeNum = Math.max(0, Number(stake) || 0);
+  const potentialPayout = selected
+    ? (stakeNum * selected.odds).toFixed(2)
+    : "0.00";
+  const stakeExceeds = !!user && stakeNum > balanceDollars;
+  const canPlace = !!selected && stakeNum > 0 && !stakeExceeds && !submitting;
+  const { min: oddsMin, max: oddsMax } = oddsRange(
+    event.outcomes.map((o) => o.odds),
+  );
+
+  // Swipe-up to close — attached at window level so the overlay's root can
+  // stay pointer-events-none, letting taps on the IG play button reach the
+  // iframe behind it.
+  useEffect(() => {
+    let startY: number | null = null;
+    const onStart = (e: TouchEvent) => {
+      startY = e.touches[0].clientY;
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (startY === null) return;
+      const dy = e.changedTouches[0].clientY - startY;
+      startY = null;
+      if (dy < -60) onClose();
+    };
+    window.addEventListener("touchstart", onStart, { passive: true });
+    window.addEventListener("touchend", onEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchend", onEnd);
+    };
+  }, [onClose]);
+
+  async function handlePlace() {
+    if (!user) {
+      navigate(
+        `/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`,
+      );
+      return;
+    }
+    if (!canPlace || !selected) return;
+    setSubmitting(true);
+    try {
+      await placeBet(event.id, selected.id, Math.round(stakeNum * 100));
+      await refreshProfile();
+      queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
+      toast.success(
+        `Bet placed: $${stakeNum.toFixed(2)} on "${selected.label}"`,
+        {
+          description: `Potential payout $${potentialPayout}.`,
+        },
+      );
+      onClose();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to place bet";
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-30">
+      {/* X close button — top right */}
+      <button
+        type="button"
+        aria-label="Close fullscreen"
+        onClick={onClose}
+        className="pointer-events-auto absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur transition-colors hover:bg-black/75"
+      >
+        <X className="h-5 w-5" />
+      </button>
+
+      {/* Bottom controls: outcomes column + stake chips on the left, payout + Place a bet on the right */}
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
+        <div className="flex items-end justify-between gap-3">
+          {/* Left: outcome column directly above the stake row */}
+          <div className="pointer-events-auto space-y-2">
+            <div className="flex flex-col items-start gap-1.5">
+              {event.outcomes.map((o) => {
+                const active = selected?.id === o.id;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => setSelected(o)}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-full bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition-colors",
+                      active && "bg-primary text-primary-foreground ring-2 ring-primary",
+                    )}
+                  >
+                    <span className="max-w-[150px] truncate text-left">
+                      {o.label}
+                    </span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
+                        active
+                          ? "bg-white text-primary"
+                          : oddsPillClasses(o.odds, oddsMin, oddsMax),
+                      )}
+                    >
+                      {o.odds.toFixed(2)}×
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[5, 10, 25, 50].map((amount) => {
+                const active = stakeNum === amount;
+                return (
+                  <button
+                    key={amount}
+                    type="button"
+                    onClick={() => setStake(String(amount))}
+                    className={cn(
+                      "rounded-md bg-black/45 px-3 py-1.5 text-xs font-bold text-white backdrop-blur transition-colors",
+                      active && "bg-primary text-primary-foreground ring-2 ring-primary",
+                    )}
+                  >
+                    ${amount}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right: potential payout + Place a bet */}
+          <div className="pointer-events-auto flex flex-shrink-0 flex-col items-end gap-2">
+            <div className="text-right">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-white/70">
+                Potential payout
+              </p>
+              <p className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white drop-shadow">
+                ${potentialPayout}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="accent"
+              onClick={handlePlace}
+              disabled={!!user && !canPlace}
+            >
+              {!user
+                ? "Sign in to bet"
+                : submitting
+                  ? "Placing…"
+                  : stakeExceeds
+                    ? "Insufficient"
+                    : "Place a bet"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
