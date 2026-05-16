@@ -115,8 +115,8 @@ export default function EventDetails() {
   return (
     <PageContainer className="pt-4 lg:pt-[18px]">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
-        <div className="min-w-0 space-y-4 lg:space-y-6">
-          <div className="min-w-0 space-y-3">
+        <div className="contents lg:block lg:min-w-0 lg:space-y-6">
+          <div className="contents lg:block lg:min-w-0 lg:space-y-3">
           {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop. Sticky on mobile so it pins to the top of the viewport as the user scrolls. */}
           <div className="sticky top-0 z-20 -mx-4 -mt-4 aspect-[8/5] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:static lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30">
             {isLive ? (
