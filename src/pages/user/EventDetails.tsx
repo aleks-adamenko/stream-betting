@@ -50,6 +50,7 @@ export default function EventDetails() {
   const [overlaysHidden, setOverlaysHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const betPanelRef = useRef<HTMLDivElement>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
 
   // Hide LIVE / viewers / title overlay once the user starts scrolling so the
   // sticky video container looks like a clean fixed player while reading.
@@ -131,6 +132,8 @@ export default function EventDetails() {
           <div className="contents lg:block lg:min-w-0 lg:space-y-3">
           {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop. Sticky on mobile so it pins to the top of the viewport as the user scrolls. Mobile only: tapping it expands to fullscreen (X close + bet overlay). */}
           <div
+            ref={videoContainerRef}
+            data-fullscreen-video={isFullscreen ? "true" : undefined}
             className={cn(
               isFullscreen
                 ? "fixed inset-0 z-[60] bg-black"
@@ -165,23 +168,17 @@ export default function EventDetails() {
             <div
               className={cn(
                 "pointer-events-none absolute left-4 top-4 flex items-center gap-2 transition-opacity duration-200",
-                overlaysHidden && "opacity-0 lg:opacity-100",
+                overlaysHidden && !isFullscreen && "opacity-0 lg:opacity-100",
               )}
             >
               {isLive && <LiveBadge />}
+              {isLive && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+                  <Users className="h-3.5 w-3.5" />
+                  {numberFormatter.format(event.viewersCount)} watching
+                </span>
+              )}
             </div>
-
-            {isLive && (
-              <span
-                className={cn(
-                  "pointer-events-none absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur transition-opacity duration-200",
-                  overlaysHidden && "opacity-0 lg:opacity-100",
-                )}
-              >
-                <Users className="h-3.5 w-3.5" />
-                {numberFormatter.format(event.viewersCount)} watching
-              </span>
-            )}
 
             {isScheduled && (
               <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
@@ -250,10 +247,11 @@ export default function EventDetails() {
               </div>
             </div>
 
-            {/* Fullscreen-only overlays: X close + bet controls + swipe-up */}
+            {/* Fullscreen-only overlays: X close + bet controls + drag-down close */}
             {isFullscreen && (
               <FullscreenBetOverlay
                 event={event}
+                containerRef={videoContainerRef}
                 onClose={() => setIsFullscreen(false)}
               />
             )}
@@ -346,9 +344,11 @@ export default function EventDetails() {
 
 function FullscreenBetOverlay({
   event,
+  containerRef,
   onClose,
 }: {
   event: StreamEvent;
+  containerRef: React.RefObject<HTMLDivElement>;
   onClose: () => void;
 }) {
   const { user, profile, refreshProfile } = useAuth();
@@ -359,6 +359,7 @@ function FullscreenBetOverlay({
   );
   const [stake, setStake] = useState<string>("10");
   const [submitting, setSubmitting] = useState(false);
+  const [dragY, setDragY] = useState(0);
 
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
   const stakeNum = Math.max(0, Number(stake) || 0);
@@ -371,27 +372,84 @@ function FullscreenBetOverlay({
     event.outcomes.map((o) => o.odds),
   );
 
-  // Swipe-up to close — attached at window level so the overlay's root can
-  // stay pointer-events-none, letting taps on the IG play button reach the
-  // iframe behind it.
+  // Drag-down to close — listen at window level so iframe taps still work.
+  // Below the 8px deadzone the finger movement is treated as a tap; beyond
+  // it the entire fullscreen container follows the finger via transform.
+  // Release past 120px commits the close, otherwise snaps back.
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
     let startY: number | null = null;
+    let startX: number | null = null;
+    let dragging = false;
+    let currentDy = 0;
+    const DEADZONE = 8;
+    const CLOSE_THRESHOLD = 120;
+
     const onStart = (e: TouchEvent) => {
       startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+      dragging = false;
+      currentDy = 0;
     };
-    const onEnd = (e: TouchEvent) => {
-      if (startY === null) return;
-      const dy = e.changedTouches[0].clientY - startY;
+    const onMove = (e: TouchEvent) => {
+      if (startY === null || startX === null) return;
+      const dy = e.touches[0].clientY - startY;
+      const dx = e.touches[0].clientX - startX;
+      // Only commit to a vertical drag once past the deadzone and mostly
+      // vertical — otherwise let the tap propagate to whatever is below.
+      if (!dragging) {
+        if (Math.abs(dy) < DEADZONE || Math.abs(dx) > Math.abs(dy)) return;
+        dragging = true;
+      }
+      // Resist upward drag (don't move above 0); allow downward.
+      currentDy = Math.max(0, dy);
+      setDragY(currentDy);
+    };
+    const onEnd = () => {
+      if (!dragging) {
+        startY = null;
+        startX = null;
+        return;
+      }
+      const finalDy = currentDy;
       startY = null;
-      if (dy < -60) onClose();
+      startX = null;
+      dragging = false;
+      currentDy = 0;
+      if (finalDy >= CLOSE_THRESHOLD) {
+        onClose();
+      } else {
+        setDragY(0);
+      }
     };
     window.addEventListener("touchstart", onStart, { passive: true });
+    window.addEventListener("touchmove", onMove, { passive: true });
     window.addEventListener("touchend", onEnd, { passive: true });
+    window.addEventListener("touchcancel", onEnd, { passive: true });
     return () => {
       window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchmove", onMove);
       window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onEnd);
     };
-  }, [onClose]);
+  }, [containerRef, onClose]);
+
+  // Apply drag transform to the fullscreen container.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (dragY > 0) {
+      container.style.transform = `translateY(${dragY}px)`;
+      container.style.transition = "none";
+      // Slight fade-out as it drags down
+      container.style.opacity = String(Math.max(0.4, 1 - dragY / 600));
+    } else {
+      container.style.transform = "";
+      container.style.transition = "transform 200ms ease-out, opacity 200ms ease-out";
+      container.style.opacity = "";
+    }
+  }, [dragY, containerRef]);
 
   async function handlePlace() {
     if (!user) {
@@ -433,88 +491,100 @@ function FullscreenBetOverlay({
         <X className="h-5 w-5" />
       </button>
 
-      {/* Bottom controls: outcomes column + stake chips on the left, payout + Place a bet on the right */}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
-        <div className="flex items-end justify-between gap-3">
-          {/* Left: outcome column directly above the stake row */}
-          <div className="pointer-events-auto space-y-2">
-            <div className="flex flex-col items-start gap-1.5">
-              {event.outcomes.map((o) => {
-                const active = selected?.id === o.id;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => setSelected(o)}
-                    className={cn(
-                      "flex items-center justify-between gap-2 rounded-full bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition-colors",
-                      active && "bg-primary text-primary-foreground ring-2 ring-primary",
-                    )}
-                  >
-                    <span className="max-w-[150px] truncate text-left">
-                      {o.label}
-                    </span>
-                    <span
+      {/* Bottom controls — only when authenticated. Anonymous users see a single
+          centered Sign in to bet CTA so the video can be enjoyed unobstructed. */}
+      {user ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
+          <div className="flex items-end justify-between gap-3">
+            {/* Left: outcome column directly above the stake row */}
+            <div className="pointer-events-auto space-y-2">
+              <div className="flex flex-col items-start gap-1.5">
+                {event.outcomes.map((o) => {
+                  const active = selected?.id === o.id;
+                  return (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => setSelected(o)}
                       className={cn(
-                        "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
-                        active
-                          ? "bg-white text-primary"
-                          : oddsPillClasses(o.odds, oddsMin, oddsMax),
+                        "flex items-center justify-between gap-2 rounded-full bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition-colors",
+                        active && "bg-primary text-primary-foreground ring-2 ring-primary",
                       )}
                     >
-                      {o.odds.toFixed(2)}×
-                    </span>
-                  </button>
-                );
-              })}
+                      <span className="max-w-[150px] truncate text-left">
+                        {o.label}
+                      </span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
+                          active
+                            ? "bg-white text-primary"
+                            : oddsPillClasses(o.odds, oddsMin, oddsMax),
+                        )}
+                      >
+                        {o.odds.toFixed(2)}×
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[5, 10, 25, 50].map((amount) => {
+                  const active = stakeNum === amount;
+                  return (
+                    <button
+                      key={amount}
+                      type="button"
+                      onClick={() => setStake(String(amount))}
+                      className={cn(
+                        "rounded-md bg-black/45 px-3 py-1.5 text-xs font-bold text-white backdrop-blur transition-colors",
+                        active && "bg-primary text-primary-foreground ring-2 ring-primary",
+                      )}
+                    >
+                      ${amount}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {[5, 10, 25, 50].map((amount) => {
-                const active = stakeNum === amount;
-                return (
-                  <button
-                    key={amount}
-                    type="button"
-                    onClick={() => setStake(String(amount))}
-                    className={cn(
-                      "rounded-md bg-black/45 px-3 py-1.5 text-xs font-bold text-white backdrop-blur transition-colors",
-                      active && "bg-primary text-primary-foreground ring-2 ring-primary",
-                    )}
-                  >
-                    ${amount}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Right: potential payout + Place a bet */}
-          <div className="pointer-events-auto flex flex-shrink-0 flex-col items-end gap-2">
-            <div className="text-right">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-white/70">
-                Potential payout
-              </p>
-              <p className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white drop-shadow">
-                ${potentialPayout}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="accent"
-              onClick={handlePlace}
-              disabled={!!user && !canPlace}
-            >
-              {!user
-                ? "Sign in to bet"
-                : submitting
+            {/* Right: potential payout + Place a bet */}
+            <div className="pointer-events-auto flex flex-shrink-0 flex-col items-end gap-2">
+              <div className="text-right">
+                <p className="text-[10px] font-medium uppercase tracking-wider text-white/70">
+                  Potential payout
+                </p>
+                <p className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white drop-shadow">
+                  ${potentialPayout}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="accent"
+                onClick={handlePlace}
+                disabled={!canPlace}
+              >
+                {submitting
                   ? "Placing…"
                   : stakeExceeds
                     ? "Insufficient"
                     : "Place a bet"}
-            </Button>
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-black/70 via-black/30 to-transparent p-4 pt-12">
+          <Button
+            type="button"
+            variant="accent"
+            onClick={handlePlace}
+            className="pointer-events-auto"
+          >
+            Sign in to bet
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

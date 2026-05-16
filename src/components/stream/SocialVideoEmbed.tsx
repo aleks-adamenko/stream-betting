@@ -9,6 +9,8 @@
  */
 import { useEffect, useState } from "react";
 
+import { cn } from "@/lib/utils";
+
 type Platform = "instagram" | "tiktok";
 
 interface EmbedConfig {
@@ -66,6 +68,7 @@ export function SocialVideoEmbed({ url, title, fullscreen }: SocialVideoEmbedPro
   // is scaled down to match — keeps the visible video portion sized
   // to the container's height instead of overflowing.
   const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mq = window.matchMedia("(max-width: 1023px)");
@@ -74,21 +77,39 @@ export function SocialVideoEmbed({ url, title, fullscreen }: SocialVideoEmbedPro
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () =>
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
   if (!cfg) return null;
+  const isFullscreenIg = !!fullscreen && cfg.platform === "instagram";
+  // Fullscreen IG: scale the 9:16 video to *cover* the viewport (whichever of
+  // width/height edge is reached last drives the scale). Capped at 1.4 so we
+  // don't crop more than ~14% off each side on ultra-tall phones.
+  const coverScale =
+    viewport.w > 0 ? (9 * viewport.h) / (16 * viewport.w) : 1.0;
+  const fullscreenIgScale = Math.min(1.4, Math.max(1.0, coverScale));
   const scale =
     cfg.platform === "instagram" && isCompactViewport
       ? fullscreen
-        ? 1
+        ? fullscreenIgScale
         : 0.45
       : cfg.scale;
   // Push the iframe up by the scaled header height so the post header
   // sits just above the visible area after scaling.
   const topOffset = Math.round(cfg.headerPx * scale);
-  // After CSS transform: scale, the visual height is iframe_css_height * scale.
-  // To make the visual content reach the container bottom (i.e. the crop line
-  // sits at the very bottom of the container), the CSS height must be
-  // container/scale so that height*scale === container.
+  // For most cases: visual content reaches the container bottom when CSS
+  // height ≈ container/scale. For fullscreen IG specifically, the iframe
+  // also needs to be tall enough to render the FULL 9:16 video region
+  // (54px header + 16/9 * iframe-css-width). Use CSS max() to satisfy both.
   const heightPct = Math.round(100 / scale);
+  const iframeHeight = isFullscreenIg
+    ? `max(${heightPct}% + ${cfg.headerPx}px, calc(${cfg.headerPx}px + 100vw * 16 / 9))`
+    : `calc(${heightPct}% + ${cfg.headerPx}px)`;
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
       <iframe
@@ -97,7 +118,7 @@ export function SocialVideoEmbed({ url, title, fullscreen }: SocialVideoEmbedPro
         className="absolute left-0 w-full border-0"
         style={{
           top: `-${topOffset}px`,
-          height: `calc(${heightPct}% + ${cfg.headerPx}px)`,
+          height: iframeHeight,
           transform: `scale(${scale})`,
           transformOrigin: "top center",
         }}
@@ -110,14 +131,22 @@ export function SocialVideoEmbed({ url, title, fullscreen }: SocialVideoEmbedPro
       {/* Mask the residual footer / caption / action row */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-0 bg-black"
+        className={cn(
+          "absolute inset-x-0 bottom-0 bg-black",
+          // In fullscreen, the mask also has to swallow taps so the IG chrome
+          // (caption / actions / "View on Instagram") behind it doesn't react
+          // to user interaction. The native play button sits in the upper
+          // portion of the iframe, so this doesn't interfere with it.
+          isFullscreenIg ? "pointer-events-auto" : "pointer-events-none",
+        )}
         style={
-          fullscreen && cfg.platform === "instagram"
-            ? // In fullscreen, the IG reel renders the video at 9:16 of iframe
-              // width starting at the top, then IG chrome (caption, actions,
-              // likes) below. Mask everything below the natural video bottom
-              // so only the video frame is visible.
-              { height: `calc(100dvh - 100vw * 16 / 9)` }
+          isFullscreenIg
+            ? // Gap between visual video bottom (= 100vw * 16/9 * scale) and
+              // viewport bottom. Zero when scale exactly fills the viewport;
+              // positive when scale is capped below cover-scale.
+              {
+                height: `max(0px, calc(100dvh - 100vw * 16 * ${scale} / 9))`,
+              }
             : { height: `${cfg.bottomMask}px` }
         }
       />

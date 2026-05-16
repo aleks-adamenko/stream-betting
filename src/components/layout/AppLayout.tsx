@@ -60,6 +60,13 @@ export function AppLayout() {
         startY = null;
         return;
       }
+      // Don't engage the pull-to-reveal gesture when the touch starts inside
+      // the fullscreen video container — that owns its own drag-to-close.
+      const target = e.target as Element | null;
+      if (target?.closest?.('[data-fullscreen-video="true"]')) {
+        startY = null;
+        return;
+      }
       startY = e.touches[0].clientY;
       pulling = false;
       lastDelta = 0;
