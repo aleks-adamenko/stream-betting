@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Loader2, Mail, Lock, Eye, EyeOff, Zap, MailCheck } from "lucide-react";
 
@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 type Step = "form" | "check-email";
 
 export default function SignUp() {
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = params.get("next") ?? "/";
 
@@ -42,7 +43,7 @@ export default function SignUp() {
     }
 
     setSubmitting(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -55,6 +56,18 @@ export default function SignUp() {
       setError(error.message);
       return;
     }
+
+    // When email confirmation is disabled in the Supabase project,
+    // signUp() returns a session immediately — auto-log in instead of
+    // showing the "check your inbox" screen.
+    if (data.session) {
+      toast.success("Welcome to LiveRush ⚡", {
+        description: "Your account is ready.",
+      });
+      navigate(next, { replace: true });
+      return;
+    }
+
     toast.success("Check your inbox", {
       description: "Click the confirm link in the email we sent.",
     });

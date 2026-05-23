@@ -1,33 +1,54 @@
-import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Eye, EyeOff, Loader2, Lock, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { Loader2, Lock, Eye, EyeOff, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthLayout, AuthTitle } from "@/components/layout/AuthLayout";
 import { supabase } from "@/integrations/supabase/client";
 
+/**
+ * Step 2 of password recovery.
+ *
+ * By the time we land here, `AuthCallback` has already exchanged the
+ * email token for a recovery session. We just verify the session is
+ * present and let the user pick a new password. Same primitive as
+ * sign-up confirmation — link in email -> /auth/callback -> session.
+ */
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const [email, setEmail] = useState(params.get("email") ?? "");
-  const [code, setCode] = useState("");
+
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkInvalid, setLinkInvalid] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Recovery session must already exist (the email link took the user
+  // through /auth/callback first). If we don't see one, the link is
+  // invalid / expired and we send them back to forgot-password.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (cancelled) return;
+      if (error || !data.session) {
+        setLinkInvalid(true);
+      }
+      setCheckingSession(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (code.length !== 6) {
-      setError("Enter the 6-digit code from your email.");
-      return;
-    }
     if (password.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
@@ -38,18 +59,6 @@ export default function ResetPassword() {
     }
 
     setSubmitting(true);
-
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: "recovery",
-    });
-    if (verifyError) {
-      setError(verifyError.message);
-      setSubmitting(false);
-      return;
-    }
-
     const { error: updateError } = await supabase.auth.updateUser({ password });
     setSubmitting(false);
 
@@ -62,44 +71,53 @@ export default function ResetPassword() {
     navigate("/", { replace: true });
   }
 
+  if (checkingSession) {
+    return (
+      <AuthLayout>
+        <div className="flex h-32 items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-white/70" />
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  if (linkInvalid) {
+    return (
+      <AuthLayout>
+        <AuthTitle subtitle="This reset link is invalid or has expired. Request a fresh one to continue.">
+          Reset link expired
+        </AuthTitle>
+
+        <Button
+          asChild
+          size="lg"
+          className="mt-6 w-full gap-2 text-base text-[#1F2679] ring-0 hover:text-[#1F2679]"
+          style={{ backgroundColor: "#FEE53A", backgroundImage: "none" }}
+        >
+          <Link to="/auth/forgot-password">
+            Request a new link <Zap className="h-4 w-4 fill-current" />
+          </Link>
+        </Button>
+
+        <p className="mt-6 text-center text-sm text-white/75">
+          <Link
+            to="/auth/sign-in"
+            className="font-bold text-[#FEE53A] underline-offset-4 hover:underline"
+          >
+            Back to sign in
+          </Link>
+        </p>
+      </AuthLayout>
+    );
+  }
+
   return (
     <AuthLayout>
-      <AuthTitle subtitle="Enter the code from your email and a new password.">
+      <AuthTitle subtitle="Choose a new password for your account.">
         Reset password
       </AuthTitle>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-        <div className="space-y-2">
-          <label htmlFor="email" className="text-sm font-medium">
-            Email
-          </label>
-          <Input
-            id="email"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="border-white/20 bg-white/10 text-white placeholder:text-white/40"
-            placeholder="you@example.com"
-          />
-        </div>
-        <div className="space-y-2">
-          <label htmlFor="code" className="text-sm font-medium">
-            6-digit code
-          </label>
-          <Input
-            id="code"
-            inputMode="numeric"
-            pattern="\d{6}"
-            maxLength={6}
-            autoComplete="one-time-code"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-            className="border-white/20 bg-white/10 text-center text-2xl font-bold tracking-[0.5em] text-white placeholder:text-white/40"
-            placeholder="000000"
-            required
-          />
-        </div>
         <div className="space-y-2">
           <label htmlFor="password" className="text-sm font-medium">
             New password
@@ -127,6 +145,7 @@ export default function ResetPassword() {
             </button>
           </div>
         </div>
+
         <div className="space-y-2">
           <label htmlFor="confirm" className="text-sm font-medium">
             Confirm new password
@@ -154,11 +173,13 @@ export default function ResetPassword() {
             </button>
           </div>
         </div>
+
         {error && (
           <p className="rounded-lg bg-destructive/30 px-3 py-2 text-sm text-destructive-foreground">
             {error}
           </p>
         )}
+
         <Button
           type="submit"
           size="lg"
@@ -178,7 +199,7 @@ export default function ResetPassword() {
 
       <p className="mt-6 text-center text-sm text-white/75">
         <Link to="/auth/forgot-password" className="font-bold text-[#FEE53A] underline-offset-4 hover:underline">
-          Resend code
+          Request a new link
         </Link>
       </p>
     </AuthLayout>
