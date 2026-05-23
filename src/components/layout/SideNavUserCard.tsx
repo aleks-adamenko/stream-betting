@@ -3,12 +3,13 @@ import { Wallet, ListChecks, Plus, Bell } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useMyBets } from "@/hooks/useMyBets";
+import { totalBalanceCents } from "@/lib/balance";
 
 export function SideNavUserCard() {
   const { profile, user } = useAuth();
   const { data: bets } = useMyBets();
   const openBetsCount = bets?.filter((b) => b.status === "open").length ?? 0;
-  const balanceDollars = (profile?.balance_cents ?? 0) / 100;
+  const balanceDollars = totalBalanceCents(profile?.balance_cents) / 100;
   const handle = profile?.display_name ?? user?.email?.split("@")[0] ?? "you";
   const initials = handle.slice(0, 2).toUpperCase();
 
@@ -74,7 +75,7 @@ export function SideNavUserCard() {
 
         {/* Plus button — accent variant, vertically centered to the whole container */}
         <Link
-          to="/balance/top-up"
+          to="/balance"
           aria-label="Add funds"
           className="absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[hsl(227_47%_21%)] shadow-lg ring-4 ring-[#FED448]/40 transition-all duration-200 hover:-translate-y-1/2 hover:scale-105 hover:shadow-xl"
           style={{ backgroundImage: "linear-gradient(90deg,#FFDD49,#FFBE3B)" }}

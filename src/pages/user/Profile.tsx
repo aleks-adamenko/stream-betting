@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { useAuth } from "@/contexts/AuthContext";
+import { totalBalanceCents } from "@/lib/balance";
 import {
   uploadAvatar,
   updateDisplayName,
@@ -30,7 +31,7 @@ export default function Profile() {
     setNameDraft(profile?.display_name ?? "");
   }, [profile?.display_name]);
 
-  const balance = profile?.balance_cents ?? 0;
+  const balance = totalBalanceCents(profile?.balance_cents);
   const fallbackHandle =
     profile?.display_name ?? user?.email?.split("@")[0] ?? "you";
   const initials = fallbackHandle.slice(0, 2).toUpperCase();
@@ -132,7 +133,7 @@ export default function Profile() {
               {dollars(balance)}
             </span>
             <Button asChild size="lg" variant="accent" className="ml-auto">
-              <Link to="/balance/top-up">
+              <Link to="/balance">
                 <Plus className="h-4 w-4" strokeWidth={3} /> Top up
               </Link>
             </Button>

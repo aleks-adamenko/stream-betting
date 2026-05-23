@@ -1,5 +1,5 @@
 import { Fragment, useMemo } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { StreamCard } from "@/components/feed/StreamCard";
 import { FeedSkeleton } from "@/components/feed/FeedSkeleton";
@@ -80,8 +80,8 @@ export default function Home() {
 function RewardsBannerCard() {
   return (
     <article className="relative mx-auto w-full max-w-[520px] snap-start scroll-mt-4">
-      <button
-        type="button"
+      <Link
+        to="/rewards"
         aria-label="Rewards"
         className="block w-full overflow-hidden rounded-2xl border border-border/40 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
@@ -90,7 +90,7 @@ function RewardsBannerCard() {
           alt=""
           className="block h-auto w-full"
         />
-      </button>
+      </Link>
     </article>
   );
 }

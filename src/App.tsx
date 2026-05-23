@@ -12,7 +12,8 @@ import EventDetails from "@/pages/user/EventDetails";
 import MyBets from "@/pages/user/MyBets";
 import Profile from "@/pages/user/Profile";
 import Notifications from "@/pages/user/Notifications";
-import TopUp from "@/pages/user/TopUp";
+import Balance from "@/pages/user/Balance";
+import Rewards from "@/pages/user/Rewards";
 import Company from "@/pages/user/Company";
 import SignUp from "@/pages/auth/SignUp";
 import SignIn from "@/pages/auth/SignIn";
@@ -74,10 +75,18 @@ const App = () => (
               }
             />
             <Route
-              path="/balance/top-up"
+              path="/balance"
               element={
                 <ProtectedRoute>
-                  <TopUp />
+                  <Balance />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/rewards"
+              element={
+                <ProtectedRoute>
+                  <Rewards />
                 </ProtectedRoute>
               }
             />

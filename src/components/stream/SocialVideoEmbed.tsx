@@ -67,8 +67,19 @@ export function SocialVideoEmbed({ url, title, fullscreen }: SocialVideoEmbedPro
   // Mobile/tablet container is half-height vs desktop, so the IG embed
   // is scaled down to match — keeps the visible video portion sized
   // to the container's height instead of overflowing.
-  const [isCompactViewport, setIsCompactViewport] = useState(false);
-  const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  const [isCompactViewport, setIsCompactViewport] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia("(max-width: 1023px)").matches
+      : false,
+  );
+  // Lazy-initialize from window so first render already uses the correct
+  // viewport ratio — otherwise the iframe loads at scale=1.0 (where IG chrome
+  // is visible) before useEffect catches up.
+  const [viewport, setViewport] = useState(() =>
+    typeof window === "undefined"
+      ? { w: 0, h: 0 }
+      : { w: window.innerWidth, h: window.innerHeight },
+  );
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mq = window.matchMedia("(max-width: 1023px)");
@@ -103,12 +114,13 @@ export function SocialVideoEmbed({ url, title, fullscreen }: SocialVideoEmbedPro
   // sits just above the visible area after scaling.
   const topOffset = Math.round(cfg.headerPx * scale);
   // For most cases: visual content reaches the container bottom when CSS
-  // height ≈ container/scale. For fullscreen IG specifically, the iframe
-  // also needs to be tall enough to render the FULL 9:16 video region
-  // (54px header + 16/9 * iframe-css-width). Use CSS max() to satisfy both.
+  // height ≈ container/scale. For fullscreen IG, the iframe must be tall
+  // enough to render the FULL 9:16 video region (54px header + 16/9 *
+  // iframe-css-width). Bypass the percentage variant so URL-bar showing /
+  // hiding can't make the iframe shorter than the video region.
   const heightPct = Math.round(100 / scale);
   const iframeHeight = isFullscreenIg
-    ? `max(${heightPct}% + ${cfg.headerPx}px, calc(${cfg.headerPx}px + 100vw * 16 / 9))`
+    ? `calc(${cfg.headerPx}px + 100vw * 16 / 9)`
     : `calc(${heightPct}% + ${cfg.headerPx}px)`;
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">

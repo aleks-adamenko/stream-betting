@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, UserCircle } from "lucide-react";
 
 import logoUrl from "@/assets/live-rush-logo-2.png";
 import { useAuth } from "@/contexts/AuthContext";
+import { totalBalanceCents } from "@/lib/balance";
 
 interface EventMobileTopBarProps {
   style?: CSSProperties;
@@ -12,7 +13,7 @@ interface EventMobileTopBarProps {
 export function EventMobileTopBar({ style }: EventMobileTopBarProps) {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
-  const balanceDollars = (profile?.balance_cents ?? 0) / 100;
+  const balanceDollars = totalBalanceCents(profile?.balance_cents) / 100;
 
   return (
     <header
@@ -44,7 +45,7 @@ export function EventMobileTopBar({ style }: EventMobileTopBarProps) {
           {user && (
             <div className="flex items-center gap-2 rounded-full bg-white py-1 pl-1 pr-3 shadow-md ring-1 ring-primary/10">
               <Link
-                to="/balance/top-up"
+                to="/balance"
                 aria-label="Add funds"
                 className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[hsl(227_47%_21%)] shadow-md ring-4 ring-[#FED448]/40 transition-transform hover:scale-105"
                 style={{ backgroundImage: "linear-gradient(90deg,#FFDD49,#FFBE3B)" }}

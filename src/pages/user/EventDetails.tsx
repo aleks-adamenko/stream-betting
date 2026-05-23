@@ -137,7 +137,11 @@ export default function EventDetails() {
             className={cn(
               isFullscreen
                 ? "fixed inset-0 z-[60] bg-black"
-                : "sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:static lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30",
+                : // `lg:relative` (not `lg:static`) so the title overlay below
+                  // anchors to the video container on desktop — `static` removes
+                  // the positioning context and the overlay otherwise falls
+                  // back to the viewport, appearing as a sticky page-bottom bar.
+                  "sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:relative lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30",
             )}
           >
             {isLive ? (
@@ -239,7 +243,7 @@ export default function EventDetails() {
                     type="button"
                     variant="accent"
                     onClick={handleHeaderBet}
-                    className="pointer-events-auto flex-shrink-0"
+                    className="pointer-events-auto flex-shrink-0 lg:hidden"
                   >
                     {user ? "Place a bet" : "Sign in to bet"}
                   </Button>
@@ -294,8 +298,8 @@ export default function EventDetails() {
           </section>
 
           {/* Rewards banner — desktop only; mobile renders this after the bet panel inside the aside */}
-          <button
-            type="button"
+          <Link
+            to="/rewards"
             aria-label="Rewards"
             className="hidden w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:block"
           >
@@ -304,7 +308,7 @@ export default function EventDetails() {
               alt=""
               className="block h-auto w-full"
             />
-          </button>
+          </Link>
         </div>
 
         {/* Right-side / bottom panel */}
@@ -319,13 +323,13 @@ export default function EventDetails() {
             )}
           </div>
           {/* Mobile-only rewards banner — sits between bet panel and chat */}
-          <button
-            type="button"
+          <Link
+            to="/rewards"
             aria-label="Rewards"
             className="order-2 block w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:hidden"
           >
             <img src={rewardsBannerImg} alt="" className="block h-auto w-full" />
-          </button>
+          </Link>
           <div className="order-3 lg:order-3">
             <ChatPanel />
           </div>
@@ -815,7 +819,13 @@ function BetPanel({ event }: { event: StreamEvent }) {
         </p>
       )}
 
-      <Button onClick={handlePlaceBet} size="lg" className="mt-4 w-full" disabled={!canPlace && !!user}>
+      <Button
+        onClick={handlePlaceBet}
+        variant="accent"
+        size="lg"
+        className="mt-4 w-full"
+        disabled={!canPlace && !!user}
+      >
         {!user
           ? "Sign in to place bet"
           : submitting
