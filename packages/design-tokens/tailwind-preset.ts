@@ -1,8 +1,13 @@
+/**
+ * Shared Tailwind preset for the LiveRush monorepo. Apps merge it in via
+ * `presets: [preset]` in their own `tailwind.config.ts`, then add their own
+ * `content` globs on top.
+ */
 import type { Config } from "tailwindcss";
+import tailwindAnimate from "tailwindcss-animate";
 
-export default {
+const preset = {
   darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
   prefix: "",
   theme: {
     container: {
@@ -144,5 +149,7 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
-} satisfies Config;
+  plugins: [tailwindAnimate],
+} satisfies Partial<Config>;
+
+export default preset;

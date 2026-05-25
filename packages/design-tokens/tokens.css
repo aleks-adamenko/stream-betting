@@ -1,8 +1,12 @@
+/**
+ * LiveRush design tokens — sourced from docs/design-system.md.
+ * Imported by every app's index.css so the design system stays a single
+ * source of truth.
+ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* stream-betting design tokens — sourced from docs/design-system.md */
 
 @layer base {
   :root {

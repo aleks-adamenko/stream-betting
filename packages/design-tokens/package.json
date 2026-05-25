@@ -1,0 +1,14 @@
+{
+  "name": "@liverush/design-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tokens.css": "./tokens.css",
+    "./tailwind-preset": "./tailwind-preset.ts"
+  },
+  "peerDependencies": {
+    "tailwindcss": "^3.0.0",
+    "tailwindcss-animate": "^1.0.0"
+  }
+}

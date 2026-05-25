@@ -1,0 +1,4 @@
+/* Design tokens, base layer, and shared utility classes all live in the
+ * @liverush/design-tokens package so studio + admin can share the same
+ * source of truth. */
+@import "@liverush/design-tokens/tokens.css";
