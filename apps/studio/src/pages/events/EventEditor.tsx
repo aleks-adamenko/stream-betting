@@ -10,6 +10,7 @@ import {
   Plus,
   Save,
   Send,
+  Sparkles,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -18,21 +19,38 @@ import { Button, Input } from "@liverush/ui";
 import { cn } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { LiveStreamTest } from "@/components/LiveStreamTest";
 
 type RoundFormat = "time" | "event";
 type Outcome = { id?: string; label: string; odds: string; sort_order: number };
 
-const COVER_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
+// Supabase RPC errors are PostgrestError plain objects, not Error instances,
+// so `err instanceof Error` is false and `err.message` is on the object
+// directly. This helper pulls the most useful text out either way.
+function errMessage(err: unknown, fallback: string): string {
+  if (typeof err === "object" && err !== null) {
+    const e = err as { message?: unknown; details?: unknown; hint?: unknown };
+    const parts = [e.message, e.details, e.hint].filter(
+      (v): v is string => typeof v === "string" && v.length > 0,
+    );
+    if (parts.length > 0) return parts.join(" — ");
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+const COVER_MAX_BYTES = 300 * 1024; // 300 KB
 const COVER_ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"];
 
-const CATEGORIES = [
-  "Challenge",
-  "Sports",
-  "Gaming",
-  "Music",
-  "Cooking",
-  "Other",
-];
+// Static category for now — the user-facing dropdown was removed; once
+// categories become part of the platform UX they'll come back here.
+const DEFAULT_CATEGORY = "Challenge";
+
+// Until dynamic, pool-based odds are computed at bet-time, every outcome
+// gets seeded with the same neutral 2.00× value so the existing schema
+// constraint (odds > 1) is satisfied. Existing outcomes loaded from the
+// DB keep whatever odds they were saved with.
+const DEFAULT_ODDS = "2.00";
 
 export default function EventEditor() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -45,7 +63,10 @@ export default function EventEditor() {
 
   // Form state
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  // `category` is kept in state so existing rows that already have one
+  // round-trip cleanly, but new events get the DEFAULT_CATEGORY value.
+  // The user-facing dropdown was removed per product call.
+  const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [description, setDescription] = useState("");
   const [rules, setRules] = useState("");
   const [roundFormat, setRoundFormat] = useState<RoundFormat>("event");
@@ -55,8 +76,8 @@ export default function EventEditor() {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [outcomes, setOutcomes] = useState<Outcome[]>([
-    { label: "", odds: "2.00", sort_order: 0 },
-    { label: "", odds: "2.00", sort_order: 1 },
+    { label: "", odds: DEFAULT_ODDS, sort_order: 0 },
+    { label: "", odds: DEFAULT_ODDS, sort_order: 1 },
   ]);
   const [status, setStatus] = useState<string>("draft");
 
@@ -112,14 +133,62 @@ export default function EventEditor() {
 
   const editable = status === "draft";
   const verifiedCreator = creator?.status === "verified";
-  const validOutcomes = outcomes.filter(
-    (o) => o.label.trim() !== "" && parseFloat(o.odds) > 1,
-  );
+  // Odds are no longer user-edited (computed at bet-time later), so the
+  // only thing we check here is the label.
+  const validOutcomes = outcomes.filter((o) => o.label.trim() !== "");
   const canSave =
     title.trim().length >= 3 &&
     !!scheduledAt &&
     (roundFormat !== "time" || Number(roundDurationSec) > 0) &&
     validOutcomes.length >= 2;
+
+  // Dirty-tracking: when editing an existing draft, keep "Save changes"
+  // disabled until the form actually diverges from what's on the server.
+  // New events are always dirty (the user is composing from scratch).
+  const isDirty = useMemo(() => {
+    if (isNew) return true;
+    if (!loaded) return false;
+
+    if (title !== loaded.title) return true;
+    if (category !== loaded.category) return true;
+    if (description !== (loaded.description ?? "")) return true;
+    if (rules !== (loaded.rules ?? "")) return true;
+    if (roundFormat !== loaded.round_format) return true;
+    if (
+      roundDurationSec !== (loaded.round_duration_sec?.toString() ?? "")
+    ) {
+      return true;
+    }
+    if (scheduledAt !== toLocalDateTimeInput(loaded.scheduled_at)) return true;
+    if (videoUrl !== (loaded.video_url ?? "")) return true;
+    if (coverUrl !== (loaded.cover_url ?? null)) return true;
+
+    const loadedOutcomes = [...(loaded.outcomes ?? [])].sort(
+      (a, b) => a.sort_order - b.sort_order,
+    );
+    if (outcomes.length !== loadedOutcomes.length) return true;
+    for (let i = 0; i < outcomes.length; i++) {
+      const cur = outcomes[i];
+      const prev = loadedOutcomes[i];
+      if (cur.id !== prev.id) return true;
+      if (cur.label !== prev.label) return true;
+      // Odds aren't user-edited anymore so we don't compare them.
+    }
+    return false;
+  }, [
+    isNew,
+    loaded,
+    title,
+    category,
+    description,
+    rules,
+    roundFormat,
+    roundDurationSec,
+    scheduledAt,
+    videoUrl,
+    coverUrl,
+    outcomes,
+  ]);
 
   const canPublish = canSave && verifiedCreator;
 
@@ -135,7 +204,7 @@ export default function EventEditor() {
     }
     if (file.size > COVER_MAX_BYTES) {
       toast.error(
-        `Cover is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 2 MB.`,
+        `Cover is too large (${(file.size / 1024).toFixed(0)} KB). Max 300 KB.`,
       );
       return;
     }
@@ -162,6 +231,14 @@ export default function EventEditor() {
     } finally {
       setCoverUploading(false);
     }
+  };
+
+  // Mock for now — wires up to an image-gen service in a later phase.
+  const handleGenerateCover = () => {
+    toast.info("AI cover generation coming soon", {
+      description:
+        "We'll wire this up to an image model once the creator side is feature-complete.",
+    });
   };
 
   const saveMutation = useMutation({
@@ -221,11 +298,17 @@ export default function EventEditor() {
         }
       }
 
-      // Inserts + updates
+      // Inserts + updates. Odds aren't user-edited anymore; existing
+      // outcomes keep whatever odds they were saved with, new ones get
+      // DEFAULT_ODDS (will be replaced by pool-derived odds at bet-time).
       for (const [idx, o] of outcomes.entries()) {
         const trimmedLabel = o.label.trim();
-        const odds = parseFloat(o.odds);
-        if (!trimmedLabel || !Number.isFinite(odds) || odds <= 1) continue;
+        if (!trimmedLabel) continue;
+        const parsedOdds = parseFloat(o.odds);
+        const odds =
+          Number.isFinite(parsedOdds) && parsedOdds > 1
+            ? parsedOdds
+            : parseFloat(DEFAULT_ODDS);
         if (o.id && existingIds.has(o.id)) {
           const { error } = await supabase.rpc("update_event_outcome", {
             p_outcome_id: o.id,
@@ -254,8 +337,10 @@ export default function EventEditor() {
       if (isNew) navigate(`/events/${savedId}`, { replace: true });
     },
     onError: (err) => {
-      const message = err instanceof Error ? err.message : "Save failed";
-      toast.error(message);
+      // Log to the console so Postgrest details/hint/code show up in DevTools
+      // for the next layer of diagnosis if the toast text isn't enough.
+      console.error("Event save failed", err);
+      toast.error(errMessage(err, "Save failed"));
     },
   });
 
@@ -274,8 +359,8 @@ export default function EventEditor() {
       navigate("/events");
     },
     onError: (err) => {
-      const message = err instanceof Error ? err.message : "Publish failed";
-      toast.error(message);
+      console.error("Event publish failed", err);
+      toast.error(errMessage(err, "Publish failed"));
     },
   });
 
@@ -293,8 +378,8 @@ export default function EventEditor() {
       void queryClient.invalidateQueries({ queryKey: ["studio", "event", eventId] });
     },
     onError: (err) => {
-      const message = err instanceof Error ? err.message : "Unpublish failed";
-      toast.error(message);
+      console.error("Event unpublish failed", err);
+      toast.error(errMessage(err, "Unpublish failed"));
     },
   });
 
@@ -312,8 +397,8 @@ export default function EventEditor() {
       navigate("/events", { replace: true });
     },
     onError: (err) => {
-      const message = err instanceof Error ? err.message : "Delete failed";
-      toast.error(message);
+      console.error("Event delete failed", err);
+      toast.error(errMessage(err, "Delete failed"));
     },
   });
 
@@ -337,7 +422,7 @@ export default function EventEditor() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex items-start justify-between gap-3">
         <div>
           <Link
@@ -400,43 +485,37 @@ export default function EventEditor() {
             className="hidden"
             onChange={handleCoverChange}
           />
-          <div className="text-sm text-muted-foreground">
-            JPG / PNG / WebP, max 2 MB. Recommended 16:9.
+          <div className="flex flex-col items-start gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleGenerateCover}
+              disabled={!editable}
+            >
+              <Sparkles className="h-4 w-4" />
+              Generate image
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              JPG / PNG / WebP, max 300 KB. Recommended 16:9.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* Title + category */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
-        <div className="space-y-2">
-          <label htmlFor="title" className="text-sm font-semibold">
-            Title
-          </label>
-          <Input
-            id="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            disabled={!editable}
-            maxLength={120}
-            placeholder="What's the show?"
-          />
-        </div>
-        <div className="space-y-2">
-          <label htmlFor="category" className="text-sm font-semibold">
-            Category
-          </label>
-          <select
-            id="category"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            disabled={!editable}
-            className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-        </div>
+      {/* Title */}
+      <section className="space-y-2">
+        <label htmlFor="title" className="text-sm font-semibold">
+          Title
+        </label>
+        <Input
+          id="title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          disabled={!editable}
+          maxLength={120}
+          placeholder="What's the show?"
+        />
       </section>
 
       {/* Description + rules */}
@@ -539,14 +618,18 @@ export default function EventEditor() {
         </p>
       </section>
 
-      {/* Outcomes */}
+      {/* Outcomes — odds aren't user-edited anymore (computed from the
+          pool at bet-time later), so this collapses to just a label
+          per outcome. */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <label className="text-sm font-semibold">Bet outcomes</label>
-          <span className="text-xs text-muted-foreground">
-            Min 2, max 8.
-          </span>
+          <span className="text-xs text-muted-foreground">Min 2, max 8.</span>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Odds are calculated automatically from the betting pool once users
+          start placing bets.
+        </p>
         <ul className="space-y-2">
           {outcomes.map((o, idx) => (
             <li
@@ -565,22 +648,6 @@ export default function EventEditor() {
                 disabled={!editable}
                 placeholder="Outcome label"
                 className="flex-1"
-              />
-              <Input
-                type="number"
-                step="0.05"
-                min={1.01}
-                value={o.odds}
-                onChange={(e) =>
-                  setOutcomes((prev) =>
-                    prev.map((p, i) =>
-                      i === idx ? { ...p, odds: e.target.value } : p,
-                    ),
-                  )
-                }
-                disabled={!editable}
-                placeholder="2.00"
-                className="w-24"
               />
               <button
                 type="button"
@@ -607,7 +674,7 @@ export default function EventEditor() {
           onClick={() =>
             setOutcomes((prev) => [
               ...prev,
-              { label: "", odds: "2.00", sort_order: prev.length },
+              { label: "", odds: DEFAULT_ODDS, sort_order: prev.length },
             ])
           }
         >
@@ -616,6 +683,10 @@ export default function EventEditor() {
         </Button>
       </section>
 
+      {/* Camera check — preview-only, helps creators confirm their hardware
+          works before publishing. No recording, no upload. */}
+      <LiveStreamTest />
+
       {/* Actions */}
       <section className="flex flex-wrap items-center gap-3 border-t border-border/40 pt-6">
         <Button
@@ -623,7 +694,14 @@ export default function EventEditor() {
           variant="accent"
           size="lg"
           onClick={() => saveMutation.mutate()}
-          disabled={!canSave || !editable || saveMutation.isPending}
+          disabled={
+            !canSave ||
+            !editable ||
+            saveMutation.isPending ||
+            // Stay disabled on the edit screen until the user actually
+            // changes something — `isDirty` is always true for new events.
+            !isDirty
+          }
         >
           {saveMutation.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin" />
