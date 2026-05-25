@@ -9,7 +9,7 @@ import { MobileFooter } from "./MobileFooter";
 import { cn } from "@/lib/utils";
 import bgUrl from "@/assets/live-rush-bg.jpg";
 
-const FEED_PATHS = new Set(["/", "/live", "/trending"]);
+const FEED_PATHS = new Set(["/live", "/trending"]);
 const BAR_HEIGHT = 56;
 const PULL_TAP_TOLERANCE = 18;
 

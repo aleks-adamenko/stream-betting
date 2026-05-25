@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import logoUrl from "@/assets/live-rush-white-logo.png";
 
 const mainNav = [
-  { to: "/", label: "For you", icon: Home, exact: true },
+  { to: "/", label: "Home", icon: Home, exact: true },
   { to: "/live", label: "Live now", icon: Radio, withLiveCount: true },
   { to: "/discover", label: "Discover", icon: Compass },
   { to: "/trending", label: "Trending", icon: TrendingUp },
