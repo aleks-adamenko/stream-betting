@@ -22,10 +22,36 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
-const AVATAR_MAX_BYTES = 500 * 1024; // 500 KB
+const AVATAR_MAX_BYTES = 200 * 1024; // 200 KB — matches user-app's profile photo limit
 const AVATAR_ALLOWED_MIME = ["image/jpeg", "image/png"];
 
 type Step = 1 | 2 | 3;
+
+/** Normalize a display name into a valid handle candidate: lowercase,
+ *  spaces → underscores, strip non-[a-z0-9_], cap at 20 chars. */
+function handleFromDisplayName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 20);
+}
+
+/** Produce N candidate handles based on `base` with 1–3 random digits
+ *  appended. Truncates the base so the result still fits in 20 chars. */
+function suggestionsFor(base: string, count = 3): string[] {
+  const out = new Set<string>();
+  while (out.size < count) {
+    const digits = Math.floor(Math.random() * 900) + 10; // 10-909 → mostly 2-3 digits
+    const suffix = `_${digits}`;
+    const trimmed = base.slice(0, 20 - suffix.length);
+    if (trimmed.length >= 1) out.add(`${trimmed}${suffix}`);
+    if (out.size > 50) break; // safety
+  }
+  return Array.from(out);
+}
 
 export default function CreatorOnboarding() {
   const navigate = useNavigate();
@@ -42,21 +68,63 @@ export default function CreatorOnboarding() {
   const [tiktok, setTiktok] = useState("");
   const [youtube, setYoutube] = useState("");
 
+  // Tracks whether the user has manually typed in the handle field. If
+  // they haven't, we keep the handle auto-derived from the display name.
+  const [handleEdited, setHandleEdited] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
   const [handleStatus, setHandleStatus] = useState<
     "idle" | "checking" | "available" | "taken" | "invalid"
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Pre-fill display name + avatar from the user-app profiles row, if the
+  // user has one. Lets a returning consumer skip retyping their name and
+  // reuse the avatar they've already uploaded on the consumer side.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    supabase
+      .from("profiles")
+      .select("display_name, avatar_url")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data?.display_name) {
+          setDisplayName((prev) => prev || data.display_name);
+        }
+        if (data?.avatar_url) {
+          // Only pre-fill if the user hasn't already picked a new file
+          // (their selection takes precedence).
+          setAvatarPreview((prev) => prev || data.avatar_url);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Auto-derive the handle from the display name while the user hasn't
+  // manually touched the handle input.
+  useEffect(() => {
+    if (handleEdited) return;
+    const derived = handleFromDisplayName(displayName);
+    setHandle(derived);
+  }, [displayName, handleEdited]);
+
   // Debounced handle availability lookup
   useEffect(() => {
     const trimmed = handle.trim().toLowerCase();
     if (!trimmed) {
       setHandleStatus("idle");
+      setSuggestions([]);
       return;
     }
     if (!HANDLE_RE.test(trimmed)) {
       setHandleStatus("invalid");
+      setSuggestions([]);
       return;
     }
     setHandleStatus("checking");
@@ -69,7 +137,13 @@ export default function CreatorOnboarding() {
         setHandleStatus("idle");
         return;
       }
-      setHandleStatus(data ? "available" : "taken");
+      if (data) {
+        setHandleStatus("available");
+        setSuggestions([]);
+      } else {
+        setHandleStatus("taken");
+        setSuggestions(suggestionsFor(trimmed, 3));
+      }
     }, 350);
     return () => window.clearTimeout(timer);
   }, [handle]);
@@ -84,7 +158,7 @@ export default function CreatorOnboarding() {
     }
     if (file.size > AVATAR_MAX_BYTES) {
       toast.error(
-        `File is too large (${(file.size / 1024).toFixed(0)} KB). Max 500 KB.`,
+        `File is too large (${(file.size / 1024).toFixed(0)} KB). Max 200 KB.`,
       );
       return;
     }
@@ -104,6 +178,7 @@ export default function CreatorOnboarding() {
       if (!user) throw new Error("Not signed in");
       let avatarUrl: string | null = null;
       if (avatarFile) {
+        // A new file was picked → upload to creator-assets.
         const ext = avatarFile.name.split(".").pop()?.toLowerCase() ?? "jpg";
         const path = `${user.id}/avatar-${Date.now()}.${ext}`;
         const { error: upErr } = await supabase.storage
@@ -118,6 +193,10 @@ export default function CreatorOnboarding() {
           .from("creator-assets")
           .getPublicUrl(path);
         avatarUrl = data.publicUrl;
+      } else if (avatarPreview && !avatarPreview.startsWith("blob:")) {
+        // No new file, but the user-app already had an avatar — reuse it.
+        // (Local previews are blob:// URLs; reused URLs are https://.)
+        avatarUrl = avatarPreview;
       }
 
       const socialLinks: Record<string, string> = {};
@@ -173,26 +252,6 @@ export default function CreatorOnboarding() {
       {step === 1 && (
         <div className="mt-6 space-y-5">
           <div className="space-y-2">
-            <label htmlFor="handle" className="text-sm font-medium">
-              Handle
-            </label>
-            <div className="relative">
-              <AtSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
-              <Input
-                id="handle"
-                value={handle}
-                onChange={(e) => setHandle(e.target.value.toLowerCase())}
-                required
-                minLength={3}
-                maxLength={20}
-                placeholder="your_handle"
-                className="border-white/20 bg-white/10 pl-9 text-white placeholder:text-white/40"
-              />
-            </div>
-            <HandleStatusLine status={handleStatus} value={handle} />
-          </div>
-
-          <div className="space-y-2">
             <label htmlFor="display-name" className="text-sm font-medium">
               Display name
             </label>
@@ -206,6 +265,47 @@ export default function CreatorOnboarding() {
               placeholder="The name your audience sees"
               className="border-white/20 bg-white/10 text-white placeholder:text-white/40"
             />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="handle" className="text-sm font-medium">
+              ID
+            </label>
+            <div className="relative">
+              <AtSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
+              <Input
+                id="handle"
+                value={handle}
+                onChange={(e) => {
+                  setHandle(e.target.value.toLowerCase());
+                  setHandleEdited(true);
+                }}
+                required
+                minLength={3}
+                maxLength={20}
+                placeholder="your_id"
+                className="border-white/20 bg-white/10 pl-9 text-white placeholder:text-white/40"
+              />
+            </div>
+            <HandleStatusLine status={handleStatus} value={handle} />
+            {handleStatus === "taken" && suggestions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-[11px] text-white/65">Try:</span>
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      setHandle(s);
+                      setHandleEdited(true);
+                    }}
+                    className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-white/20"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -243,7 +343,7 @@ export default function CreatorOnboarding() {
                 onChange={handleAvatarChange}
               />
               <div className="min-w-0 flex-1 text-sm text-white/75">
-                <p>JPG or PNG, max 500 KB.</p>
+                <p>JPG or PNG, max 200 KB.</p>
                 <p className="text-xs text-white/55">Square images look best.</p>
               </div>
             </div>
