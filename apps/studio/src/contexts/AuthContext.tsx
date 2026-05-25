@@ -63,12 +63,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
       if (nextSession?.user) {
-        void fetchCreator(nextSession.user.id);
+        // On a fresh sign-in (or refreshed user) we need to gate the UI
+        // on the creator-profile fetch finishing — otherwise the next
+        // route renders with creator=null for a tick and ProtectedRoute
+        // misroutes the user to /onboarding even when their row exists.
+        if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+          setLoading(true);
+        }
+        void fetchCreator(nextSession.user.id).finally(() => {
+          setLoading(false);
+        });
       } else {
         setCreator(null);
+        setLoading(false);
       }
     });
 
