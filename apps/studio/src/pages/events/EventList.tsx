@@ -41,7 +41,7 @@ export default function EventList() {
   });
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold sm:text-3xl">My events</h1>

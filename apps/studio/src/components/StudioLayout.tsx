@@ -211,14 +211,19 @@ export function StudioLayout() {
   );
 
   return (
-    <div className="relative flex min-h-[100dvh] bg-background">
+    // Lock the shell to the viewport so the sidebar stays pinned and the
+    // <main> region owns all scrolling. Using `h-[100dvh] overflow-hidden`
+    // (not min-h) is what keeps the gradient sidebar from scrolling
+    // off-screen on tall pages like the event editor.
+    <div className="relative flex h-[100dvh] overflow-hidden bg-background">
       {/* Background pattern (subtle) */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-60"
       />
 
-      {/* Sidebar — desktop */}
+      {/* Sidebar — desktop. Full viewport height; inner <nav> handles its
+          own overflow if the nav items ever exceed the available space. */}
       <aside className="relative hidden h-[100dvh] flex-shrink-0 flex-col overflow-hidden bg-gradient-to-r from-[#1973FF] to-[#5048FF] text-white lg:flex lg:w-60 xl:w-64">
         {sidebarBody()}
       </aside>
@@ -264,10 +269,17 @@ export function StudioLayout() {
         </div>
       )}
 
-      {/* Main content */}
+      {/* Main content — width + padding mirror the user-app PageContainer
+          (mx-auto / max-w-7xl / lg:px-12 / lg:py-10) plus the same
+          `lg:pt-[18px]` override every user-app page applies, so the
+          studio feels continuous with the consumer surface on every
+          screen size. The outer scroll wrapper owns the overflow; the
+          inner div is the centered, capped content rail. */}
       <main className="relative flex min-w-0 flex-1 flex-col pt-14 lg:pt-0">
-        <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
-          <Outlet />
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-12 lg:py-10 lg:pt-[18px]">
+            <Outlet />
+          </div>
         </div>
       </main>
     </div>
