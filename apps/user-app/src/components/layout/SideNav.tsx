@@ -174,19 +174,38 @@ export function SideNav() {
         )}
 
         <ul className="mt-[11px] space-y-0.5 px-3">
-          {[
-            { to: "/studio", label: "Creator Studio" },
-            { to: "/company", label: "Company" },
-          ].map((item) => (
-            <li key={item.to}>
-              <Link
-                to={item.to}
-                className="block py-1 text-sm font-bold text-white/85 transition-colors hover:text-white"
-              >
-                {item.label}
-              </Link>
-            </li>
-          ))}
+          {(
+            [
+              {
+                to: "https://studio.liverush.co",
+                label: "Creator Studio",
+                external: true,
+              },
+              { to: "/company", label: "Company", external: false },
+            ] as const
+          ).map((item) =>
+            item.external ? (
+              <li key={item.to}>
+                <a
+                  href={item.to}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="block py-1 text-sm font-bold text-white/85 transition-colors hover:text-white"
+                >
+                  {item.label}
+                </a>
+              </li>
+            ) : (
+              <li key={item.to}>
+                <Link
+                  to={item.to}
+                  className="block py-1 text-sm font-bold text-white/85 transition-colors hover:text-white"
+                >
+                  {item.label}
+                </Link>
+              </li>
+            ),
+          )}
         </ul>
       </nav>
 
