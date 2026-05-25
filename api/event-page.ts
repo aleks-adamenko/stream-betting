@@ -5,7 +5,7 @@ import { imageSize } from "image-size";
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "";
-const SITE_URL = process.env.VITE_SITE_URL ?? "https://liverush.vercel.app";
+const SITE_URL = process.env.VITE_SITE_URL ?? "https://liverush.co";
 
 interface EventRow {
   title: string;
