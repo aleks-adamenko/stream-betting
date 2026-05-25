@@ -1,0 +1,3 @@
+/* Studio shares the same design tokens, base layer, and utility classes
+ * as user-app — single source of truth in @liverush/design-tokens. */
+@import "@liverush/design-tokens/tokens.css";

@@ -28,7 +28,11 @@ export interface Database {
       events: {
         Row: {
           id: string;
-          influencer_id: string;
+          /** Legacy FK to the seeded `influencers` table; new studio-created
+           *  events leave this null and populate `creator_id` instead. */
+          influencer_id: string | null;
+          /** Set on events created via studio. Null on legacy seed rows. */
+          creator_id: string | null;
           title: string;
           description: string | null;
           cover_url: string | null;
@@ -37,7 +41,7 @@ export interface Database {
           rules: string | null;
           round_format: "time" | "event";
           round_duration_sec: number | null;
-          status: "scheduled" | "live" | "finished";
+          status: "draft" | "scheduled" | "live" | "finished" | "cancelled";
           scheduled_at: string;
           started_at: string | null;
           viewers_count: number;
@@ -55,7 +59,43 @@ export interface Database {
             referencedRelation: "influencers";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "events_creator_id_fkey";
+            columns: ["creator_id"];
+            referencedRelation: "creator_profiles";
+            referencedColumns: ["id"];
+          },
         ];
+      };
+      creator_profiles: {
+        Row: {
+          id: string;
+          handle: string;
+          display_name: string;
+          avatar_url: string | null;
+          bio: string | null;
+          social_links: Json;
+          followers_count: number;
+          status: "pending" | "verified" | "rejected";
+          commission_pct: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          handle: string;
+          display_name: string;
+          avatar_url?: string | null;
+          bio?: string | null;
+          social_links?: Json;
+          followers_count?: number;
+          status?: "pending" | "verified" | "rejected";
+          commission_pct?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["creator_profiles"]["Insert"]>;
+        Relationships: [];
       };
       event_outcomes: {
         Row: {
@@ -197,6 +237,93 @@ export interface Database {
       };
       mark_all_notifications_read: {
         Args: Record<string, never>;
+        Returns: void;
+      };
+      is_creator_handle_available: {
+        Args: { p_handle: string };
+        Returns: boolean;
+      };
+      complete_creator_onboarding: {
+        Args: {
+          p_handle: string;
+          p_display_name: string;
+          p_avatar_url: string | null;
+          p_bio: string | null;
+          p_social_links: Json;
+        };
+        Returns: Database["public"]["Tables"]["creator_profiles"]["Row"];
+      };
+      update_creator_profile: {
+        Args: {
+          p_handle: string;
+          p_display_name: string;
+          p_avatar_url: string | null;
+          p_bio: string | null;
+          p_social_links: Json;
+        };
+        Returns: Database["public"]["Tables"]["creator_profiles"]["Row"];
+      };
+      create_event: {
+        Args: {
+          p_title: string;
+          p_cover_url: string | null;
+          p_description: string | null;
+          p_rules: string | null;
+          p_category: string;
+          p_round_format: "time" | "event";
+          p_round_duration_sec: number | null;
+          p_scheduled_at: string;
+          p_video_url: string | null;
+        };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      update_event: {
+        Args: {
+          p_event_id: string;
+          p_title: string;
+          p_cover_url: string | null;
+          p_description: string | null;
+          p_rules: string | null;
+          p_category: string;
+          p_round_format: "time" | "event";
+          p_round_duration_sec: number | null;
+          p_scheduled_at: string;
+          p_video_url: string | null;
+        };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      delete_event: {
+        Args: { p_event_id: string };
+        Returns: void;
+      };
+      publish_event: {
+        Args: { p_event_id: string };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      unpublish_event: {
+        Args: { p_event_id: string };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      add_event_outcome: {
+        Args: {
+          p_event_id: string;
+          p_label: string;
+          p_odds: number;
+          p_sort_order: number;
+        };
+        Returns: Database["public"]["Tables"]["event_outcomes"]["Row"];
+      };
+      update_event_outcome: {
+        Args: {
+          p_outcome_id: string;
+          p_label: string;
+          p_odds: number;
+          p_sort_order: number;
+        };
+        Returns: Database["public"]["Tables"]["event_outcomes"]["Row"];
+      };
+      delete_event_outcome: {
+        Args: { p_outcome_id: string };
         Returns: void;
       };
     };

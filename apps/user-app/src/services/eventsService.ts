@@ -1,6 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import type { Influencer, StreamEvent } from "@/domain/types";
+import type { EventStatus, Influencer, StreamEvent } from "@/domain/types";
+
+// Statuses user-app surfaces. `draft` is creator-only (hidden by RLS too)
+// and `cancelled` is filtered out client-side as well for defense in depth.
+const PUBLIC_STATUSES = ["scheduled", "live", "finished"] as const;
 
 type EventRow = Database["public"]["Tables"]["events"]["Row"] & {
   influencer: Database["public"]["Tables"]["influencers"]["Row"] | null;
@@ -63,7 +67,9 @@ function mapEvent(row: EventRow): StreamEvent {
     rules: row.rules ?? "",
     roundFormat: row.round_format,
     roundDurationSec: row.round_duration_sec ?? undefined,
-    status: row.status,
+    // The DB enum now includes 'draft' + 'cancelled' but both are filtered
+    // out at the query level before reaching this mapper.
+    status: row.status as EventStatus,
     scheduledAt: row.scheduled_at,
     startedAt: row.started_at ?? undefined,
     viewersCount: row.viewers_count,
@@ -83,6 +89,7 @@ export async function listEvents(): Promise<StreamEvent[]> {
   const { data, error } = await supabase
     .from("events")
     .select(EVENT_SELECT)
+    .in("status", PUBLIC_STATUSES as unknown as string[])
     .order("status", { ascending: true })
     .order("scheduled_at", { ascending: true });
 
@@ -95,6 +102,7 @@ export async function getEvent(id: string): Promise<StreamEvent | null> {
     .from("events")
     .select(EVENT_SELECT)
     .eq("id", id)
+    .in("status", PUBLIC_STATUSES as unknown as string[])
     .maybeSingle();
 
   if (error) throw error;
