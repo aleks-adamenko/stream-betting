@@ -8,6 +8,10 @@ const PUBLIC_STATUSES = ["scheduled", "live", "finished"] as const;
 
 type EventRow = Database["public"]["Tables"]["events"]["Row"] & {
   influencer: Database["public"]["Tables"]["influencers"]["Row"] | null;
+  creator: Pick<
+    Database["public"]["Tables"]["creator_profiles"]["Row"],
+    "id" | "handle" | "display_name" | "avatar_url" | "followers_count" | "social_links"
+  > | null;
   outcomes: Database["public"]["Tables"]["event_outcomes"]["Row"][];
 };
 
@@ -28,6 +32,9 @@ const EVENT_SELECT = `
   total_pool,
   influencer:influencers!events_influencer_id_fkey (
     id, handle, display_name, avatar_url, followers, socials
+  ),
+  creator:creator_profiles!events_creator_id_fkey (
+    id, handle, display_name, avatar_url, followers_count, social_links
   ),
   outcomes:event_outcomes!event_outcomes_event_id_fkey (
     id, label, odds, sort_order
@@ -53,9 +60,43 @@ function mapInfluencer(
   };
 }
 
+/** Studio-created creators land here through the events.creator_id FK and
+ *  get adapted into the same Influencer shape that the user-app UI
+ *  components already render. The DB columns differ a touch
+ *  (followers_count vs followers, social_links vs socials) so this
+ *  mapper bridges them. */
+function mapCreator(
+  row: NonNullable<EventRow["creator"]>,
+): Influencer {
+  const socials = (row.social_links ?? {}) as Record<string, string | undefined>;
+  return {
+    id: row.id,
+    handle: row.handle,
+    displayName: row.display_name,
+    avatarUrl: row.avatar_url ?? "",
+    followers: row.followers_count,
+    socials: {
+      instagram: socials.instagram,
+      tiktok: socials.tiktok,
+      youtube: socials.youtube,
+      x: socials.x,
+    },
+  };
+}
+
 function mapEvent(row: EventRow): StreamEvent {
-  if (!row.influencer) {
-    throw new Error(`Event ${row.id} is missing its influencer relation`);
+  // Studio-published events populate `creator_id` (→ creator_profiles);
+  // legacy seeded events populate `influencer_id` (→ influencers). Each
+  // event has exactly one of the two — prefer the creator side when
+  // present so studio events surface with the verified creator's data.
+  let influencer: Influencer | null = null;
+  if (row.creator) {
+    influencer = mapCreator(row.creator);
+  } else if (row.influencer) {
+    influencer = mapInfluencer(row.influencer);
+  }
+  if (!influencer) {
+    throw new Error(`Event ${row.id} has neither a creator nor an influencer`);
   }
   return {
     id: row.id,
@@ -74,7 +115,7 @@ function mapEvent(row: EventRow): StreamEvent {
     startedAt: row.started_at ?? undefined,
     viewersCount: row.viewers_count,
     totalPool: Number(row.total_pool),
-    influencer: mapInfluencer(row.influencer),
+    influencer,
     outcomes: [...row.outcomes]
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((o) => ({
