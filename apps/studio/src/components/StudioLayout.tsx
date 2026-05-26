@@ -222,8 +222,8 @@ export function StudioLayout() {
         className="pointer-events-none absolute inset-0 opacity-60"
       />
 
-      {/* Sidebar — desktop. Full viewport height; inner <nav> handles its
-          own overflow if the nav items ever exceed the available space. */}
+      {/* Sidebar — single full-width variant on every route, so editor
+          pages match Dashboard / Events / etc. */}
       <aside className="relative hidden h-[100dvh] flex-shrink-0 flex-col overflow-hidden bg-gradient-to-r from-[#1973FF] to-[#5048FF] text-white lg:flex lg:w-60 xl:w-64">
         {sidebarBody()}
       </aside>
@@ -269,19 +269,46 @@ export function StudioLayout() {
         </div>
       )}
 
-      {/* Main content — width + padding mirror the user-app PageContainer
-          (mx-auto / max-w-7xl / lg:px-12 / lg:py-10) plus the same
-          `lg:pt-[18px]` override every user-app page applies, so the
-          studio feels continuous with the consumer surface on every
-          screen size. The outer scroll wrapper owns the overflow; the
-          inner div is the centered, capped content rail. */}
+      {/* Main content — mirrors the user-app PageContainer
+          (mx-auto / max-w-7xl / lg:px-12 / lg:py-10 + lg:pt-[18px]) on
+          every route. The pending banner sits at the top of the same
+          rail so it appears identically across pages. */}
       <main className="relative flex min-w-0 flex-1 flex-col pt-14 lg:pt-0">
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-12 lg:py-10 lg:pt-[18px]">
+          {creator?.status === "pending" && (
+            <div className="mx-auto w-full max-w-7xl px-4 pt-4 sm:px-6 lg:px-12 lg:pt-[18px]">
+              <PendingReviewBanner />
+            </div>
+          )}
+          <div
+            className={cn(
+              "mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-12 lg:py-10 lg:pt-[18px]",
+              // Tighter top padding when the banner is visible so the
+              // page heading sits flush below it rather than doubling
+              // the spacing.
+              creator?.status === "pending" && "pt-3 lg:pt-3",
+            )}
+          >
             <Outlet />
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+/**
+ * "Account pending review" notice. Rendered once at the top of the
+ * scrollable content on standard routes by StudioLayout, and re-used
+ * by EventEditor on editor routes (so it sits above the right column
+ * only, not over the steps rail).
+ */
+export function PendingReviewBanner() {
+  return (
+    <div className="rounded-2xl border border-[#FEE53A]/40 bg-[#FEE53A]/10 px-4 py-3 text-sm text-foreground">
+      <span className="font-semibold">Account pending review.</span>{" "}
+      Drafts save normally, but publishing unlocks once your creator
+      profile is verified.
     </div>
   );
 }

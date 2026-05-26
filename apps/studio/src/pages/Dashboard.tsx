@@ -58,20 +58,8 @@ export default function Dashboard() {
         </Button>
       </div>
 
-      {creator?.status === "pending" && (
-        <div className="flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
-          <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
-          <div>
-            <p className="font-heading text-sm font-semibold text-amber-700">
-              Your account is under review
-            </p>
-            <p className="mt-1 text-sm text-amber-800/80">
-              You can already draft events and add outcomes. Publishing unlocks
-              once a moderator verifies your account.
-            </p>
-          </div>
-        </div>
-      )}
+      {/* Pending-review notice is rendered globally in StudioLayout
+          (PendingReviewBanner) so it stays consistent across pages. */}
 
       {creator?.status === "rejected" && (
         <div className="flex items-start gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 p-4">
