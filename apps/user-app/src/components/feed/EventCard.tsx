@@ -51,6 +51,15 @@ export function EventCard({ event, className }: EventCardProps) {
             <Users className="h-3 w-3" /> {numberFormatter.format(event.viewersCount)}
           </span>
         )}
+        {isScheduled && (
+          // Scheduled-event start time pinned to bottom-center of the
+          // cover (10px from the bottom edge). Reads against any image
+          // thanks to the black/50 backdrop-blur chip.
+          <span className="absolute bottom-2.5 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-black/50 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur">
+            <Calendar className="h-3 w-3" />
+            {formatScheduledAt(event.scheduledAt)}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-4">
@@ -61,29 +70,20 @@ export function EventCard({ event, className }: EventCardProps) {
           <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{event.description}</p>
         </div>
 
-        <div className="mt-auto flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <img
-              src={event.influencer.avatarUrl}
-              alt={event.influencer.displayName}
-              className="h-7 w-7 flex-shrink-0 rounded-full object-cover ring-1 ring-border"
-            />
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold text-foreground">
-                {event.influencer.displayName}
-              </p>
-              <p className="truncate text-[11px] text-muted-foreground">
-                {event.influencer.handle}
-              </p>
-            </div>
+        <div className="mt-auto flex items-center gap-3">
+          <img
+            src={event.influencer.avatarUrl}
+            alt={event.influencer.displayName}
+            className="h-7 w-7 flex-shrink-0 rounded-full object-cover ring-1 ring-border"
+          />
+          <div className="min-w-0">
+            <p className="truncate text-xs font-semibold text-foreground">
+              {event.influencer.displayName}
+            </p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {event.influencer.handle}
+            </p>
           </div>
-          {isScheduled && (
-            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
-              <Calendar className="h-3 w-3" />
-              <span className="hidden sm:inline">{formatScheduledAt(event.scheduledAt)}</span>
-              <span className="sm:hidden">Upcoming</span>
-            </span>
-          )}
         </div>
       </div>
     </Link>

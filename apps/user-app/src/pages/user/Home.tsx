@@ -202,10 +202,16 @@ function EventGrid({ events }: { events: StreamEvent[] }) {
 /* ---------- featured live section ---------- */
 
 function FeaturedLiveSection({ event }: { event: StreamEvent }) {
+  // Desktop: horizontal player (16:9) + a 420px bet panel matching
+  // the EventDetails layout exactly. Mobile: stacked.
   return (
-    <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
-      <FeaturedPlayer event={event} />
-      <SimpleBetPanel event={event} />
+    <section className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8">
+      <div className="min-w-0 flex-1">
+        <FeaturedPlayer event={event} />
+      </div>
+      <div className="w-full lg:w-[420px] lg:flex-shrink-0">
+        <SimpleBetPanel event={event} />
+      </div>
     </section>
   );
 }
@@ -216,7 +222,10 @@ function FeaturedPlayer({ event }: { event: StreamEvent }) {
   return (
     <Link
       to={`/event/${event.id}`}
-      className="group relative block aspect-video w-full overflow-hidden rounded-2xl border border-border/30 bg-black shadow-lg lg:aspect-auto lg:h-full"
+      // Horizontal 16:9 player — matches a video frame's natural ratio
+      // so external Instagram / TikTok / WebRTC sources don't end up
+      // letterboxed inside a portrait container.
+      className="group relative block aspect-video w-full overflow-hidden rounded-2xl border border-border/30 bg-black shadow-lg"
     >
       {socialUrl ? (
         <SocialVideoEmbed url={socialUrl} title={event.title} fit="contain" />

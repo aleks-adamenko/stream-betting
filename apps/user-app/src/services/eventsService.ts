@@ -127,11 +127,18 @@ function mapEvent(row: EventRow): StreamEvent {
 }
 
 export async function listEvents(): Promise<StreamEvent[]> {
+  // `created_at` desc puts freshly-published events at the top of every
+  // status group. Studio creators expect their newly published event
+  // to surface first in the Home "Upcoming" rail and at the start of
+  // the Discover grid; this is the simplest proxy for "newest first"
+  // without adding a dedicated published_at column.
+  // `scheduled_at` asc is kept as a tiebreaker so two events created
+  // in the same instant fall back to "earliest start first" order.
   const { data, error } = await supabase
     .from("events")
     .select(EVENT_SELECT)
     .in("status", PUBLIC_STATUSES as unknown as string[])
-    .order("status", { ascending: true })
+    .order("created_at", { ascending: false })
     .order("scheduled_at", { ascending: true });
 
   if (error) throw error;

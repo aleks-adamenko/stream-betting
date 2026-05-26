@@ -12,6 +12,12 @@ interface HlsPlayerProps {
   className?: string;
 }
 
+// Hold the cover poster + spinner on screen for at least this long so
+// viewers register what they're about to watch before the video kicks
+// in. If the HLS stream takes longer to start, the loading state
+// naturally outlives the timer.
+const MIN_POSTER_MS = 2000;
+
 export function HlsPlayer({
   src,
   poster,
@@ -23,6 +29,16 @@ export function HlsPlayer({
   const [muted, setMuted] = useState(initialMuted);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Minimum-display gate for the poster — set true after MIN_POSTER_MS
+  // ticks. We show the poster while EITHER the video is buffering OR
+  // this gate hasn't tripped yet.
+  const [minElapsed, setMinElapsed] = useState(false);
+
+  useEffect(() => {
+    setMinElapsed(false);
+    const t = setTimeout(() => setMinElapsed(true), MIN_POSTER_MS);
+    return () => clearTimeout(t);
+  }, [src]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -73,19 +89,37 @@ export function HlsPlayer({
     setMuted(video.muted);
   }
 
+  // Show the poster + spinner while EITHER the video is still loading
+  // OR the minimum-display window hasn't elapsed yet. This gives the
+  // viewer a guaranteed 2s "here's what you're about to watch" beat
+  // even when HLS starts up fast.
+  const showPoster = (loading || !minElapsed) && !error;
+
   return (
-    <div className={cn("relative h-full w-full", className)}>
+    <div className={cn("relative h-full w-full overflow-hidden", className)}>
       <video
         ref={videoRef}
-        poster={poster}
         playsInline
         autoPlay={autoPlay}
         muted={muted}
         loop
         disablePictureInPicture
-        className="h-full w-full object-cover"
+        className="absolute inset-0 h-full w-full object-cover"
       />
-      {loading && !error && (
+      {/* Poster overlay — absolutely-positioned <img> with object-cover
+          so the cover fills the player container the same way the
+          live video does, regardless of the poster's native aspect
+          ratio. Hidden once the video has started AND the 2s minimum
+          window has elapsed. */}
+      {poster && showPoster && (
+        <img
+          src={poster}
+          alt=""
+          aria-hidden
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+      {showPoster && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
           <Loader2 className="h-8 w-8 animate-spin text-white/80" />
         </div>
