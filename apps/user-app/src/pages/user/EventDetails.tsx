@@ -23,6 +23,7 @@ import {
 } from "@/components/stream/SocialVideoEmbed";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useEvent } from "@/hooks/useEvents";
+import { useEventViewers } from "@/hooks/useEventViewers";
 import { useAuth } from "@/contexts/AuthContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
 import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
@@ -51,6 +52,12 @@ export default function EventDetails() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const betPanelRef = useRef<HTMLDivElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
+
+  // Real-time viewer count. `track: true` registers this client in
+  // the presence channel so it counts towards the total — the studio
+  // creator on the LiveStream page sees it instantly via the same
+  // channel.
+  const viewerCount = useEventViewers(id, { track: true });
 
   // Hide LIVE / viewers / title overlay once the user starts scrolling so the
   // sticky video container looks like a clean fixed player while reading.
@@ -179,7 +186,7 @@ export default function EventDetails() {
               {isLive && (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur">
                   <Users className="h-3.5 w-3.5" />
-                  {numberFormatter.format(event.viewersCount)} watching
+                  {numberFormatter.format(viewerCount)} watching
                 </span>
               )}
             </div>
@@ -331,7 +338,7 @@ export default function EventDetails() {
             <img src={rewardsBannerImg} alt="" className="block h-auto w-full" />
           </Link>
           <div className="order-3 lg:order-3">
-            <ChatPanel />
+            <ChatPanel eventId={event.id} />
           </div>
         </aside>
       </div>

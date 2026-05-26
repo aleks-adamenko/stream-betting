@@ -15,6 +15,8 @@ import {
 
 import { Button } from "@liverush/ui";
 import { useAuth } from "@/contexts/AuthContext";
+import { useEventChat, type ChatMessage } from "@/hooks/useEventChat";
+import { useEventViewers } from "@/hooks/useEventViewers";
 import { supabase } from "@/integrations/supabase/client";
 
 /**
@@ -43,6 +45,11 @@ export default function LiveStream() {
     "idle" | "requesting" | "live" | "ending" | "error" | "unsupported"
   >("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Real-time viewer count from the shared `event:{id}:viewers`
+  // presence channel. `track: false` so the creator doesn't count
+  // themselves as a viewer.
+  const viewerCount = useEventViewers(eventId, { track: false });
 
   // Bail out if the browser doesn't expose getUserMedia (insecure
   // context / very old browser).
@@ -263,12 +270,12 @@ export default function LiveStream() {
                 <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
                 Live
               </span>
-              {/* Viewer count — currently mocked. Will hook into a
-                  Supabase Realtime presence channel keyed on the
-                  event id in the next pass. */}
+              {/* Real-time viewer count from the presence channel —
+                  updates instantly as viewers join / leave the event
+                  page in the user-app. */}
               <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">
                 <Users className="h-3.5 w-3.5" />
-                <span className="tabular-nums">{MOCK_VIEWER_COUNT}</span>
+                <span className="tabular-nums">{viewerCount}</span>
               </span>
             </>
           )}
@@ -384,7 +391,7 @@ export default function LiveStream() {
       {phase === "live" && (
         <>
           <StakesOverlay />
-          <ChatOverlay />
+          <ChatOverlay eventId={eventId} />
         </>
       )}
 
@@ -405,8 +412,6 @@ export default function LiveStream() {
 // `bets` table inserts for the stakes feed, a new `event_chat` table
 // for the chat) in a follow-up pass.
 // =========================================================================
-
-const MOCK_VIEWER_COUNT = 247;
 
 type StakeRow = {
   id: string;
@@ -451,46 +456,6 @@ const MOCK_STAKES: StakeRow[] = [
     amountCents: 1500,
     outcomeLabel: "Pops all 10",
     placedAt: new Date(Date.now() - 1000 * 60 * 6),
-  },
-];
-
-type ChatRow = {
-  id: string;
-  name: string;
-  message: string;
-  postedAt: Date;
-};
-
-const MOCK_CHAT: ChatRow[] = [
-  {
-    id: "c1",
-    name: "RushFanatic",
-    message: "Go Mango! 💪",
-    postedAt: new Date(Date.now() - 1000 * 8),
-  },
-  {
-    id: "c2",
-    name: "QueenBee",
-    message: "This is intense! 😱😱",
-    postedAt: new Date(Date.now() - 1000 * 18),
-  },
-  {
-    id: "c3",
-    name: "SpeedyG",
-    message: "They got this!!!",
-    postedAt: new Date(Date.now() - 1000 * 42),
-  },
-  {
-    id: "c4",
-    name: "kookaburra666",
-    message: "My money's on the draw 👀",
-    postedAt: new Date(Date.now() - 1000 * 60),
-  },
-  {
-    id: "c5",
-    name: "GoodVibesOnly",
-    message: "Such a close one lol",
-    postedAt: new Date(Date.now() - 1000 * 90),
   },
 ];
 
@@ -553,7 +518,17 @@ function StakesOverlay() {
   );
 }
 
-function ChatOverlay() {
+function ChatOverlay({ eventId }: { eventId: string | undefined }) {
+  const messages = useEventChat(eventId);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Auto-scroll to the latest message when a new one arrives.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+
   return (
     <aside
       aria-label="Live chat"
@@ -567,21 +542,29 @@ function ChatOverlay() {
           </h2>
         </div>
         <span className="text-[10px] font-medium uppercase tracking-wider text-white/50">
-          {MOCK_CHAT.length}
+          {messages.length}
         </span>
       </div>
-      <ul className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {MOCK_CHAT.map((m) => (
+      <ul
+        ref={listRef}
+        className="flex-1 space-y-3 overflow-y-auto px-3 py-3"
+      >
+        {messages.length === 0 && (
+          <li className="text-center text-[11px] text-white/50">
+            No chat yet — viewers will appear here as they post.
+          </li>
+        )}
+        {messages.map((m: ChatMessage) => (
           <li key={m.id} className="text-xs">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate font-semibold text-primary-foreground/90 text-white">
-                {m.name}
+              <span className="truncate font-semibold text-white">
+                {m.display_name ?? "Viewer"}
               </span>
               <span className="flex-shrink-0 text-[10px] text-white/50">
-                {relativeTimeShort(m.postedAt)} ago
+                {relativeTimeShort(new Date(m.created_at))} ago
               </span>
             </div>
-            <p className="mt-0.5 leading-snug text-white/85">{m.message}</p>
+            <p className="mt-0.5 leading-snug text-white/85">{m.body}</p>
           </li>
         ))}
       </ul>
