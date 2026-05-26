@@ -121,6 +121,41 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["creator_profiles"]["Insert"]>;
         Relationships: [];
       };
+      event_chat_messages: {
+        Row: {
+          id: string;
+          event_id: string;
+          user_id: string;
+          display_name: string | null;
+          avatar_url: string | null;
+          body: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["event_chat_messages"]["Row"],
+          "id" | "created_at"
+        > & {
+          id?: string;
+          created_at?: string;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["event_chat_messages"]["Insert"]
+        >;
+        Relationships: [
+          {
+            foreignKeyName: "event_chat_messages_event_id_fkey";
+            columns: ["event_id"];
+            referencedRelation: "events";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "event_chat_messages_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       event_outcomes: {
         Row: {
           id: string;
@@ -381,6 +416,10 @@ export interface Database {
       finish_event: {
         Args: { p_event_id: string };
         Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      send_chat_message: {
+        Args: { p_event_id: string; p_body: string };
+        Returns: Database["public"]["Tables"]["event_chat_messages"]["Row"];
       };
       add_event_outcome: {
         Args: {
