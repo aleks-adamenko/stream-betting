@@ -16,6 +16,7 @@ import CreatorOnboarding from "@/pages/onboarding/CreatorOnboarding";
 import Dashboard from "@/pages/Dashboard";
 import EventList from "@/pages/events/EventList";
 import EventEditor from "@/pages/events/EventEditor";
+import LiveStream from "@/pages/events/LiveStream";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +44,18 @@ export default function App() {
               element={
                 <ProtectedRoute requireOnboarding={false}>
                   <CreatorOnboarding />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Live stream view — full-screen, no studio shell. Kept
+                outside StudioLayout so the camera takes the entire
+                viewport without the sidebar in the way. */}
+            <Route
+              path="/events/:id/live"
+              element={
+                <ProtectedRoute>
+                  <LiveStream />
                 </ProtectedRoute>
               }
             />

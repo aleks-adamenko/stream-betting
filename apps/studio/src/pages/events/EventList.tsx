@@ -1,11 +1,13 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   CalendarClock,
   CheckCircle2,
   Loader2,
+  Pencil,
   Plus,
+  Radio,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -104,6 +106,7 @@ function completedStepsCount(event: EventRow): number {
 export default function EventList() {
   const { creator } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const verifiedCreator = creator?.status === "verified";
 
   const { data: events, isLoading } = useQuery({
@@ -204,6 +207,9 @@ export default function EventList() {
         <ul className="space-y-3">
           {events.map((event) => {
             const isDraft = event.status === "draft";
+            const isScheduled = event.status === "scheduled";
+            const isLive = event.status === "live";
+            const isFinished = event.status === "finished";
             const stepsDone = isDraft
               ? completedStepsCount(event)
               : TOTAL_STEPS;
@@ -217,6 +223,16 @@ export default function EventList() {
               : !isComplete
                 ? "Complete every section in the editor to publish"
                 : undefined;
+
+            // Start Stream unlocks the moment the scheduled time
+            // arrives. We don't auto-flip to live ourselves — the
+            // creator clicks Start Stream → camera grant → start_event
+            // RPC.
+            const startTimeMs = new Date(event.scheduled_at).getTime();
+            const canStartStream = isScheduled && startTimeMs <= Date.now();
+            const startStreamTooltip = !canStartStream
+              ? "Available at the scheduled start time"
+              : undefined;
 
             return (
               <li
@@ -244,9 +260,28 @@ export default function EventList() {
                       <p className="font-heading text-base font-semibold text-foreground sm:text-lg">
                         {event.title}
                       </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground sm:text-sm">
-                        {new Date(event.scheduled_at).toLocaleString()}
-                      </p>
+
+                      {/* Status pill + scheduled date sitting together
+                          on the same line so the creator can read both
+                          at a glance. For live events the pill carries
+                          the start time; for finished events we omit
+                          the date entirely. */}
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                            STATUS_CLASS[event.status] ??
+                              "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {STATUS_LABEL[event.status] ?? event.status}
+                        </span>
+                        {!isFinished && (
+                          <span className="text-muted-foreground">
+                            {new Date(event.scheduled_at).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
 
                       {/* Draft completion bar — only shown for drafts. */}
                       {isDraft && (
@@ -287,32 +322,16 @@ export default function EventList() {
                     </div>
                   </Link>
 
-                  {/* Right side: status badge + (for drafts) Publish button */}
-                  <div className="flex flex-shrink-0 items-center gap-3">
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-                        STATUS_CLASS[event.status] ??
-                          "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      {STATUS_LABEL[event.status] ?? event.status}
-                    </span>
-
+                  {/* Right side: status-aware actions */}
+                  <div className="flex flex-shrink-0 items-center gap-2">
                     {isDraft && (
                       <Button
                         type="button"
                         size="sm"
                         disabled={!canPublish || publishing}
                         title={publishTooltip}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!canPublish) {
-                            // Not strictly needed (button is disabled) but
-                            // keeps the click a no-op even when a child
-                            // overrides the disabled state.
-                            return;
-                          }
+                        onClick={() => {
+                          if (!canPublish) return;
                           publishMutation.mutate(event.id);
                         }}
                       >
@@ -326,6 +345,53 @@ export default function EventList() {
                         )}
                       </Button>
                     )}
+
+                    {isScheduled && (
+                      <>
+                        {/* Edit (icon) — opens the editor. Editing is
+                            allowed for scheduled events; the editor
+                            itself enforces the per-status field locks. */}
+                        <Button
+                          asChild
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          title="Edit event"
+                          aria-label="Edit event"
+                        >
+                          <Link to={`/events/${event.id}`}>
+                            <Pencil className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                        {/* Start Stream — sends the creator into the
+                            full-screen live view; the live page
+                            actually fires the start_event RPC after
+                            the camera permission lands. */}
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!canStartStream}
+                          title={startStreamTooltip}
+                          onClick={() => navigate(`/events/${event.id}/live`)}
+                        >
+                          <Radio className="h-4 w-4" />
+                          Start stream
+                        </Button>
+                      </>
+                    )}
+
+                    {isLive && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => navigate(`/events/${event.id}/live`)}
+                      >
+                        <Radio className="h-4 w-4" />
+                        Resume live
+                      </Button>
+                    )}
+                    {/* Finished: no actions — just the status pill that
+                        already sits inline with the title. */}
                   </div>
                 </div>
               </li>
