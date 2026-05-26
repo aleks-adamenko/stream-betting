@@ -47,6 +47,30 @@ export interface Database {
           viewers_count: number;
           total_pool: number;
           created_at: string;
+          // Phase 6 betting metadata. All nullable so seeded rows and
+          // partial drafts stay valid.
+          void_conditions: string | null;
+          min_bet_cents: number | null;
+          max_bet_cents: number | null;
+          bet_window_opens:
+            | "on_live"
+            | "15m_before"
+            | "1h_before"
+            | "24h_before"
+            | null;
+          bet_window_locks:
+            | "manual"
+            | "30s_after"
+            | "1m_after"
+            | "2m_after"
+            | "5m_after"
+            | null;
+          source_type:
+            | "browser_camera"
+            | "external_rtmp"
+            | "external_url"
+            | null;
+          broadcast_delay_sec: 0 | 5 | 10 | 15 | null;
         };
         Insert: Omit<Database["public"]["Tables"]["events"]["Row"], "created_at"> & {
           created_at?: string;
@@ -274,6 +298,30 @@ export interface Database {
           p_round_duration_sec: number | null;
           p_scheduled_at: string;
           p_video_url: string | null;
+          // Phase 6 betting/stream metadata — every new param has a server-
+          // side DEFAULT NULL so omitting them keeps existing callers OK.
+          p_void_conditions?: string | null;
+          p_min_bet_cents?: number | null;
+          p_max_bet_cents?: number | null;
+          p_bet_window_opens?:
+            | "on_live"
+            | "15m_before"
+            | "1h_before"
+            | "24h_before"
+            | null;
+          p_bet_window_locks?:
+            | "manual"
+            | "30s_after"
+            | "1m_after"
+            | "2m_after"
+            | "5m_after"
+            | null;
+          p_source_type?:
+            | "browser_camera"
+            | "external_rtmp"
+            | "external_url"
+            | null;
+          p_broadcast_delay_sec?: 0 | 5 | 10 | 15 | null;
         };
         Returns: Database["public"]["Tables"]["events"]["Row"];
       };
@@ -289,6 +337,28 @@ export interface Database {
           p_round_duration_sec: number | null;
           p_scheduled_at: string;
           p_video_url: string | null;
+          p_void_conditions?: string | null;
+          p_min_bet_cents?: number | null;
+          p_max_bet_cents?: number | null;
+          p_bet_window_opens?:
+            | "on_live"
+            | "15m_before"
+            | "1h_before"
+            | "24h_before"
+            | null;
+          p_bet_window_locks?:
+            | "manual"
+            | "30s_after"
+            | "1m_after"
+            | "2m_after"
+            | "5m_after"
+            | null;
+          p_source_type?:
+            | "browser_camera"
+            | "external_rtmp"
+            | "external_url"
+            | null;
+          p_broadcast_delay_sec?: 0 | 5 | 10 | 15 | null;
         };
         Returns: Database["public"]["Tables"]["events"]["Row"];
       };
