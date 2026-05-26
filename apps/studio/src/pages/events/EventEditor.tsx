@@ -269,7 +269,12 @@ export default function EventEditor() {
     }
   }, [loaded]);
 
-  const editable = status === "draft";
+  // Drafts and scheduled (published-but-not-yet-live) events both
+  // allow most edits. Live / finished / cancelled events lock down.
+  const editable = status === "draft" || status === "scheduled";
+  // Source type + stream URL are frozen the moment the event leaves
+  // draft — viewers may already be queued up watching for that source.
+  const sourceEditable = status === "draft";
   const verifiedCreator = creator?.status === "verified";
 
   // ---- Derived validation ----
@@ -372,6 +377,15 @@ export default function EventEditor() {
   ]);
   const allComplianceMet = complianceChecks.every((c) => c.passed);
   const canPublish = canSave && verifiedCreator && allComplianceMet;
+  // Save requires the loose `canSave` minimums for a draft, but a
+  // strict "all compliance checks pass" for a scheduled event since
+  // its data is already public and shouldn't regress into an invalid
+  // state. Non-editable statuses (live / finished / cancelled) can't
+  // save at all.
+  const canSaveNow =
+    editable &&
+    canSave &&
+    (status === "draft" || allComplianceMet);
 
   // Per-step completion — drives the green check marks in the rail. Each
   // step is "complete" only when every field that belongs to it is fully
@@ -841,13 +855,17 @@ export default function EventEditor() {
                 colour anchor stays on the primary action. */}
             <button
               type="button"
-              aria-label={isNew ? "Create draft" : "Save draft"}
-              title={isNew ? "Create draft" : "Save draft"}
-              onClick={() => saveMutation.mutate()}
-              disabled={
-                !canSave || !editable || saveMutation.isPending || !isDirty
+              aria-label={isNew ? "Create draft" : "Save"}
+              title={
+                status === "scheduled" && !allComplianceMet
+                  ? "All fields must be valid before saving a scheduled event"
+                  : isNew
+                    ? "Create draft"
+                    : "Save"
               }
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md text-white transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => saveMutation.mutate()}
+              disabled={!canSaveNow || saveMutation.isPending || !isDirty}
+              className="inline-flex h-10 w-7 items-center justify-center rounded-md text-white transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {saveMutation.isPending ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
@@ -938,10 +956,18 @@ export default function EventEditor() {
         </div>
       </div>
 
-      {!editable && (
+      {status === "scheduled" && (
+        <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 text-sm text-foreground">
+          <span className="font-semibold">Event scheduled.</span> Edits
+          save instantly and refresh what viewers see at liverush.co.
+          Source and stream URL are locked once published.
+        </div>
+      )}
+      {(status === "live" ||
+        status === "finished" ||
+        status === "cancelled") && (
         <div className="rounded-2xl border border-border/40 bg-muted/30 p-4 text-sm text-muted-foreground">
-          This event is published. Revert to draft to edit fields or
-          outcomes.
+          This event is {status}. Editing is locked.
         </div>
       )}
 
@@ -1358,7 +1384,7 @@ export default function EventEditor() {
             name="source_type"
             value={sourceType}
             onChange={(v) => setSourceType(v as SourceType)}
-            disabled={!editable}
+            disabled={!sourceEditable}
             options={SOURCE_TYPES}
           />
         </FieldRow>
@@ -1369,7 +1395,7 @@ export default function EventEditor() {
               id="video-url"
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
-              disabled={!editable}
+              disabled={!sourceEditable}
               placeholder="https://instagram.com/reel/... or https://www.tiktok.com/.../video/..."
             />
             <p className="text-xs text-muted-foreground">

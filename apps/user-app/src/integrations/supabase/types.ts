@@ -374,6 +374,14 @@ export interface Database {
         Args: { p_event_id: string };
         Returns: Database["public"]["Tables"]["events"]["Row"];
       };
+      start_event: {
+        Args: { p_event_id: string };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      finish_event: {
+        Args: { p_event_id: string };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
       add_event_outcome: {
         Args: {
           p_event_id: string;
