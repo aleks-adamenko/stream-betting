@@ -8,6 +8,7 @@ import {
   CalendarClock,
   Camera,
   CheckCircle2,
+  HelpCircle,
   Info,
   Loader2,
   Plus,
@@ -733,8 +734,11 @@ export default function EventEditor() {
       {/* ============================================================== */}
       {/* `top-4` leaves a 16px gap between the bar and the scroll
           viewport's top edge once it's stuck — keeps the card visually
-          detached instead of crashing into the screen edge. */}
-      <div className="card-elevated sticky top-4 z-20">
+          detached instead of crashing into the screen edge. Dark
+          blue→purple gradient bg makes the stepper feel like part of
+          the platform's brand surface; stepper text + line colors
+          below are swapped to white-tinted variants for contrast. */}
+      <div className="sticky top-4 z-20 rounded-xl border border-white/10 bg-gradient-to-r from-[#210B88] to-[#5B21FA] shadow-lg">
         <div className="flex items-center justify-between gap-2 px-3 py-3 sm:gap-4 sm:px-5">
           {/* Stepper — each step is a [icon + label] pill linked back to
               its anchor section. Connection lines turn green once the
@@ -760,8 +764,8 @@ export default function EventEditor() {
                       complete
                         ? "font-semibold text-success"
                         : isActive
-                          ? "font-semibold text-foreground"
-                          : "font-medium text-muted-foreground hover:text-foreground",
+                          ? "font-semibold text-white"
+                          : "font-medium text-white/70 hover:text-white",
                     )}
                   >
                     {complete ? (
@@ -769,12 +773,12 @@ export default function EventEditor() {
                     ) : isActive ? (
                       <span
                         aria-hidden
-                        className="h-3 w-3 flex-shrink-0 rounded-full bg-primary"
+                        className="h-3 w-3 flex-shrink-0 rounded-full bg-white"
                       />
                     ) : (
                       <span
                         aria-hidden
-                        className="h-3 w-3 flex-shrink-0 rounded-full border-2 border-muted-foreground/40"
+                        className="h-3 w-3 flex-shrink-0 rounded-full border-2 border-white/50"
                       />
                     )}
                     <span className="hidden whitespace-nowrap sm:inline">
@@ -786,7 +790,7 @@ export default function EventEditor() {
                       aria-hidden
                       className={cn(
                         "h-0.5 w-3 transition-colors sm:w-10",
-                        complete ? "bg-success" : "bg-border",
+                        complete ? "bg-success" : "bg-white/25",
                       )}
                     />
                   )}
@@ -800,13 +804,13 @@ export default function EventEditor() {
               new draft) show as disabled with an explanatory tooltip
               instead of disappearing. */}
           <div className="flex items-center gap-2">
-            {/* Delete — only available on saved drafts. Hidden for
-                scheduled/live events (revert to draft first). */}
+            {/* Delete — bare white icon on the gradient bar (no chrome).
+                Available on draft + finished states, hidden once the
+                event is scheduled/live. Disabled on a brand-new draft
+                with a tooltip explaining why. */}
             {status !== "scheduled" && status !== "live" && (
-              <Button
+              <button
                 type="button"
-                variant="ghost"
-                size="icon"
                 aria-label="Delete draft"
                 title={
                   isNew
@@ -822,35 +826,35 @@ export default function EventEditor() {
                   }
                 }}
                 disabled={isNew || deleteMutation.isPending}
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                className="inline-flex h-10 w-7 items-center justify-center rounded-md text-white transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {deleteMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-5 w-5" />
                 )}
-              </Button>
+              </button>
             )}
 
-            {/* Save — present whenever the draft is editable. Uses the
-                regular (default blue gradient) button variant; the
-                accent (yellow) variant is reserved for Publish. */}
-            <Button
+            {/* Save — same bare white icon treatment as Delete. The
+                Publish button (next over) keeps its accent fill so the
+                colour anchor stays on the primary action. */}
+            <button
               type="button"
-              size="icon"
               aria-label={isNew ? "Create draft" : "Save draft"}
               title={isNew ? "Create draft" : "Save draft"}
               onClick={() => saveMutation.mutate()}
               disabled={
                 !canSave || !editable || saveMutation.isPending || !isDirty
               }
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md text-white transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {saveMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
-                <Save className="h-4 w-4" />
+                <Save className="h-5 w-5" />
               )}
-            </Button>
+            </button>
 
             {/* Publish — visible while the event is still a draft. For a
                 brand-new draft it stays disabled with a "Save the draft
@@ -1099,16 +1103,14 @@ export default function EventEditor() {
 
         <div className="rounded-2xl border border-border/40 bg-muted/30 p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold">Bet outcomes</label>
+            <div className="flex items-center gap-1.5">
+              <label className="text-sm font-semibold">Bet outcomes</label>
+              <HelperTooltip text="What can viewers bet on? Each outcome should be mutually exclusive — only one can be true at the end. Odds are calculated automatically from the betting pool." />
+            </div>
             <span className="text-xs text-muted-foreground">
               Min 2, max 8
             </span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            What can viewers bet on? Each outcome should be mutually
-            exclusive — only one can be true at the end. Odds are
-            calculated automatically from the betting pool.
-          </p>
           <ul className="space-y-2">
             {outcomes.map((o, idx) => {
               const isDup = outcomeDuplicates.has(idx);
@@ -1623,15 +1625,43 @@ function FieldRow({
 }) {
   return (
     <div className="space-y-2">
-      <label
-        htmlFor={htmlFor}
-        className="block text-sm font-semibold text-foreground"
-      >
-        {label}
-      </label>
-      {helper && <p className="text-xs text-muted-foreground">{helper}</p>}
+      <div className="flex items-center gap-1.5">
+        <label
+          htmlFor={htmlFor}
+          className="block text-sm font-semibold text-foreground"
+        >
+          {label}
+        </label>
+        {helper && <HelperTooltip text={helper} />}
+      </div>
       {children}
     </div>
+  );
+}
+
+/**
+ * Small circled "?" rendered inline next to a field label. Hover (or
+ * keyboard focus) reveals a styled tooltip — dark navy background
+ * (the app's `--foreground` value, same as regular text) with light
+ * text — instead of relying on the unstylable native `title` popup.
+ */
+function HelperTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-label={text}
+        className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground"
+      >
+        <HelpCircle className="h-4 w-4" />
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 w-64 max-w-[min(16rem,calc(100vw-2rem))] rounded-md bg-foreground px-3 py-2 text-xs font-normal leading-snug text-background opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
   );
 }
 
@@ -1668,7 +1698,9 @@ function RadioCardGroup<T extends string>({
   }>;
 }) {
   return (
-    <div className="space-y-2">
+    // Stack on mobile, evenly spaced columns at sm+ so options like the
+    // 3 Source choices read as a single horizontal row on desktop.
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       {options.map((opt) => {
         const isSelected = value === opt.value;
         const isInteractive = !disabled && !opt.disabled;
@@ -1676,7 +1708,7 @@ function RadioCardGroup<T extends string>({
           <label
             key={opt.value}
             className={cn(
-              "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-colors",
+              "flex h-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-colors",
               isSelected
                 ? "border-primary bg-primary/5"
                 : "border-border/40 hover:border-border",
