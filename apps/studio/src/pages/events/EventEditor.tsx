@@ -3,9 +3,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowLeft,
   CalendarClock,
   Camera,
+  CheckCircle2,
+  Info,
   Loader2,
   Plus,
   Save,
@@ -21,12 +24,107 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { LiveStreamTest } from "@/components/LiveStreamTest";
 
+// =========================================================================
+// Types + constants
+// =========================================================================
+
 type RoundFormat = "time" | "event";
 type Outcome = { id?: string; label: string; odds: string; sort_order: number };
 
-// Supabase RPC errors are PostgrestError plain objects, not Error instances,
-// so `err instanceof Error` is false and `err.message` is on the object
-// directly. This helper pulls the most useful text out either way.
+type BetWindowOpens = "on_live" | "15m_before" | "1h_before" | "24h_before";
+type BetWindowLocks =
+  | "manual"
+  | "30s_after"
+  | "1m_after"
+  | "2m_after"
+  | "5m_after";
+type SourceType = "browser_camera" | "external_rtmp" | "external_url";
+
+const COVER_MAX_BYTES = 300 * 1024; // 300 KB
+const COVER_ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"];
+
+// The DB schema still requires a non-empty `category` (create_event raises
+// otherwise), but the product no longer surfaces categories in the UI. We
+// send a single sentinel value for every new studio event; existing rows
+// keep whatever category they were already saved with.
+const DEFAULT_CATEGORY = "General";
+
+const BET_WINDOW_OPENS: Array<{ value: BetWindowOpens; label: string }> = [
+  { value: "on_live", label: "When event goes live" },
+  { value: "15m_before", label: "15 min before live" },
+  { value: "1h_before", label: "1 hour before live" },
+  { value: "24h_before", label: "24 hours before live" },
+];
+
+const BET_WINDOW_LOCKS: Array<{
+  value: BetWindowLocks;
+  label: string;
+  recommended?: boolean;
+}> = [
+  {
+    value: "manual",
+    label: "When creator hits 'Lock bets'",
+    recommended: true,
+  },
+  { value: "30s_after", label: "30 seconds after going live" },
+  { value: "1m_after", label: "1 minute after going live" },
+  { value: "2m_after", label: "2 minutes after going live" },
+  { value: "5m_after", label: "5 minutes after going live" },
+];
+
+const SOURCE_TYPES: Array<{
+  value: SourceType;
+  label: string;
+  helper: string;
+  disabled?: boolean;
+}> = [
+  {
+    value: "browser_camera",
+    label: "Browser camera (built-in)",
+    helper: "Stream directly from this device's camera.",
+  },
+  {
+    value: "external_rtmp",
+    label: "External RTMP (OBS / Streamlabs)",
+    helper: "Coming soon — we'll generate an ingest URL + stream key.",
+    disabled: true,
+  },
+  {
+    value: "external_url",
+    label: "External stream URL (Instagram / TikTok)",
+    helper: "Paste a public Instagram Reel or TikTok video URL.",
+  },
+];
+
+const DEFAULT_ODDS = "2.00";
+const DEFAULT_MIN_BET_CENTS = 100; // $1.00 in v0's virtual currency
+const DEFAULT_MAX_BET_CENTS = 10_000; // $100.00
+
+// =========================================================================
+// Helpers
+// =========================================================================
+
+function toLocalDateTimeInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function centsToDollarsString(cents: number | null | undefined): string {
+  if (cents == null) return "";
+  return (cents / 100).toFixed(2);
+}
+
+function dollarsStringToCents(s: string): number | null {
+  if (!s.trim()) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100);
+}
+
+// Supabase RPC errors are plain PostgrestError objects, not Error instances.
+// Pull the most useful text out either way.
 function errMessage(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null) {
     const e = err as { message?: unknown; details?: unknown; hint?: unknown };
@@ -39,18 +137,31 @@ function errMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-const COVER_MAX_BYTES = 300 * 1024; // 300 KB
-const COVER_ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"];
+// =========================================================================
+// Steps rail (left side of the editor, sticky, full height)
+// =========================================================================
 
-// Static category for now — the user-facing dropdown was removed; once
-// categories become part of the platform UX they'll come back here.
-const DEFAULT_CATEGORY = "Challenge";
+const SECTIONS = [
+  {
+    id: "challenge",
+    label: "Challenge",
+    helper: "Cover, title, rules, format",
+  },
+  {
+    id: "betting",
+    label: "Betting",
+    helper: "Outcomes, limits, void conditions",
+  },
+  { id: "stream", label: "Stream", helper: "Source and schedule" },
+  { id: "review", label: "Review", helper: "Summary + publish" },
+] as const;
 
-// Until dynamic, pool-based odds are computed at bet-time, every outcome
-// gets seeded with the same neutral 2.00× value so the existing schema
-// constraint (odds > 1) is satisfied. Existing outcomes loaded from the
-// DB keep whatever odds they were saved with.
-const DEFAULT_ODDS = "2.00";
+// Step stepper + action buttons are rendered as a sticky top bar inside
+// EventEditor's main render — see the JSX below.
+
+// =========================================================================
+// Main editor
+// =========================================================================
 
 export default function EventEditor() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -61,27 +172,38 @@ export default function EventEditor() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Form state
+  // ---- Form state ----
   const [title, setTitle] = useState("");
-  // `category` is kept in state so existing rows that already have one
-  // round-trip cleanly, but new events get the DEFAULT_CATEGORY value.
-  // The user-facing dropdown was removed per product call.
-  const [category, setCategory] = useState(DEFAULT_CATEGORY);
   const [description, setDescription] = useState("");
+  // `category` is hidden from the UI but still needed by the RPC. Held
+  // in state so loaded drafts round-trip their existing value.
+  const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
   const [rules, setRules] = useState("");
   const [roundFormat, setRoundFormat] = useState<RoundFormat>("event");
   const [roundDurationSec, setRoundDurationSec] = useState<string>("");
-  const [scheduledAt, setScheduledAt] = useState<string>("");
-  const [videoUrl, setVideoUrl] = useState<string>("");
-  const [coverUrl, setCoverUrl] = useState<string | null>(null);
-  const [coverUploading, setCoverUploading] = useState(false);
+  const [voidConditions, setVoidConditions] = useState("");
   const [outcomes, setOutcomes] = useState<Outcome[]>([
     { label: "", odds: DEFAULT_ODDS, sort_order: 0 },
     { label: "", odds: DEFAULT_ODDS, sort_order: 1 },
   ]);
+  const [minBetDollars, setMinBetDollars] = useState(
+    centsToDollarsString(DEFAULT_MIN_BET_CENTS),
+  );
+  const [maxBetDollars, setMaxBetDollars] = useState(
+    centsToDollarsString(DEFAULT_MAX_BET_CENTS),
+  );
+  const [betWindowOpens, setBetWindowOpens] =
+    useState<BetWindowOpens>("on_live");
+  const [betWindowLocks, setBetWindowLocks] =
+    useState<BetWindowLocks>("manual");
+  const [scheduledAt, setScheduledAt] = useState<string>("");
+  const [sourceType, setSourceType] = useState<SourceType>("external_url");
+  const [videoUrl, setVideoUrl] = useState<string>("");
   const [status, setStatus] = useState<string>("draft");
 
-  // Load existing event when editing.
+  // ---- Load existing draft ----
   const { data: loaded, isLoading } = useQuery({
     queryKey: ["studio", "event", eventId],
     enabled: !!eventId,
@@ -92,6 +214,10 @@ export default function EventEditor() {
           `
           id, title, description, cover_url, video_url, category, rules,
           round_format, round_duration_sec, status, scheduled_at, creator_id,
+          void_conditions,
+          min_bet_cents, max_bet_cents,
+          bet_window_opens, bet_window_locks,
+          source_type, broadcast_delay_sec,
           outcomes:event_outcomes!event_outcomes_event_id_fkey (
             id, label, odds, sort_order
           )
@@ -107,15 +233,26 @@ export default function EventEditor() {
   useEffect(() => {
     if (!loaded) return;
     setTitle(loaded.title);
-    setCategory(loaded.category);
     setDescription(loaded.description ?? "");
+    // Preserve whatever category the row was saved with so we don't
+    // overwrite legacy values on update.
+    setCategory(loaded.category || DEFAULT_CATEGORY);
+    setCoverUrl(loaded.cover_url ?? null);
     setRules(loaded.rules ?? "");
     setRoundFormat(loaded.round_format as RoundFormat);
     setRoundDurationSec(loaded.round_duration_sec?.toString() ?? "");
-    // Format for datetime-local: "YYYY-MM-DDTHH:mm" (local)
+    setVoidConditions(loaded.void_conditions ?? "");
+    setMinBetDollars(
+      centsToDollarsString(loaded.min_bet_cents ?? DEFAULT_MIN_BET_CENTS),
+    );
+    setMaxBetDollars(
+      centsToDollarsString(loaded.max_bet_cents ?? DEFAULT_MAX_BET_CENTS),
+    );
+    setBetWindowOpens(loaded.bet_window_opens ?? "on_live");
+    setBetWindowLocks(loaded.bet_window_locks ?? "manual");
     setScheduledAt(toLocalDateTimeInput(loaded.scheduled_at));
+    setSourceType(loaded.source_type ?? "external_url");
     setVideoUrl(loaded.video_url ?? "");
-    setCoverUrl(loaded.cover_url ?? null);
     setStatus(loaded.status);
     if (loaded.outcomes && loaded.outcomes.length > 0) {
       setOutcomes(
@@ -133,33 +270,157 @@ export default function EventEditor() {
 
   const editable = status === "draft";
   const verifiedCreator = creator?.status === "verified";
-  // Odds are no longer user-edited (computed at bet-time later), so the
-  // only thing we check here is the label.
-  const validOutcomes = outcomes.filter((o) => o.label.trim() !== "");
+
+  // ---- Derived validation ----
+  const validOutcomes = useMemo(
+    () => outcomes.filter((o) => o.label.trim() !== ""),
+    [outcomes],
+  );
+  const outcomeLabelsLower = useMemo(
+    () => outcomes.map((o) => o.label.trim().toLowerCase()),
+    [outcomes],
+  );
+  const outcomeDuplicates = useMemo(() => {
+    const seen = new Map<string, number>();
+    const dupes = new Set<number>();
+    outcomeLabelsLower.forEach((label, idx) => {
+      if (!label) return;
+      const first = seen.get(label);
+      if (first === undefined) {
+        seen.set(label, idx);
+      } else {
+        dupes.add(idx);
+        dupes.add(first);
+      }
+    });
+    return dupes;
+  }, [outcomeLabelsLower]);
+
+  const minCents = dollarsStringToCents(minBetDollars);
+  const maxCents = dollarsStringToCents(maxBetDollars);
+  const betLimitsValid =
+    minCents !== null &&
+    maxCents !== null &&
+    minCents >= 100 &&
+    maxCents >= minCents &&
+    maxCents <= 1_000_000;
+
+  // Minimums needed to call create_event / update_event without the DB
+  // rejecting the row. We keep this loose so partial drafts can be saved.
   const canSave =
     title.trim().length >= 3 &&
     !!scheduledAt &&
     (roundFormat !== "time" || Number(roundDurationSec) > 0) &&
-    validOutcomes.length >= 2;
+    validOutcomes.length >= 2 &&
+    outcomeDuplicates.size === 0;
 
-  // Dirty-tracking: when editing an existing draft, keep "Save changes"
-  // disabled until the form actually diverges from what's on the server.
-  // New events are always dirty (the user is composing from scratch).
+  // Compliance checks shown in the Review section. All must pass before
+  // Publish unlocks (in addition to being a verified creator).
+  const complianceChecks = useMemo(() => {
+    return [
+      {
+        key: "title",
+        label: "Title and description provided",
+        passed: title.trim().length >= 5 && description.trim().length > 0,
+      },
+      {
+        key: "cover",
+        label: "Cover image uploaded",
+        passed: !!coverUrl,
+      },
+      {
+        key: "rules",
+        label: "Rules describe the challenge clearly",
+        passed: rules.trim().length >= 30,
+      },
+      {
+        key: "outcomes",
+        label: "At least 2 unique outcomes defined",
+        passed: validOutcomes.length >= 2 && outcomeDuplicates.size === 0,
+      },
+      {
+        key: "betlimits",
+        label: "Bet limits within platform range",
+        passed: betLimitsValid,
+      },
+      {
+        key: "stream",
+        label: "Stream source configured",
+        passed:
+          sourceType === "browser_camera" ||
+          (sourceType === "external_url" && videoUrl.trim().length > 0),
+      },
+      {
+        key: "schedule",
+        label: "Scheduled in the future",
+        passed:
+          !!scheduledAt && new Date(scheduledAt).getTime() > Date.now(),
+      },
+    ];
+  }, [
+    title,
+    description,
+    coverUrl,
+    rules,
+    validOutcomes.length,
+    outcomeDuplicates.size,
+    betLimitsValid,
+    sourceType,
+    videoUrl,
+    scheduledAt,
+  ]);
+  const allComplianceMet = complianceChecks.every((c) => c.passed);
+  const canPublish = canSave && verifiedCreator && allComplianceMet;
+
+  // Per-step completion — drives the green check marks in the rail. Each
+  // step is "complete" only when every field that belongs to it is fully
+  // valid (same predicates used for the Missing chips in the summary).
+  // The merged "Challenge" step owns what used to be in Basics too.
+  const stepComplete: Record<(typeof SECTIONS)[number]["id"], boolean> = {
+    challenge:
+      title.trim().length >= 5 &&
+      description.trim().length > 0 &&
+      !!coverUrl &&
+      rules.trim().length >= 30 &&
+      (roundFormat !== "time" || Number(roundDurationSec) > 0),
+    betting:
+      validOutcomes.length >= 2 &&
+      outcomeDuplicates.size === 0 &&
+      betLimitsValid,
+    stream:
+      !!scheduledAt &&
+      new Date(scheduledAt).getTime() > Date.now() &&
+      (sourceType !== "external_url" || videoUrl.trim().length > 0),
+    // Review is a summary step — mark it complete once the rest of the
+    // form is ready to publish (without requiring verified-creator,
+    // which is a moderator concern, not the creator's).
+    review: allComplianceMet,
+  };
+
+  // ---- Dirty tracking ----
   const isDirty = useMemo(() => {
     if (isNew) return true;
     if (!loaded) return false;
 
     if (title !== loaded.title) return true;
-    if (category !== loaded.category) return true;
     if (description !== (loaded.description ?? "")) return true;
+    if (category !== (loaded.category || DEFAULT_CATEGORY)) return true;
     if (rules !== (loaded.rules ?? "")) return true;
     if (roundFormat !== loaded.round_format) return true;
-    if (
-      roundDurationSec !== (loaded.round_duration_sec?.toString() ?? "")
-    ) {
+    if (roundDurationSec !== (loaded.round_duration_sec?.toString() ?? ""))
       return true;
-    }
-    if (scheduledAt !== toLocalDateTimeInput(loaded.scheduled_at)) return true;
+    if (voidConditions !== (loaded.void_conditions ?? "")) return true;
+    if (minCents !== (loaded.min_bet_cents ?? DEFAULT_MIN_BET_CENTS))
+      return true;
+    if (maxCents !== (loaded.max_bet_cents ?? DEFAULT_MAX_BET_CENTS))
+      return true;
+    if (betWindowOpens !== (loaded.bet_window_opens ?? "on_live"))
+      return true;
+    if (betWindowLocks !== (loaded.bet_window_locks ?? "manual"))
+      return true;
+    if (scheduledAt !== toLocalDateTimeInput(loaded.scheduled_at))
+      return true;
+    if (sourceType !== (loaded.source_type ?? "external_url")) return true;
     if (videoUrl !== (loaded.video_url ?? "")) return true;
     if (coverUrl !== (loaded.cover_url ?? null)) return true;
 
@@ -172,26 +433,55 @@ export default function EventEditor() {
       const prev = loadedOutcomes[i];
       if (cur.id !== prev.id) return true;
       if (cur.label !== prev.label) return true;
-      // Odds aren't user-edited anymore so we don't compare them.
     }
     return false;
   }, [
     isNew,
     loaded,
     title,
-    category,
     description,
+    category,
     rules,
     roundFormat,
     roundDurationSec,
+    voidConditions,
+    minCents,
+    maxCents,
+    betWindowOpens,
+    betWindowLocks,
     scheduledAt,
+    sourceType,
     videoUrl,
     coverUrl,
     outcomes,
   ]);
 
-  const canPublish = canSave && verifiedCreator;
+  // ---- Section anchor highlight on scroll ----
+  const [activeSection, setActiveSection] =
+    useState<(typeof SECTIONS)[number]["id"]>("basics");
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const targets = SECTIONS.map((s) =>
+      document.getElementById(s.id),
+    ).filter((el): el is HTMLElement => el !== null);
+    if (targets.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting && e.target.id) {
+            setActiveSection(
+              e.target.id as (typeof SECTIONS)[number]["id"],
+            );
+          }
+        }
+      },
+      { rootMargin: "-30% 0px -60% 0px", threshold: 0 },
+    );
+    targets.forEach((t) => observer.observe(t));
+    return () => observer.disconnect();
+  }, []);
 
+  // ---- Cover upload handler ----
   const handleCoverChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
@@ -226,14 +516,12 @@ export default function EventEditor() {
       setCoverUrl(data.publicUrl);
       toast.success("Cover uploaded");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Upload failed";
-      toast.error(message);
+      toast.error(errMessage(err, "Upload failed"));
     } finally {
       setCoverUploading(false);
     }
   };
 
-  // Mock for now — wires up to an image-gen service in a later phase.
   const handleGenerateCover = () => {
     toast.info("AI cover generation coming soon", {
       description:
@@ -241,6 +529,7 @@ export default function EventEditor() {
     });
   };
 
+  // ---- Save / publish / delete mutations ----
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!canSave) throw new Error("Fill the required fields first");
@@ -249,33 +538,35 @@ export default function EventEditor() {
       const duration =
         roundFormat === "time" ? Number(roundDurationSec) || null : null;
 
+      const rpcArgs = {
+        p_title: title.trim(),
+        p_cover_url: coverUrl,
+        p_description: description.trim() || null,
+        p_rules: rules.trim() || null,
+        p_category: category,
+        p_round_format: roundFormat,
+        p_round_duration_sec: duration,
+        p_scheduled_at: isoScheduled,
+        p_video_url: videoUrl.trim() || null,
+        p_void_conditions: voidConditions.trim() || null,
+        p_min_bet_cents: minCents,
+        p_max_bet_cents: maxCents,
+        p_bet_window_opens: betWindowOpens,
+        p_bet_window_locks: betWindowLocks,
+        p_source_type: sourceType,
+        // Broadcast delay is now enforced platform-side; no per-event
+        // override gets sent.
+      };
+
       let savedId = eventId;
       if (isNew) {
-        const { data, error } = await supabase.rpc("create_event", {
-          p_title: title.trim(),
-          p_cover_url: coverUrl,
-          p_description: description.trim() || null,
-          p_rules: rules.trim() || null,
-          p_category: category,
-          p_round_format: roundFormat,
-          p_round_duration_sec: duration,
-          p_scheduled_at: isoScheduled,
-          p_video_url: videoUrl.trim() || null,
-        });
+        const { data, error } = await supabase.rpc("create_event", rpcArgs);
         if (error) throw error;
         savedId = data.id;
       } else {
         const { error } = await supabase.rpc("update_event", {
           p_event_id: eventId!,
-          p_title: title.trim(),
-          p_cover_url: coverUrl,
-          p_description: description.trim() || null,
-          p_rules: rules.trim() || null,
-          p_category: category,
-          p_round_format: roundFormat,
-          p_round_duration_sec: duration,
-          p_scheduled_at: isoScheduled,
-          p_video_url: videoUrl.trim() || null,
+          ...rpcArgs,
         });
         if (error) throw error;
       }
@@ -287,8 +578,6 @@ export default function EventEditor() {
       const keptIds = new Set(
         outcomes.filter((o) => o.id).map((o) => o.id!),
       );
-
-      // Deletes
       for (const ex of loaded?.outcomes ?? []) {
         if (!keptIds.has(ex.id)) {
           const { error } = await supabase.rpc("delete_event_outcome", {
@@ -297,10 +586,6 @@ export default function EventEditor() {
           if (error) throw error;
         }
       }
-
-      // Inserts + updates. Odds aren't user-edited anymore; existing
-      // outcomes keep whatever odds they were saved with, new ones get
-      // DEFAULT_ODDS (will be replaced by pool-derived odds at bet-time).
       for (const [idx, o] of outcomes.entries()) {
         const trimmedLabel = o.label.trim();
         if (!trimmedLabel) continue;
@@ -327,18 +612,19 @@ export default function EventEditor() {
           if (error) throw error;
         }
       }
-
       return savedId!;
     },
     onSuccess: (savedId) => {
       toast.success("Event saved");
-      void queryClient.invalidateQueries({ queryKey: ["studio", "events", creator?.id] });
-      void queryClient.invalidateQueries({ queryKey: ["studio", "event", savedId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "event", savedId],
+      });
       if (isNew) navigate(`/events/${savedId}`, { replace: true });
     },
     onError: (err) => {
-      // Log to the console so Postgrest details/hint/code show up in DevTools
-      // for the next layer of diagnosis if the toast text isn't enough.
       console.error("Event save failed", err);
       toast.error(errMessage(err, "Save failed"));
     },
@@ -354,8 +640,12 @@ export default function EventEditor() {
     },
     onSuccess: () => {
       toast.success("Event published");
-      void queryClient.invalidateQueries({ queryKey: ["studio", "events", creator?.id] });
-      void queryClient.invalidateQueries({ queryKey: ["studio", "event", eventId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "event", eventId],
+      });
       navigate("/events");
     },
     onError: (err) => {
@@ -374,8 +664,12 @@ export default function EventEditor() {
     },
     onSuccess: () => {
       toast.success("Event reverted to draft");
-      void queryClient.invalidateQueries({ queryKey: ["studio", "events", creator?.id] });
-      void queryClient.invalidateQueries({ queryKey: ["studio", "event", eventId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "event", eventId],
+      });
     },
     onError: (err) => {
       console.error("Event unpublish failed", err);
@@ -393,7 +687,9 @@ export default function EventEditor() {
     },
     onSuccess: () => {
       toast.success("Event deleted");
-      void queryClient.invalidateQueries({ queryKey: ["studio", "events", creator?.id] });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
       navigate("/events", { replace: true });
     },
     onError: (err) => {
@@ -402,6 +698,7 @@ export default function EventEditor() {
     },
   });
 
+  // ---- Loading / not-found states ----
   if (eventId && isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -409,7 +706,6 @@ export default function EventEditor() {
       </div>
     );
   }
-
   if (eventId && !loaded) {
     return (
       <div className="mx-auto max-w-xl space-y-4 py-12 text-center">
@@ -421,8 +717,202 @@ export default function EventEditor() {
     );
   }
 
+  // =======================================================================
+  // RENDER
+  // =======================================================================
+
   return (
     <div className="w-full space-y-6">
+      {/* ============================================================== */}
+      {/* Sticky top bar — horizontal stepper + 3 action buttons.        */}
+      {/* Rendered as a card-elevated container (same surface treatment  */}
+      {/* every other section uses) and pinned to the top of the scroll  */}
+      {/* viewport. Its left/right edges align with the page wrapper's   */}
+      {/* content padding so the bar feels continuous with the cards     */}
+      {/* below it.                                                       */}
+      {/* ============================================================== */}
+      {/* `top-4` leaves a 16px gap between the bar and the scroll
+          viewport's top edge once it's stuck — keeps the card visually
+          detached instead of crashing into the screen edge. */}
+      <div className="card-elevated sticky top-4 z-20">
+        <div className="flex items-center justify-between gap-2 px-3 py-3 sm:gap-4 sm:px-5">
+          {/* Stepper — each step is a [icon + label] pill linked back to
+              its anchor section. Connection lines turn green once the
+              step on their LEFT is complete, so the bar visually fills
+              in left-to-right as the form gets done. On mobile we drop
+              the labels and tighten the line widths so the whole row
+              fits at 375px viewport. */}
+          <ol className="flex items-center gap-1 sm:gap-3">
+            {SECTIONS.map((s, idx) => {
+              const isActive = activeSection === s.id;
+              const complete = stepComplete[s.id];
+              return (
+                <li
+                  key={s.id}
+                  className="flex items-center gap-1 sm:gap-3"
+                >
+                  <a
+                    href={`#${s.id}`}
+                    title={s.label}
+                    aria-label={s.label}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg px-1 py-1 text-sm transition-colors sm:px-1.5",
+                      complete
+                        ? "font-semibold text-success"
+                        : isActive
+                          ? "font-semibold text-foreground"
+                          : "font-medium text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {complete ? (
+                      <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-success" />
+                    ) : isActive ? (
+                      <span
+                        aria-hidden
+                        className="h-3 w-3 flex-shrink-0 rounded-full bg-primary"
+                      />
+                    ) : (
+                      <span
+                        aria-hidden
+                        className="h-3 w-3 flex-shrink-0 rounded-full border-2 border-muted-foreground/40"
+                      />
+                    )}
+                    <span className="hidden whitespace-nowrap sm:inline">
+                      {s.label}
+                    </span>
+                  </a>
+                  {idx < SECTIONS.length - 1 && (
+                    <div
+                      aria-hidden
+                      className={cn(
+                        "h-0.5 w-3 transition-colors sm:w-10",
+                        complete ? "bg-success" : "bg-border",
+                      )}
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+
+          {/* Right: 3 action buttons. All three are always visible; the
+              ones that don't make sense yet (Delete/Publish on a brand-
+              new draft) show as disabled with an explanatory tooltip
+              instead of disappearing. */}
+          <div className="flex items-center gap-2">
+            {/* Delete — only available on saved drafts. Hidden for
+                scheduled/live events (revert to draft first). */}
+            {status !== "scheduled" && status !== "live" && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Delete draft"
+                title={
+                  isNew
+                    ? "Save the draft first to enable deletion"
+                    : "Delete draft"
+                }
+                onClick={() => {
+                  if (
+                    !isNew &&
+                    confirm("Delete this draft? This cannot be undone.")
+                  ) {
+                    deleteMutation.mutate();
+                  }
+                }}
+                disabled={isNew || deleteMutation.isPending}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </Button>
+            )}
+
+            {/* Save — present whenever the draft is editable. Uses the
+                regular (default blue gradient) button variant; the
+                accent (yellow) variant is reserved for Publish. */}
+            <Button
+              type="button"
+              size="icon"
+              aria-label={isNew ? "Create draft" : "Save draft"}
+              title={isNew ? "Create draft" : "Save draft"}
+              onClick={() => saveMutation.mutate()}
+              disabled={
+                !canSave || !editable || saveMutation.isPending || !isDirty
+              }
+            >
+              {saveMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+            </Button>
+
+            {/* Publish — visible while the event is still a draft. For a
+                brand-new draft it stays disabled with a "Save the draft
+                first" tooltip. Accent variant is the headline action.
+                On mobile the label collapses so the button matches the
+                icon-only Save/Delete next to it. */}
+            {status === "draft" && (
+              <Button
+                type="button"
+                variant="accent"
+                aria-label="Publish"
+                title={
+                  isNew
+                    ? "Save the draft first to enable publishing"
+                    : !verifiedCreator
+                      ? "Publishing unlocks once your account is verified"
+                      : !allComplianceMet
+                        ? "Complete every field above to publish"
+                        : "Publish"
+                }
+                onClick={() => publishMutation.mutate()}
+                disabled={isNew || !canPublish || publishMutation.isPending}
+                className="w-10 px-0 sm:w-auto sm:px-5"
+              >
+                {publishMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" />
+                    <span className="hidden sm:inline">Publish</span>
+                  </>
+                )}
+              </Button>
+            )}
+
+            {/* Unpublish — replaces Publish once the event has been
+                pushed live or scheduled. Same icon-on-mobile treatment. */}
+            {!isNew && (status === "scheduled" || status === "live") && (
+              <Button
+                type="button"
+                variant="secondary"
+                aria-label="Unpublish"
+                title="Unpublish"
+                onClick={() => unpublishMutation.mutate()}
+                disabled={unpublishMutation.isPending}
+                className="w-10 px-0 sm:w-auto sm:px-5"
+              >
+                {unpublishMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <XCircle className="h-4 w-4" />
+                    <span className="hidden sm:inline">Unpublish</span>
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
           <Link
@@ -437,7 +927,8 @@ export default function EventEditor() {
           </h1>
           {!isNew && (
             <p className="mt-1 text-sm text-muted-foreground">
-              Status: <span className="font-semibold text-foreground">{status}</span>
+              Status:{" "}
+              <span className="font-semibold text-foreground">{status}</span>
             </p>
           )}
         </div>
@@ -445,148 +936,408 @@ export default function EventEditor() {
 
       {!editable && (
         <div className="rounded-2xl border border-border/40 bg-muted/30 p-4 text-sm text-muted-foreground">
-          This event is published. Revert to draft to edit fields or outcomes.
+          This event is published. Revert to draft to edit fields or
+          outcomes.
         </div>
       )}
 
-      {/* Cover */}
-      <section className="space-y-2">
-        <label className="text-sm font-semibold">Cover image</label>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!editable || coverUploading}
-            className="group relative h-24 w-32 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-muted disabled:opacity-60"
-          >
-            {coverUrl ? (
-              <img
-                src={coverUrl}
-                alt="Cover"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                <Camera className="h-6 w-6" />
-              </div>
-            )}
-            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-              {coverUploading ? (
-                <Loader2 className="h-5 w-5 animate-spin text-white" />
-              ) : (
-                <Camera className="h-5 w-5 text-white" />
-              )}
-            </div>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={handleCoverChange}
-          />
-          <div className="flex flex-col items-start gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={handleGenerateCover}
-              disabled={!editable}
-            >
-              <Sparkles className="h-4 w-4" />
-              Generate image
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              JPG / PNG / WebP, max 300 KB. Recommended 16:9.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Title */}
-      <section className="space-y-2">
-        <label htmlFor="title" className="text-sm font-semibold">
-          Title
-        </label>
-        <Input
-          id="title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          disabled={!editable}
-          maxLength={120}
-          placeholder="What's the show?"
+      {/* ================================================================ */}
+      {/* SECTION 1 — CHALLENGE (merged with the former Basics card)        */}
+      {/* ================================================================ */}
+      <section
+        id="challenge"
+        aria-labelledby="challenge-heading"
+        className="card-elevated overflow-hidden scroll-mt-20"
+      >
+        <SectionHeading
+          id="challenge-heading"
+          index={1}
+          label="Challenge"
         />
-      </section>
+        <div className="space-y-6 p-5 sm:p-6">
 
-      {/* Description + rules */}
-      <section className="space-y-4">
-        <div className="space-y-2">
-          <label htmlFor="description" className="text-sm font-semibold">
-            Description
-          </label>
+        <FieldRow label="Cover image">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!editable || coverUploading}
+              className="group relative h-24 w-32 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-muted disabled:opacity-60"
+            >
+              {coverUrl ? (
+                <img
+                  src={coverUrl}
+                  alt="Cover"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                  <Camera className="h-6 w-6" />
+                </div>
+              )}
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                {coverUploading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-white" />
+                ) : (
+                  <Camera className="h-5 w-5 text-white" />
+                )}
+              </div>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handleCoverChange}
+            />
+            <div className="flex flex-col items-start gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={handleGenerateCover}
+                disabled={!editable}
+              >
+                <Sparkles className="h-4 w-4" />
+                Generate image
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                JPG / PNG / WebP, max 300 KB. Recommended 16:9.
+              </p>
+            </div>
+          </div>
+        </FieldRow>
+
+        <FieldRow label="Title" htmlFor="title">
+          <Input
+            id="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value.slice(0, 80))}
+            disabled={!editable}
+            maxLength={80}
+            placeholder="What's the show?"
+          />
+          <CharCounter value={title} max={80} />
+        </FieldRow>
+
+        <FieldRow label="Description" htmlFor="description">
           <textarea
             id="description"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => setDescription(e.target.value.slice(0, 300))}
             disabled={!editable}
             rows={3}
+            maxLength={300}
             className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
             placeholder="A quick hook for the feed."
           />
-        </div>
-        <div className="space-y-2">
-          <label htmlFor="rules" className="text-sm font-semibold">
-            Rules
-          </label>
+          <CharCounter value={description} max={300} />
+        </FieldRow>
+
+        <FieldRow
+          label="Rules"
+          htmlFor="rules"
+          helper="Describe exactly what you'll do and what counts as success. Write rules so the winning outcome is obvious to anyone watching — clear, observable conditions reduce viewer disputes and speed up moderation."
+        >
           <textarea
             id="rules"
             value={rules}
-            onChange={(e) => setRules(e.target.value)}
+            onChange={(e) => setRules(e.target.value.slice(0, 1000))}
             disabled={!editable}
-            rows={4}
+            rows={5}
+            maxLength={1000}
             className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-            placeholder="How the rounds work, win conditions, etc."
+            placeholder="Example: I'll attempt to pop 10 balloons blindfolded in under 60 seconds. A balloon counts as popped only if fully burst, not deflated."
           />
+          <CharCounter value={rules} max={1000} />
+        </FieldRow>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <FieldRow
+            label="Round format"
+            htmlFor="round-format"
+            helper="How many attempts or rounds make up this challenge?"
+          >
+            <select
+              id="round-format"
+              value={roundFormat}
+              onChange={(e) => setRoundFormat(e.target.value as RoundFormat)}
+              disabled={!editable}
+              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+            >
+              <option value="event">Single round</option>
+              <option value="time">Time-limited</option>
+            </select>
+          </FieldRow>
+          {roundFormat === "time" && (
+            <FieldRow label="Round duration (sec)" htmlFor="round-duration">
+              <Input
+                id="round-duration"
+                type="number"
+                min={5}
+                value={roundDurationSec}
+                onChange={(e) => setRoundDurationSec(e.target.value)}
+                disabled={!editable}
+                placeholder="30"
+              />
+            </FieldRow>
+          )}
+        </div>
         </div>
       </section>
 
-      {/* Round format + scheduled at */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="space-y-2">
-          <label htmlFor="round-format" className="text-sm font-semibold">
-            Round format
-          </label>
-          <select
-            id="round-format"
-            value={roundFormat}
-            onChange={(e) => setRoundFormat(e.target.value as RoundFormat)}
-            disabled={!editable}
-            className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
-          >
-            <option value="event">Event-based</option>
-            <option value="time">Time-based</option>
-          </select>
-        </div>
-        {roundFormat === "time" && (
-          <div className="space-y-2">
-            <label htmlFor="round-duration" className="text-sm font-semibold">
-              Round duration (sec)
-            </label>
-            <Input
-              id="round-duration"
-              type="number"
-              min={5}
-              value={roundDurationSec}
-              onChange={(e) => setRoundDurationSec(e.target.value)}
-              disabled={!editable}
-              placeholder="30"
-            />
+      {/* ================================================================ */}
+      {/* SECTION 2 — BETTING                                               */}
+      {/* ================================================================ */}
+      <section
+        id="betting"
+        aria-labelledby="betting-heading"
+        className="card-elevated overflow-hidden scroll-mt-20"
+      >
+        <SectionHeading id="betting-heading" index={2} label="Betting" />
+        <div className="space-y-6 p-5 sm:p-6">
+
+        <div className="rounded-2xl border border-border/40 bg-muted/30 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-semibold">Bet outcomes</label>
+            <span className="text-xs text-muted-foreground">
+              Min 2, max 8
+            </span>
           </div>
-        )}
-        <div className="space-y-2">
-          <label htmlFor="scheduled-at" className="text-sm font-semibold">
-            Scheduled for
-          </label>
+          <p className="text-xs text-muted-foreground">
+            What can viewers bet on? Each outcome should be mutually
+            exclusive — only one can be true at the end. Odds are
+            calculated automatically from the betting pool.
+          </p>
+          <ul className="space-y-2">
+            {outcomes.map((o, idx) => {
+              const isDup = outcomeDuplicates.has(idx);
+              const trimmed = o.label.trim();
+              const isEmpty =
+                trimmed === "" && outcomes.length <= validOutcomes.length;
+              return (
+                <li
+                  key={o.id ?? `new-${idx}`}
+                  className="flex flex-col gap-1 rounded-xl border border-border/40 bg-card p-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={o.label}
+                      onChange={(e) =>
+                        setOutcomes((prev) =>
+                          prev.map((p, i) =>
+                            i === idx
+                              ? { ...p, label: e.target.value.slice(0, 50) }
+                              : p,
+                          ),
+                        )
+                      }
+                      disabled={!editable}
+                      placeholder="Outcome label"
+                      maxLength={50}
+                      className={cn(
+                        "flex-1",
+                        isDup &&
+                          "border-destructive focus-visible:ring-destructive",
+                      )}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOutcomes((prev) =>
+                          prev.filter((_, i) => i !== idx),
+                        )
+                      }
+                      disabled={!editable || outcomes.length <= 2}
+                      aria-label="Remove outcome"
+                      className={cn(
+                        "inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/40 hover:text-destructive",
+                        (!editable || outcomes.length <= 2) &&
+                          "cursor-not-allowed opacity-40",
+                      )}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {isDup && (
+                    <p className="text-xs text-destructive">
+                      Duplicate outcome
+                    </p>
+                  )}
+                  {isEmpty && idx < 2 && (
+                    <p className="text-xs text-muted-foreground">
+                      Outcome cannot be empty
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!editable || outcomes.length >= 8}
+            onClick={() =>
+              setOutcomes((prev) => [
+                ...prev,
+                {
+                  label: "",
+                  odds: DEFAULT_ODDS,
+                  sort_order: prev.length,
+                },
+              ])
+            }
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add outcome
+          </Button>
+        </div>
+
+        {/* Platform-wide moderation note — not a field, no border, no
+            background. Sits between outcomes and bet limits. */}
+        <p className="flex items-start gap-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+          <span>
+            Winning outcomes are verified by the LiveRush moderation team
+            before payouts are released.
+          </span>
+        </p>
+
+        <FieldRow
+          label="Bet amount limits"
+          helper="Per-user, per-outcome. Values in platform currency units."
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label
+                htmlFor="min-bet"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Minimum bet
+              </label>
+              <Input
+                id="min-bet"
+                type="number"
+                min={1}
+                step="0.01"
+                value={minBetDollars}
+                onChange={(e) => setMinBetDollars(e.target.value)}
+                disabled={!editable}
+              />
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor="max-bet"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Maximum bet
+              </label>
+              <Input
+                id="max-bet"
+                type="number"
+                min={1}
+                step="0.01"
+                value={maxBetDollars}
+                onChange={(e) => setMaxBetDollars(e.target.value)}
+                disabled={!editable}
+              />
+            </div>
+          </div>
+          {!betLimitsValid && (minBetDollars || maxBetDollars) && (
+            <p className="text-xs text-destructive">
+              Min must be ≥ 1, max must be ≥ min and ≤ 10,000.
+            </p>
+          )}
+        </FieldRow>
+
+        <FieldRow
+          label="When can viewers bet?"
+          helper="Locking bets manually is recommended for skill challenges — it gives you control over when betting closes based on what's happening on stream."
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label
+                htmlFor="window-opens"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Opens
+              </label>
+              <select
+                id="window-opens"
+                value={betWindowOpens}
+                onChange={(e) =>
+                  setBetWindowOpens(e.target.value as BetWindowOpens)
+                }
+                disabled={!editable}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+              >
+                {BET_WINDOW_OPENS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor="window-locks"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Locks
+              </label>
+              <select
+                id="window-locks"
+                value={betWindowLocks}
+                onChange={(e) =>
+                  setBetWindowLocks(e.target.value as BetWindowLocks)
+                }
+                disabled={!editable}
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+              >
+                {BET_WINDOW_LOCKS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                    {o.recommended ? " — recommended" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </FieldRow>
+
+        <FieldRow
+          label="Special void conditions (optional)"
+          htmlFor="void-conditions"
+          helper="Platform defaults already cover stream disconnects, technical failures, and creator cancellation. Use this only for challenge-specific situations."
+        >
+          <textarea
+            id="void-conditions"
+            value={voidConditions}
+            onChange={(e) => setVoidConditions(e.target.value.slice(0, 300))}
+            disabled={!editable}
+            rows={3}
+            maxLength={300}
+            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            placeholder="Example: bets are voided if more than 2 balloons are defective and cannot be popped through normal effort."
+          />
+          <CharCounter value={voidConditions} max={300} />
+        </FieldRow>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/* SECTION 3 — STREAM                                                */}
+      {/* ================================================================ */}
+      <section
+        id="stream"
+        aria-labelledby="stream-heading"
+        className="card-elevated overflow-hidden scroll-mt-20"
+      >
+        <SectionHeading id="stream-heading" index={3} label="Stream" />
+        <div className="space-y-5 p-5 sm:p-6">
+
+        <FieldRow label="Scheduled for" htmlFor="scheduled-at">
           <div className="relative">
             <CalendarClock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -598,190 +1349,418 @@ export default function EventEditor() {
               className="pl-9"
             />
           </div>
+        </FieldRow>
+
+        <FieldRow label="Source">
+          <RadioCardGroup
+            name="source_type"
+            value={sourceType}
+            onChange={(v) => setSourceType(v as SourceType)}
+            disabled={!editable}
+            options={SOURCE_TYPES}
+          />
+        </FieldRow>
+
+        {sourceType === "external_url" && (
+          <FieldRow label="Stream URL" htmlFor="video-url">
+            <Input
+              id="video-url"
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
+              disabled={!editable}
+              placeholder="https://instagram.com/reel/... or https://www.tiktok.com/.../video/..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Instagram Reel or TikTok URL. If left blank, the user-app
+              uses the fallback HLS test stream.
+            </p>
+          </FieldRow>
+        )}
+
+        {/* Broadcast delay is enforced uniformly by the platform now — no
+            per-event creator toggle. Surfaced as a static notice so
+            creators understand the integrity guarantee. */}
+        <p className="flex items-start gap-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+          <span>
+            LiveRush adds a small broadcast delay to all streams to ensure
+            fair betting for everyone watching.
+          </span>
+        </p>
+
+        <LiveStreamTest />
         </div>
       </section>
 
-      <section className="space-y-2">
-        <label htmlFor="video-url" className="text-sm font-semibold">
-          Stream URL <span className="text-muted-foreground">(optional)</span>
-        </label>
-        <Input
-          id="video-url"
-          value={videoUrl}
-          onChange={(e) => setVideoUrl(e.target.value)}
-          disabled={!editable}
-          placeholder="https://instagram.com/reel/... or https://www.tiktok.com/.../video/..."
-        />
-        <p className="text-xs text-muted-foreground">
-          Instagram Reel or TikTok URL. If left blank, the user-app uses the
-          fallback HLS test stream.
-        </p>
-      </section>
+      {/* ================================================================ */}
+      {/* SECTION 4 — REVIEW                                                */}
+      {/* ================================================================ */}
+      <section
+        id="review"
+        aria-labelledby="review-heading"
+        className="card-elevated overflow-hidden scroll-mt-20"
+      >
+        <SectionHeading id="review-heading" index={4} label="Review" />
+        <div className="space-y-5 p-5 sm:p-6">
 
-      {/* Outcomes — odds aren't user-edited anymore (computed from the
-          pool at bet-time later), so this collapses to just a label
-          per outcome. */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-semibold">Bet outcomes</label>
-          <span className="text-xs text-muted-foreground">Min 2, max 8.</span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Odds are calculated automatically from the betting pool once users
-          start placing bets.
-        </p>
-        <ul className="space-y-2">
-          {outcomes.map((o, idx) => (
-            <li
-              key={o.id ?? `new-${idx}`}
-              className="flex items-center gap-2 rounded-xl border border-border/40 bg-card p-2"
-            >
-              <Input
-                value={o.label}
-                onChange={(e) =>
-                  setOutcomes((prev) =>
-                    prev.map((p, i) =>
-                      i === idx ? { ...p, label: e.target.value } : p,
-                    ),
-                  )
-                }
-                disabled={!editable}
-                placeholder="Outcome label"
-                className="flex-1"
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  setOutcomes((prev) => prev.filter((_, i) => i !== idx))
-                }
-                disabled={!editable || outcomes.length <= 2}
-                aria-label="Remove outcome"
-                className={cn(
-                  "inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/40 hover:text-destructive",
-                  (!editable || outcomes.length <= 2) && "cursor-not-allowed opacity-40",
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+          <div className="space-y-4">
+            <SummaryGroup
+              title="Challenge"
+              anchor="challenge"
+              rows={[
+                {
+                  label: "Title",
+                  value: title,
+                  missing: title.trim().length < 5,
+                },
+                {
+                  label: "Description",
+                  value: description,
+                  missing: description.trim().length === 0,
+                },
+                {
+                  label: "Rules",
+                  value:
+                    rules.trim().length > 80
+                      ? `${rules.trim().slice(0, 80)}…`
+                      : rules.trim(),
+                  missing: rules.trim().length < 30,
+                },
+                {
+                  label: "Round format",
+                  value:
+                    roundFormat === "time"
+                      ? `Time-limited (${roundDurationSec || "?"}s)`
+                      : "Single round",
+                  missing:
+                    roundFormat === "time" && Number(roundDurationSec) <= 0,
+                },
+              ]}
+            />
+            <SummaryGroup
+              title="Betting"
+              anchor="betting"
+              rows={[
+                {
+                  label: "Outcomes",
+                  value:
+                    validOutcomes.length > 0
+                      ? validOutcomes
+                          .map((o) => o.label.trim())
+                          .join(" · ")
+                      : "",
+                  missing:
+                    validOutcomes.length < 2 || outcomeDuplicates.size > 0,
+                },
+                {
+                  label: "Bet range",
+                  value:
+                    minCents !== null && maxCents !== null
+                      ? `$${(minCents / 100).toFixed(2)} – $${(maxCents / 100).toFixed(2)}`
+                      : "",
+                  missing: !betLimitsValid,
+                },
+                {
+                  label: "Betting window",
+                  value: `${
+                    BET_WINDOW_OPENS.find((o) => o.value === betWindowOpens)
+                      ?.label
+                  } → ${
+                    BET_WINDOW_LOCKS.find((o) => o.value === betWindowLocks)
+                      ?.label
+                  }`,
+                },
+              ]}
+            />
+            <SummaryGroup
+              title="Stream"
+              anchor="stream"
+              rows={[
+                {
+                  label: "Scheduled",
+                  value: scheduledAt
+                    ? new Date(scheduledAt).toLocaleString()
+                    : "",
+                  missing:
+                    !scheduledAt ||
+                    new Date(scheduledAt).getTime() <= Date.now(),
+                },
+                {
+                  label: "Source",
+                  value:
+                    SOURCE_TYPES.find((s) => s.value === sourceType)?.label ??
+                    "",
+                },
+                // Only show the URL row when the source is "external link"
+                // — for browser camera there's no URL to validate.
+                ...(sourceType === "external_url"
+                  ? [
+                      {
+                        label: "Stream URL",
+                        value: videoUrl.trim(),
+                        missing: videoUrl.trim().length === 0,
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          </div>
+
+          <aside className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              How viewers will see this
+            </p>
+            <div className="overflow-hidden rounded-2xl border border-border/40 bg-card lg:sticky lg:top-20">
+              <div className="relative aspect-[16/9] w-full bg-muted">
+                {coverUrl ? (
+                  <img
+                    src={coverUrl}
+                    alt="Preview cover"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <Camera className="h-6 w-6" />
+                    <span className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Cover missing
+                    </span>
+                  </div>
                 )}
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </li>
-          ))}
-        </ul>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!editable || outcomes.length >= 8}
-          onClick={() =>
-            setOutcomes((prev) => [
-              ...prev,
-              { label: "", odds: DEFAULT_ODDS, sort_order: prev.length },
-            ])
-          }
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add outcome
-        </Button>
+              </div>
+              <div className="space-y-2 p-4">
+                <p className="font-heading text-base font-bold leading-tight">
+                  {title || "Untitled event"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {scheduledAt
+                    ? new Date(scheduledAt).toLocaleString()
+                    : "Schedule pending"}
+                </p>
+                <ul className="space-y-1">
+                  {validOutcomes.slice(0, 4).map((o, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center justify-between rounded-md bg-secondary/30 px-2 py-1 text-xs"
+                    >
+                      <span className="truncate">{o.label.trim()}</span>
+                      <span className="ml-2 text-muted-foreground">—</span>
+                    </li>
+                  ))}
+                  {validOutcomes.length === 0 && (
+                    <li className="text-xs text-muted-foreground">
+                      Outcomes will appear here
+                    </li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        {/* Compliance checklist now lives in the left steps rail. */}
+        </div>
       </section>
 
-      {/* Camera check — preview-only, helps creators confirm their hardware
-          works before publishing. No recording, no upload. */}
-      <LiveStreamTest />
-
-      {/* Actions */}
-      <section className="flex flex-wrap items-center gap-3 border-t border-border/40 pt-6">
-        <Button
-          type="button"
-          variant="accent"
-          size="lg"
-          onClick={() => saveMutation.mutate()}
-          disabled={
-            !canSave ||
-            !editable ||
-            saveMutation.isPending ||
-            // Stay disabled on the edit screen until the user actually
-            // changes something — `isDirty` is always true for new events.
-            !isDirty
-          }
-        >
-          {saveMutation.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <>
-              <Save className="h-4 w-4" />
-              {isNew ? "Create draft" : "Save changes"}
-            </>
-          )}
-        </Button>
-        {!isNew && status === "draft" && (
-          <Button
-            type="button"
-            size="lg"
-            onClick={() => publishMutation.mutate()}
-            disabled={!canPublish || publishMutation.isPending}
-          >
-            {publishMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <>
-                <Send className="h-4 w-4" />
-                Publish
-              </>
-            )}
-          </Button>
-        )}
-        {!isNew && (status === "scheduled" || status === "live") && (
-          <Button
-            type="button"
-            variant="secondary"
-            size="lg"
-            onClick={() => unpublishMutation.mutate()}
-            disabled={unpublishMutation.isPending}
-          >
-            {unpublishMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <>
-                <XCircle className="h-4 w-4" />
-                Unpublish
-              </>
-            )}
-          </Button>
-        )}
-        {!isNew && status === "draft" && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="lg"
-            onClick={() => {
-              if (confirm("Delete this draft? This cannot be undone.")) {
-                deleteMutation.mutate();
-              }
-            }}
-            disabled={deleteMutation.isPending}
-            className="ml-auto text-destructive hover:text-destructive"
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete draft
-          </Button>
-        )}
-        {!verifiedCreator && status === "draft" && !isNew && (
-          <p className="ml-auto text-xs text-muted-foreground">
-            Publishing unlocks once your creator profile is verified.
-          </p>
-        )}
-      </section>
+      {/* All action buttons now live in the sticky stepper bar at the
+          top of the page, so no separate footer section is needed. */}
     </div>
   );
 }
 
-function toLocalDateTimeInput(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const y = d.getFullYear();
-  const m = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const h = pad(d.getHours());
-  const mm = pad(d.getMinutes());
-  return `${y}-${m}-${day}T${h}:${mm}`;
+// =========================================================================
+// Small layout helpers
+// =========================================================================
+
+/**
+ * Section card header — same gradient bar pattern as the user-app's
+ * UpcomingPanel / betting panel so the studio editor visually matches the
+ * surface where these events will eventually be played back.
+ */
+function SectionHeading({
+  id,
+  index,
+  label,
+}: {
+  id: string;
+  index: number;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white sm:px-5">
+      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white/20 text-xs font-bold backdrop-blur-sm">
+        {index}
+      </span>
+      <h2
+        id={id}
+        className="font-heading text-sm font-bold uppercase tracking-wide"
+      >
+        {label}
+      </h2>
+    </div>
+  );
+}
+
+function SubSectionHeading({ text }: { text: string }) {
+  return (
+    <p className="border-t border-border/30 pt-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+      {text}
+    </p>
+  );
+}
+
+function FieldRow({
+  label,
+  htmlFor,
+  helper,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  helper?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <label
+        htmlFor={htmlFor}
+        className="block text-sm font-semibold text-foreground"
+      >
+        {label}
+      </label>
+      {helper && <p className="text-xs text-muted-foreground">{helper}</p>}
+      {children}
+    </div>
+  );
+}
+
+function CharCounter({ value, max }: { value: string; max: number }) {
+  return (
+    <p
+      className={cn(
+        "text-right text-[11px] tabular-nums",
+        value.length >= max ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      {value.length} / {max}
+    </p>
+  );
+}
+
+function RadioCardGroup<T extends string>({
+  name,
+  value,
+  onChange,
+  disabled,
+  options,
+}: {
+  name: string;
+  value: T | "";
+  onChange: (v: T) => void;
+  disabled?: boolean;
+  options: Array<{
+    value: T;
+    label: string;
+    helper?: string;
+    disabled?: boolean;
+    badge?: "recommended" | "warning";
+  }>;
+}) {
+  return (
+    <div className="space-y-2">
+      {options.map((opt) => {
+        const isSelected = value === opt.value;
+        const isInteractive = !disabled && !opt.disabled;
+        return (
+          <label
+            key={opt.value}
+            className={cn(
+              "flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition-colors",
+              isSelected
+                ? "border-primary bg-primary/5"
+                : "border-border/40 hover:border-border",
+              !isInteractive && "cursor-not-allowed opacity-50",
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={opt.value}
+              checked={isSelected}
+              onChange={() => onChange(opt.value)}
+              disabled={!isInteractive}
+              className="mt-1"
+            />
+            <div className="flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-foreground">
+                  {opt.label}
+                </span>
+                {opt.badge === "recommended" && (
+                  <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-success">
+                    Recommended
+                  </span>
+                )}
+                {opt.badge === "warning" && (
+                  <span className="rounded-full bg-[#FEE53A]/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#B47C00]">
+                    Higher dispute risk
+                  </span>
+                )}
+              </div>
+              {opt.helper && (
+                <p className="text-xs text-muted-foreground">{opt.helper}</p>
+              )}
+            </div>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function SummaryGroup({
+  title,
+  anchor,
+  rows,
+}: {
+  title: string;
+  anchor: string;
+  rows: Array<{ label: string; value: string; missing?: boolean }>;
+}) {
+  return (
+    <div className="rounded-2xl border border-border/40 bg-card p-4">
+      <div className="flex items-center justify-between">
+        <p className="font-heading text-sm font-bold">{title}</p>
+        <a
+          href={`#${anchor}`}
+          className="text-xs font-semibold text-primary hover:underline"
+        >
+          Edit
+        </a>
+      </div>
+      <dl className="mt-3 space-y-2">
+        {rows.map((r) => (
+          <div
+            key={r.label}
+            className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3"
+          >
+            <dt className="w-40 flex-shrink-0 text-xs uppercase tracking-wider text-muted-foreground">
+              {r.label}
+            </dt>
+            <dd className="flex items-center gap-1.5 text-sm">
+              {r.missing ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Missing
+                </span>
+              ) : (
+                <span className="text-foreground">{r.value}</span>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
 }
