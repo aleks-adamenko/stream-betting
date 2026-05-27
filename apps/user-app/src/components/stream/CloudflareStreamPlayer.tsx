@@ -1,34 +1,37 @@
-import { Stream } from "@cloudflare/stream-react";
-
-import { cn } from "@/lib/utils";
+import { HlsPlayer } from "@/components/stream/HlsPlayer";
 
 /**
  * Cloudflare Stream live broadcast player.
  *
- * Implementation note — we used to render Cloudflare's `/iframe`
- * embed directly, but that's a cross-origin iframe and iOS Safari's
- * autoplay policy refuses to start playback in a cross-origin iframe
- * until the user has interacted with the parent document. Viewers on
- * mobile landed on the event page and saw an indefinite loading state.
+ * Implementation history:
+ *   v1 — Cloudflare's `/iframe` embed. Sub-second WHEP latency but
+ *        iOS Safari's cross-origin iframe autoplay policy blocked
+ *        mobile autoplay until the user tapped the parent doc.
+ *   v2 — `@cloudflare/stream-react`. Native <video> but inconsistent
+ *        sizing (frame didn't fill the container) + same mobile
+ *        autoplay issues + an extra SDK dep we don't need.
+ *   v3 (now) — our own `HlsPlayer` pointed at the live HLS manifest
+ *        URL. HlsPlayer already plumbs `playsInline`, `object-cover`,
+ *        retry-on-fatal, and minimum-poster behaviour. Autoplay
+ *        works on every platform because we control the <video>
+ *        element directly. Latency rises to Cloudflare's standard
+ *        HLS (~3–5 s) — fine for the consumption side, and the
+ *        existing broadcast-delay buffer lives at this scale.
  *
- * `@cloudflare/stream-react` renders a native `<video>` element with
- * HLS plumbed in via its SDK — no iframe — so the autoplay policy
- * that applies is the lenient native-video one: muted autoplay works
- * on every platform identically. Sub-second WHEP latency goes away
- * (the SDK uses HLS), but Cloudflare's HLS is low-latency by default
- * for live inputs with recording enabled (~3–5 s glass-to-glass) and
- * that's the universally-friendly trade-off.
- *
- * The player chrome (play/pause/volume/fullscreen) is still
- * Cloudflare's. If we ever want our own UI, we'd drop the SDK and
- * wire HLS.js into our existing HlsPlayer pointing at the live
- * manifest URL.
+ * Cloudflare serves an HLS manifest for any live input that was
+ * created with `recording.mode: "automatic"` (our default), at
+ * `https://customer-XXX.cloudflarestream.com/<uid>/manifest/video.m3u8`.
+ * We derive it from the stored `/iframe` URL via a literal swap so
+ * we don't need a schema migration; new events provisioned in the
+ * future will continue to store the iframe URL as the canonical
+ * playback link.
  */
 
 interface CloudflareStreamPlayerProps {
   /** Full Cloudflare iframe URL stored on `events.playback_url`.
    *  Looks like `https://customer-XXX.cloudflarestream.com/<uid>/iframe`.
-   *  We parse the UID out of the path for the `<Stream>` component. */
+   *  We rewrite this to the HLS manifest URL before passing it down
+   *  to HlsPlayer. */
   src: string;
   poster?: string;
   autoPlay?: boolean;
@@ -43,68 +46,34 @@ export function CloudflareStreamPlayer({
   muted = true,
   className,
 }: CloudflareStreamPlayerProps) {
-  const uid = extractStreamUid(src);
-
-  // Defensive: if we can't parse a UID, fall back to a blank black
-  // container rather than crashing the page. Shouldn't happen in
-  // practice — provision-stream always writes the canonical URL —
-  // but a manual DB edit could break the shape.
-  if (!uid) {
-    return (
-      <div
-        className={cn("relative h-full w-full overflow-hidden bg-black", className)}
-      />
-    );
-  }
-
+  const manifestUrl = toHlsManifestUrl(src);
   return (
-    <div
-      className={cn("relative h-full w-full overflow-hidden bg-black", className)}
-    >
-      <Stream
-        src={uid}
-        autoplay={autoPlay}
-        muted={muted}
-        // Muted autoplay also requires `playsInline` on iOS to keep
-        // the video in the container instead of going fullscreen
-        // (which iOS Safari does by default for un-tagged videos).
-        // The SDK forwards this onto the underlying <video> element.
-        // The prop is named `playsInline` in stream-react.
-        responsive={false}
-        controls
-        poster={poster}
-        // Hide Cloudflare's giant default logo to keep the frame
-        // clean. `letterboxColor` replaces the black bars (when the
-        // video aspect doesn't match the container) with a colour;
-        // transparent lets the underlying black bg show through.
-        letterboxColor="transparent"
-        // Fill the wrapper.
-        height="100%"
-        width="100%"
-      />
-    </div>
+    <HlsPlayer
+      src={manifestUrl}
+      poster={poster}
+      autoPlay={autoPlay}
+      muted={muted}
+      className={className}
+    />
   );
 }
 
-/** Pull the input UID out of a Cloudflare playback URL.
- *  Accepts the canonical iframe URL we store, and is forgiving about
- *  trailing path segments / query params. */
-function extractStreamUid(url: string): string | null {
-  // Path looks like `/<uid>/iframe` (or `/<uid>/manifest/video.m3u8`).
-  // We just grab whatever sits between the host and the first
-  // recognized suffix segment.
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split("/").filter(Boolean);
-    // First non-empty path segment is the UID.
-    return parts[0] ?? null;
-  } catch {
-    return null;
+/** Rewrite a Cloudflare `/iframe` URL to its corresponding HLS
+ *  manifest URL. If the input doesn't look like an iframe URL we
+ *  return it unchanged — HlsPlayer will surface its own error
+ *  state rather than silently 404. */
+function toHlsManifestUrl(iframeUrl: string): string {
+  if (iframeUrl.endsWith("/iframe")) {
+    return iframeUrl.slice(0, -"/iframe".length) + "/manifest/video.m3u8";
   }
+  // Already a manifest URL? Pass through. Anything else? Pass through
+  // and let HlsPlayer report the real error.
+  return iframeUrl;
 }
 
 /** Cheap predicate so callers can branch on "is this a Cloudflare
- *  Stream URL" vs an HLS URL or a social-embed URL. */
+ *  Stream URL" vs an HLS URL or a social-embed URL. The stored
+ *  shape is still the iframe URL, hence the suffix check. */
 export function isCloudflareStreamUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   return url.includes("cloudflarestream.com") && url.endsWith("/iframe");
