@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
-  CalendarClock,
   CheckCircle2,
   Clock,
   ListChecks,
@@ -124,15 +123,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-dashed border-border/40 p-5 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2 text-foreground">
-          <CalendarClock className="h-5 w-5 text-primary" />
-          <h2 className="font-heading text-base font-semibold">Schedule view</h2>
-        </div>
-        <p className="mt-2">
-          Scheduled stream calendar lands in the next phase.
-        </p>
-      </div>
     </div>
   );
 }

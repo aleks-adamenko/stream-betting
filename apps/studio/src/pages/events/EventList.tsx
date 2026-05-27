@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import {
   CalendarClock,
   CheckCircle2,
+  ExternalLink,
+  Link2,
   Loader2,
   Pencil,
   Plus,
@@ -282,6 +284,19 @@ export default function EventList() {
             //     gets the final word; errors surface as a toast.
             const canEdit = !isLive;
             const canDelete = isDraft || isFinished;
+            // External user-app affordances — visible for everything
+            // except drafts (drafts don't have a public /event/:id
+            // page yet, so the link would 404 / redirect home).
+            const hasPublicPage = !isDraft;
+            const publicEventUrl = `https://liverush.co/event/${event.id}`;
+            const copyPublicLink = async () => {
+              try {
+                await navigator.clipboard.writeText(publicEventUrl);
+                toast.success("Event link copied");
+              } catch {
+                toast.error("Couldn't copy link — your browser blocked it");
+              }
+            };
 
             return (
               <li
@@ -371,35 +386,56 @@ export default function EventList() {
                     </div>
                   </div>
 
-                  {/* Right side: status-aware actions. Edit + Delete
-                      icons sit on every row that isn't currently live;
-                      then the primary status action (Publish / Start /
-                      Resume) trails them. */}
-                  <div className="flex flex-shrink-0 items-center gap-2">
+                  {/* Right side: status-aware actions. Order is
+                      Copy → Open → Edit → Delete → primary CTA
+                      (Publish / Start / Resume). The leading three
+                      icons share the public-page boundary — they're
+                      hidden for drafts (no /event/:id yet).
+                      Icons are rendered as bare clickable glyphs
+                      (no border / background) to match the look of
+                      the EventEditor stepper bar. */}
+                  <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
+                    {hasPublicPage && (
+                      <>
+                        <button
+                          type="button"
+                          title="Copy event link"
+                          aria-label="Copy event link"
+                          onClick={() => void copyPublicLink()}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Link2 className="h-5 w-5" />
+                        </button>
+                        <a
+                          href={publicEventUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open event page in a new tab"
+                          aria-label="Open event page in a new tab"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <ExternalLink className="h-5 w-5" />
+                        </a>
+                      </>
+                    )}
+
                     {canEdit && (
-                      <Button
-                        asChild
-                        type="button"
-                        variant="outline"
-                        size="icon"
+                      <Link
+                        to={`/events/${event.id}`}
                         title="Edit event"
                         aria-label="Edit event"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        <Link to={`/events/${event.id}`}>
-                          <Pencil className="h-4 w-4" />
-                        </Link>
-                      </Button>
+                        <Pencil className="h-5 w-5" />
+                      </Link>
                     )}
 
                     {canDelete && (
-                      <Button
+                      <button
                         type="button"
-                        variant="outline"
-                        size="icon"
                         disabled={deleting}
                         title="Delete event"
                         aria-label="Delete event"
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         onClick={() => {
                           if (
                             !confirm(
@@ -410,13 +446,14 @@ export default function EventList() {
                           }
                           deleteMutation.mutate(event.id);
                         }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-destructive transition-opacity hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {deleting ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-5 w-5 animate-spin" />
                         ) : (
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-5 w-5" />
                         )}
-                      </Button>
+                      </button>
                     )}
 
                     {isDraft && (

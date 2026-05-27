@@ -1189,7 +1189,7 @@ export default function EventEditor() {
             disabled={!editable}
             rows={3}
             maxLength={300}
-            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:text-sm"
             placeholder="A quick hook for the feed."
           />
           <CharCounter value={description} max={300} />
@@ -1207,7 +1207,7 @@ export default function EventEditor() {
             disabled={!editable}
             rows={5}
             maxLength={1000}
-            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:text-sm"
             placeholder="Example: I'll attempt to pop 10 balloons blindfolded in under 60 seconds. A balloon counts as popped only if fully burst, not deflated."
           />
           <CharCounter value={rules} max={1000} />
@@ -1224,7 +1224,7 @@ export default function EventEditor() {
               value={roundFormat}
               onChange={(e) => setRoundFormat(e.target.value as RoundFormat)}
               disabled={!editable}
-              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-base disabled:opacity-60 sm:text-sm"
             >
               <option value="event">Single round</option>
               <option value="time">Time-limited</option>
@@ -1429,7 +1429,7 @@ export default function EventEditor() {
                   setBetWindowOpens(e.target.value as BetWindowOpens)
                 }
                 disabled={!editable}
-                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-base disabled:opacity-60 sm:text-sm"
               >
                 {BET_WINDOW_OPENS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -1452,7 +1452,7 @@ export default function EventEditor() {
                   setBetWindowLocks(e.target.value as BetWindowLocks)
                 }
                 disabled={!editable}
-                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-base disabled:opacity-60 sm:text-sm"
               >
                 {BET_WINDOW_LOCKS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -1477,7 +1477,7 @@ export default function EventEditor() {
             disabled={!editable}
             rows={3}
             maxLength={300}
-            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-base placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:text-sm"
             placeholder="Example: bets are voided if more than 2 balloons are defective and cannot be popped through normal effort."
           />
           <CharCounter value={voidConditions} max={300} />

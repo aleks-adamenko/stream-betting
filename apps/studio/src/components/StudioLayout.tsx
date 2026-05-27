@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
-  CalendarClock,
   LayoutDashboard,
-  ListChecks,
   LogOut,
   Menu,
   Settings,
+  Tv,
   X,
   Zap,
 } from "lucide-react";
@@ -26,8 +25,10 @@ type NavItem = {
 
 const nav: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/events", label: "Events", icon: ListChecks },
-  { to: "/schedule", label: "Schedule", icon: CalendarClock, disabled: true },
+  // `Tv` reads as a broadcast/streaming symbol — better fit for the
+  // events list than the old ListChecks (which read like a generic
+  // todo). Stays solid line-icon style to match the other nav items.
+  { to: "/events", label: "Events", icon: Tv },
   { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ];
 
