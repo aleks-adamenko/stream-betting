@@ -242,7 +242,18 @@ export default function LiveStream() {
           width: { ideal: wantsPortrait ? 720 : 1280 },
           height: { ideal: wantsPortrait ? 1280 : 720 },
         },
-        audio: true,
+        // Standard audio constraints. iOS Safari especially benefits
+        // from being explicit here — bare `audio: true` sometimes
+        // ships audio with surprising defaults (raw mic, no AGC) that
+        // WHIP servers downstream don't like, resulting in silent
+        // playback on the viewer. echoCancellation / noiseSuppression
+        // / autoGainControl are widely supported and the documented
+        // iOS-friendly path.
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       });
       streamRef.current = stream;
 
@@ -318,19 +329,41 @@ export default function LiveStream() {
             width: { ideal: portrait ? 720 : 1280 },
             height: { ideal: portrait ? 1280 : 720 },
           },
-          audio: true,
+          // Same iOS-friendly audio constraints used on initial start.
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         });
         const newVideoTrack = newStream.getVideoTracks()[0];
-        if (newVideoTrack && publisherRef.current) {
-          await publisherRef.current.replaceVideoTrack(newVideoTrack);
-          // Swap the local preview too, and replace the held
-          // MediaStream so future stopStream() cleans up correctly.
-          const oldStream = streamRef.current;
-          streamRef.current = newStream;
-          if (videoRef.current) videoRef.current.srcObject = newStream;
-          if (oldStream) {
-            for (const t of oldStream.getTracks()) t.stop();
-          }
+        const newAudioTrack = newStream.getAudioTracks()[0];
+        const publisher = publisherRef.current;
+        if (!publisher) return;
+
+        // Re-apply the creator's current on/off toggle state to the
+        // fresh tracks BEFORE handing them to the publisher. Without
+        // this, rotation silently turns the camera/mic back on for
+        // a creator who'd toggled them off, while the UI icons stay
+        // showing the off state.
+        if (newVideoTrack) newVideoTrack.enabled = videoEnabled;
+        if (newAudioTrack) newAudioTrack.enabled = audioEnabled;
+
+        // Replace BOTH senders. The old code only swapped video, so
+        // after rotation the publisher kept pointing at the now-
+        // stopped old audio track and viewers went silent. Audio is
+        // critical enough to a stream that this can't be best-effort
+        // — we want it as robust as video swapping.
+        if (newVideoTrack) await publisher.replaceVideoTrack(newVideoTrack);
+        if (newAudioTrack) await publisher.replaceAudioTrack(newAudioTrack);
+
+        // Swap the local preview's MediaStream and stop the old one
+        // so the camera light reflects only the active track set.
+        const oldStream = streamRef.current;
+        streamRef.current = newStream;
+        if (videoRef.current) videoRef.current.srcObject = newStream;
+        if (oldStream) {
+          for (const t of oldStream.getTracks()) t.stop();
         }
       } catch (err) {
         console.warn("Orientation change re-capture failed", err);
@@ -339,7 +372,11 @@ export default function LiveStream() {
 
     orientation.addEventListener("change", handler);
     return () => orientation.removeEventListener("change", handler);
-  }, [phase]);
+    // videoEnabled + audioEnabled are intentionally in the dep array:
+    // if the creator toggles a track off and THEN rotates, the
+    // handler captured at registration time should observe the
+    // updated state. Re-registering on each toggle change is cheap.
+  }, [phase, videoEnabled, audioEnabled]);
 
   // Camera + mic in-broadcast toggles. We flip `track.enabled` rather
   // than stop/start the track so the WebRTC connection to Cloudflare

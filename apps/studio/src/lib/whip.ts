@@ -69,6 +69,11 @@ export class WhipPublisher {
   /** Reference to the video sender so replaceVideoTrack() can swap
    *  in a new track when the creator rotates their phone. */
   private videoSender: RTCRtpSender | null = null;
+  /** Same for the audio sender — needed because rotating a phone
+   *  triggers a fresh getUserMedia and the new audio track has to
+   *  be substituted in, or the publisher silently keeps sending the
+   *  stopped old track and viewers hear nothing. */
+  private audioSender: RTCRtpSender | null = null;
   private status: WhipPublisherStatus = "idle";
 
   constructor(private options: WhipPublisherOptions = {}) {}
@@ -111,11 +116,15 @@ export class WhipPublisher {
 
     // Add tracks as send-only and pin codec preferences. Cloudflare's
     // WHIP ingest expects H.264 baseline for video and Opus for audio.
+    // Both sender refs are stashed so the creator can rotate their
+    // phone mid-broadcast (replaceVideoTrack / replaceAudioTrack).
     for (const track of stream.getTracks()) {
       const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
       pinCodecPreferences(transceiver, track.kind);
       if (track.kind === "video") {
         this.videoSender = transceiver.sender;
+      } else if (track.kind === "audio") {
+        this.audioSender = transceiver.sender;
       }
     }
 
@@ -186,6 +195,18 @@ export class WhipPublisher {
     await this.videoSender.replaceTrack(track);
   }
 
+  /** Swap the currently-published audio track for a new one. We pair
+   *  this with replaceVideoTrack on phone-rotation: the fresh
+   *  getUserMedia returns both a new video AND new audio track, and
+   *  if we only swap video the publisher keeps trying to send the now-
+   *  stopped old audio track — viewers go silent. */
+  async replaceAudioTrack(track: MediaStreamTrack): Promise<void> {
+    if (!this.audioSender) {
+      throw new Error("Cannot replace audio track before start()");
+    }
+    await this.audioSender.replaceTrack(track);
+  }
+
   /** Tear down the session: DELETE the WHIP resource (so the server
    *  marks the ingest as cleanly ended), close the peer connection,
    *  stop the local media tracks (camera light turns off). */
@@ -216,6 +237,7 @@ export class WhipPublisher {
     }
 
     this.videoSender = null;
+    this.audioSender = null;
     this.setStatus("stopped");
   }
 
