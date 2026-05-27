@@ -1,11 +1,20 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { imageSize } from "image-size";
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "";
 const SITE_URL = process.env.VITE_SITE_URL ?? "https://liverush.co";
+
+// ES-module replacement for __dirname so we can resolve `dist/` from
+// the function's own location, not just process.cwd(). Vercel can
+// invoke serverless functions with different CWDs depending on
+// monorepo config — falling back to the function's own directory
+// makes us robust to that.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface EventRow {
   title: string;
@@ -136,14 +145,52 @@ function injectMeta(html: string, event: EventRow): string {
   return out;
 }
 
+/**
+ * Try several locations for `dist/index.html`. Vercel's serverless
+ * runtime can put us in surprising CWDs depending on how the monorepo
+ * is wired, so we cast a wide net before giving up. The first existing
+ * file wins.
+ */
+function locateIndexHtml(): string | null {
+  const candidates = [
+    // Relative to the function's own directory — most reliable when
+    // `includeFiles: "dist/**"` ships the build alongside the handler.
+    path.join(__dirname, "..", "dist", "index.html"),
+    path.join(__dirname, "dist", "index.html"),
+    // Relative to whatever CWD Vercel happens to give us.
+    path.join(process.cwd(), "dist", "index.html"),
+    path.join(process.cwd(), "apps", "user-app", "dist", "index.html"),
+    // Last resort: walk up from the function until we find a `dist`.
+    path.join(__dirname, "..", "..", "dist", "index.html"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // ignore + try next
+    }
+  }
+  return null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const id = typeof req.query.id === "string" ? req.query.id : "";
-  const indexPath = path.join(process.cwd(), "dist", "index.html");
+
+  const indexPath = locateIndexHtml();
+  if (!indexPath) {
+    console.error("[event-page] could not locate dist/index.html", {
+      cwd: process.cwd(),
+      dirname: __dirname,
+    });
+    res.status(500).send("Build artifact missing");
+    return;
+  }
+
   let html: string;
   try {
     html = fs.readFileSync(indexPath, "utf8");
   } catch (e) {
-    console.error("[event-page] missing dist/index.html", e);
+    console.error("[event-page] failed to read", indexPath, e);
     res.status(500).send("Build artifact missing");
     return;
   }
@@ -152,6 +199,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (event) html = injectMeta(html, event);
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=86400");
+  res.setHeader(
+    "Cache-Control",
+    "public, max-age=60, s-maxage=300, stale-while-revalidate=86400",
+  );
   res.status(200).send(html);
 }

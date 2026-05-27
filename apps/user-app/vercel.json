@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/event-page.ts": {
+      "includeFiles": "dist/**"
+    }
+  },
   "rewrites": [
+    { "source": "/event/:id", "destination": "/api/event-page?id=:id" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
