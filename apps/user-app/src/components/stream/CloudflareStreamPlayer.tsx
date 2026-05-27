@@ -1,37 +1,35 @@
-import { HlsPlayer } from "@/components/stream/HlsPlayer";
+import { useRef, useState } from "react";
+import { Play } from "lucide-react";
+
+import { cn } from "@/lib/utils";
 
 /**
  * Cloudflare Stream live broadcast player.
  *
- * Implementation history:
- *   v1 — Cloudflare's `/iframe` embed. Sub-second WHEP latency but
- *        iOS Safari's cross-origin iframe autoplay policy blocked
- *        mobile autoplay until the user tapped the parent doc.
- *   v2 — `@cloudflare/stream-react`. Native <video> but inconsistent
- *        sizing (frame didn't fill the container) + same mobile
- *        autoplay issues + an extra SDK dep we don't need.
- *   v3 (now) — our own `HlsPlayer` pointed at the live HLS manifest
- *        URL. HlsPlayer already plumbs `playsInline`, `object-cover`,
- *        retry-on-fatal, and minimum-poster behaviour. Autoplay
- *        works on every platform because we control the <video>
- *        element directly. Latency rises to Cloudflare's standard
- *        HLS (~3–5 s) — fine for the consumption side, and the
- *        existing broadcast-delay buffer lives at this scale.
+ * Why iframe (and not HLS via <video>): Cloudflare Stream live
+ * inputs DO NOT serve an HLS manifest during the live broadcast —
+ * HLS is only available as a VOD recording AFTER the stream ends.
+ * During the live window, Cloudflare expects viewers to use WHEP
+ * (WebRTC playback), and the only no-custom-code path to consume
+ * WHEP is their hosted iframe player. So iframe it is.
  *
- * Cloudflare serves an HLS manifest for any live input that was
- * created with `recording.mode: "automatic"` (our default), at
- * `https://customer-XXX.cloudflarestream.com/<uid>/manifest/video.m3u8`.
- * We derive it from the stored `/iframe` URL via a literal swap so
- * we don't need a schema migration; new events provisioned in the
- * future will continue to store the iframe URL as the canonical
- * playback link.
+ * Mobile autoplay quirk: iOS Safari refuses to autoplay a
+ * *cross-origin* iframe until the user has interacted with the
+ * parent document. There's no developer override for this — it's
+ * a browser-enforced privacy policy. Workaround below:
+ *   • Desktop / large viewports: autoplay starts immediately (the
+ *     policy doesn't apply on desktop browsers).
+ *   • Touch viewports: we render a full-frame overlay with a Play
+ *     icon over the cover image. One tap satisfies the parent-doc
+ *     gesture requirement and we postMessage Cloudflare's player
+ *     to start. The overlay hides itself after that single tap.
+ *
+ * The iframe itself fills the container via `absolute inset-0`.
  */
 
 interface CloudflareStreamPlayerProps {
-  /** Full Cloudflare iframe URL stored on `events.playback_url`.
-   *  Looks like `https://customer-XXX.cloudflarestream.com/<uid>/iframe`.
-   *  We rewrite this to the HLS manifest URL before passing it down
-   *  to HlsPlayer. */
+  /** Full iframe URL from `events.playback_url`, e.g.
+   *  `https://customer-XXX.cloudflarestream.com/<uid>/iframe`. */
   src: string;
   poster?: string;
   autoPlay?: boolean;
@@ -46,34 +44,88 @@ export function CloudflareStreamPlayer({
   muted = true,
   className,
 }: CloudflareStreamPlayerProps) {
-  const manifestUrl = toHlsManifestUrl(src);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Tap-to-play overlay is shown only on touch devices, only
+  // before the user's first tap. Once dismissed it stays hidden
+  // for the lifetime of this component instance — subsequent
+  // pauses are user-initiated via Cloudflare's own controls.
+  const isTouch = useTouchDevice();
+  const [overlayShown, setOverlayShown] = useState(isTouch);
+
+  // Build the iframe URL with Cloudflare's documented behaviour
+  // flags. autoplay=true + muted=true is the canonical muted-
+  // autoplay configuration browsers accept everywhere except
+  // cross-origin iframes on iOS (handled by the overlay above).
+  const params = new URLSearchParams();
+  if (autoPlay) params.set("autoplay", "true");
+  if (muted) params.set("muted", "true");
+  if (poster) params.set("poster", poster);
+  // Black letterbox bars when the source aspect doesn't match the
+  // container.  `transparent` lets the parent's bg-black show
+  // through cleanly.
+  params.set("letterboxColor", "transparent");
+  const url = `${src}?${params.toString()}`;
+
+  const handleStartPlayback = () => {
+    setOverlayShown(false);
+    // Send the play command via postMessage so the iframe's video
+    // element starts. Without this the iframe might stay paused
+    // even after the gesture lands — autoplay was already
+    // attempted and failed silently before the tap.
+    iframeRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ event: "method", method: "play" }),
+      "*",
+    );
+  };
+
   return (
-    <HlsPlayer
-      src={manifestUrl}
-      poster={poster}
-      autoPlay={autoPlay}
-      muted={muted}
-      className={className}
-    />
+    <div
+      className={cn(
+        "relative h-full w-full overflow-hidden bg-black",
+        className,
+      )}
+    >
+      <iframe
+        ref={iframeRef}
+        src={url}
+        title="Live stream"
+        allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+        allowFullScreen
+        className="absolute inset-0 h-full w-full border-0"
+      />
+      {overlayShown && (
+        <button
+          type="button"
+          onClick={handleStartPlayback}
+          aria-label="Tap to play"
+          // Sits over the iframe and intercepts the first tap. Once
+          // it disappears the iframe is interactive (volume,
+          // fullscreen, etc.). The cover image is rendered behind
+          // the iframe by Cloudflare's player itself (via the
+          // `poster=` URL param) so the user sees content here, not
+          // a black box.
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 transition-colors active:bg-black/50"
+        >
+          <span className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-white/95 text-black shadow-lg">
+            <Play className="h-7 w-7 fill-current" />
+          </span>
+        </button>
+      )}
+    </div>
   );
 }
 
-/** Rewrite a Cloudflare `/iframe` URL to its corresponding HLS
- *  manifest URL. If the input doesn't look like an iframe URL we
- *  return it unchanged — HlsPlayer will surface its own error
- *  state rather than silently 404. */
-function toHlsManifestUrl(iframeUrl: string): string {
-  if (iframeUrl.endsWith("/iframe")) {
-    return iframeUrl.slice(0, -"/iframe".length) + "/manifest/video.m3u8";
-  }
-  // Already a manifest URL? Pass through. Anything else? Pass through
-  // and let HlsPlayer report the real error.
-  return iframeUrl;
+/** True on devices whose primary input is a touch surface (phones,
+ *  tablets). We use this to decide whether to show the tap-to-play
+ *  overlay. Hydration-safe: returns false on the server (the SPA
+ *  doesn't SSR anyway, but useful for tests). */
+function useTouchDevice(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia?.("(pointer: coarse)").matches ?? false;
 }
 
 /** Cheap predicate so callers can branch on "is this a Cloudflare
- *  Stream URL" vs an HLS URL or a social-embed URL. The stored
- *  shape is still the iframe URL, hence the suffix check. */
+ *  iframe URL" vs an HLS URL or a social-embed URL. */
 export function isCloudflareStreamUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   return url.includes("cloudflarestream.com") && url.endsWith("/iframe");
