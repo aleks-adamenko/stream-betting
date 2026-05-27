@@ -260,16 +260,24 @@ create or replace function public.events_notify_dispatch()
 returns trigger
 language plpgsql
 security definer
-set search_path = public, extensions
+set search_path = public, extensions, vault
 as $$
 declare
   v_token       text;
   v_base_url    text;
 begin
-  -- Vault may not be set up in local development; read defensively.
+  -- Supabase Vault exposes decrypted values via the
+  -- `vault.decrypted_secrets` VIEW (not as a name-keyed function —
+  -- `vault.read_secret()` only takes a UUID). Read defensively so a
+  -- not-yet-configured dev env doesn't error out the status flip.
   begin
-    v_token := vault.read_secret('internal_webhook_token');
-    v_base_url := vault.read_secret('functions_base_url');
+    select decrypted_secret into v_token
+    from vault.decrypted_secrets
+    where name = 'internal_webhook_token';
+
+    select decrypted_secret into v_base_url
+    from vault.decrypted_secrets
+    where name = 'functions_base_url';
   exception when others then
     v_token := null;
     v_base_url := null;

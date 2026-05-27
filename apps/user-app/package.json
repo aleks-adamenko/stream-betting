@@ -11,6 +11,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@cloudflare/stream-react": "^1.9.3",
     "@hookform/resolvers": "^3.10.0",
     "@liverush/design-tokens": "workspace:*",
     "@liverush/lib": "workspace:*",
