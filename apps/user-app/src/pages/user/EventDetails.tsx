@@ -1048,15 +1048,12 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
     isPending,
   } = useEventSubscription(event.id);
 
-  // Hide the Notify button once the event has ended — there's nothing
-  // future to subscribe to. We keep the counter visible (handled
-  // below) as social proof.
-  const isFinished = event.status === "finished";
-  // While live, viewers might still want to "follow" the creator for
-  // the next one; we keep the button visible but with the same flow.
-  // (Subscribing to a live event subscribes you to the creator's
-  // future events too.)
-  const showButton = !isFinished;
+  // Notify button is only meaningful while the event is *scheduled*
+  // — once it's live, the viewer is already watching; once it's
+  // finished, there's nothing to notify about. The counter below
+  // (handled separately) stays visible across all three states as a
+  // social-proof signal.
+  const showButton = event.status === "scheduled";
 
   const onClick = async () => {
     if (!user) {
