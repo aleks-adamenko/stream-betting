@@ -26,7 +26,8 @@ import {
   resolveSocialEmbedUrl,
 } from "@/components/stream/SocialVideoEmbed";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { useEvent } from "@/hooks/useEvents";
+import { eventsKeys, useEvent } from "@/hooks/useEvents";
+import { supabase } from "@/integrations/supabase/client";
 import { useEventViewers } from "@/hooks/useEventViewers";
 import { useAuth } from "@/contexts/AuthContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
@@ -51,6 +52,7 @@ export default function EventDetails() {
   const { data: event, isLoading } = useEvent(id);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const [overlaysHidden, setOverlaysHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -62,6 +64,49 @@ export default function EventDetails() {
   // creator on the LiveStream page sees it instantly via the same
   // channel.
   const viewerCount = useEventViewers(id, { track: true });
+
+  // Subscribe to UPDATE events on this event row so the page reacts
+  // to status flips without manual refresh — most importantly,
+  // live → finished when the creator hits End stream. We invalidate
+  // the useEvent query on every update; React Query refetches and
+  // the page re-renders into whatever the new status calls for
+  // (e.g. CloudflareStreamPlayer → cover image + "Event ended" pill).
+  //
+  // Defer the channel setup to a microtask so React Strict Mode's
+  // mount → cleanup → remount sequence resolves cleanly. Without
+  // the defer, calling `.on()` on a channel that has already
+  // transitioned to "joined" from the discarded first mount throws
+  // inside Supabase.
+  useEffect(() => {
+    if (!id) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    const setupId = setTimeout(() => {
+      if (cancelled) return;
+      channel = supabase
+        .channel(`event:${id}:status`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "events",
+            filter: `id=eq.${id}`,
+          },
+          () => {
+            void queryClient.invalidateQueries({
+              queryKey: eventsKeys.detail(id),
+            });
+          },
+        )
+        .subscribe();
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(setupId);
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [id, queryClient]);
 
   // Hide LIVE / viewers / title overlay once the user starts scrolling so the
   // sticky video container looks like a clean fixed player while reading.

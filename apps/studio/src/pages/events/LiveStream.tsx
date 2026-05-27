@@ -8,9 +8,13 @@ import {
   Coins,
   Loader2,
   MessageCircle,
+  Mic,
+  MicOff,
   PhoneOff,
   Radio,
   Users,
+  Video,
+  VideoOff,
 } from "lucide-react";
 
 import { Button } from "@liverush/ui";
@@ -49,6 +53,14 @@ export default function LiveStream() {
     "idle" | "requesting" | "live" | "ending" | "error" | "unsupported"
   >("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Local on/off toggles for the creator's own video + audio while
+  // they're broadcasting. We flip `track.enabled` on the underlying
+  // MediaStream tracks — that keeps the WebRTC peer connection open
+  // (no re-negotiation) but tells the browser to send black frames /
+  // silence respectively. Cloudflare keeps the stream alive; viewers
+  // see a dark frame / hear silence until the creator re-enables.
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(true);
 
   // Real-time viewer count from the shared `event:{id}:viewers`
   // presence channel. `track: false` so the creator doesn't count
@@ -329,6 +341,31 @@ export default function LiveStream() {
     return () => orientation.removeEventListener("change", handler);
   }, [phase]);
 
+  // Camera + mic in-broadcast toggles. We flip `track.enabled` rather
+  // than stop/start the track so the WebRTC connection to Cloudflare
+  // stays up — no codec re-negotiation, no viewer dropout. Disabled
+  // video tracks send black frames; disabled audio tracks send
+  // silence. The creator can flip them back on instantly.
+  const toggleVideo = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const next = !videoEnabled;
+    for (const track of stream.getVideoTracks()) {
+      track.enabled = next;
+    }
+    setVideoEnabled(next);
+  }, [videoEnabled]);
+
+  const toggleAudio = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const next = !audioEnabled;
+    for (const track of stream.getAudioTracks()) {
+      track.enabled = next;
+    }
+    setAudioEnabled(next);
+  }, [audioEnabled]);
+
   const handleEnd = async () => {
     if (
       !confirm(
@@ -520,10 +557,52 @@ export default function LiveStream() {
         </>
       )}
 
-      {/* Bottom info bar was removed — the Stakes / Chat overlays now
-          extend to the same `bottom-3` inset as the side margins, and
-          the "Live" badge + End-stream button in the header already
-          carry the duplicate info. */}
+      {/* In-broadcast controls — bottom-center, horizontally centred
+          between the Stakes (left) and Chat (right) overlays. Two
+          icon buttons let the creator pause their own video or mute
+          their mic without dropping the broadcast. The stream stays
+          connected; viewers see a dark frame / hear silence until the
+          creator toggles back on. */}
+      {phase === "live" && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/55 px-3 py-2 backdrop-blur-md">
+            <button
+              type="button"
+              onClick={toggleVideo}
+              aria-label={videoEnabled ? "Turn camera off" : "Turn camera on"}
+              title={videoEnabled ? "Turn camera off" : "Turn camera on"}
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
+                videoEnabled
+                  ? "bg-white/10 text-white hover:bg-white/20"
+                  : "bg-destructive text-white hover:bg-destructive/90"
+              }`}
+            >
+              {videoEnabled ? (
+                <Video className="h-5 w-5" />
+              ) : (
+                <VideoOff className="h-5 w-5" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={toggleAudio}
+              aria-label={audioEnabled ? "Mute microphone" : "Unmute microphone"}
+              title={audioEnabled ? "Mute microphone" : "Unmute microphone"}
+              className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
+                audioEnabled
+                  ? "bg-white/10 text-white hover:bg-white/20"
+                  : "bg-destructive text-white hover:bg-destructive/90"
+              }`}
+            >
+              {audioEnabled ? (
+                <Mic className="h-5 w-5" />
+              ) : (
+                <MicOff className="h-5 w-5" />
+              )}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
