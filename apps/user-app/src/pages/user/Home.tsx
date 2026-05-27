@@ -226,14 +226,29 @@ function EventGrid({ events }: { events: StreamEvent[] }) {
  * outer container clips both into one card.
  */
 function FeaturedLiveSection({ event }: { event: StreamEvent }) {
+  const { user } = useAuth();
+  // Signed-in viewers go straight to the event page where the
+  // BetPanel lives. Signed-out viewers hit sign-in first with a
+  // `next=` redirect so they land on the event after auth.
+  const betHref = user
+    ? `/event/${event.id}`
+    : `/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`;
+
   return (
     <Link
       to={`/event/${event.id}`}
-      className="group relative flex flex-col overflow-hidden rounded-2xl border border-border/30 bg-card shadow-lg transition-shadow hover:shadow-xl lg:flex-row lg:items-stretch"
+      // `lg:min-h-[440px]` makes the desktop hero ~30% taller than the
+      // natural 16:9 footprint, giving the featured stream more visual
+      // weight on the page. items-stretch makes both columns share the
+      // same height; the player letterboxes the 16:9 video inside the
+      // taller frame.
+      className="group relative flex flex-col overflow-hidden rounded-2xl border border-border/30 bg-card shadow-lg transition-shadow hover:shadow-xl lg:min-h-[440px] lg:flex-row lg:items-stretch"
     >
-      {/* Video column — fixed 16:9 aspect. The lg:basis values give the
-          video the larger share of horizontal space, info card the rest. */}
-      <div className="relative aspect-video w-full bg-black lg:aspect-auto lg:basis-2/3 lg:flex-shrink-0">
+      {/* Video column — flex-1 so it absorbs whatever horizontal space
+          the info column doesn't claim. Mobile keeps the 16:9 aspect
+          for a clean phone shot; on lg+ we let height come from the
+          parent's min-h so the video fills the taller frame. */}
+      <div className="relative aspect-video w-full bg-black lg:aspect-auto lg:flex-1">
         <FeaturedPlayerInner event={event} />
         {/* Top-left badges — LIVE + viewer count. These stay over the
             video; everything else (title, creator) has moved into the
@@ -247,19 +262,73 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
         </div>
       </div>
 
-      {/* Info column — title / description / creator. mt-auto on the
-          creator row keeps it pinned to the bottom of the column on
-          desktop when the description is short. */}
-      <div className="flex min-w-0 flex-col gap-3 p-5 sm:p-6 lg:flex-1">
-        <h2 className="font-heading text-lg font-extrabold leading-tight sm:text-xl">
+      {/* Info column — title / description / creator. The width is
+          `(parent − 16px) / 2`, which is exactly the span of two
+          EventCards plus the gap between them in the grid below. That
+          way the card edges align visually as the eye runs down the
+          page. mt-auto on the creator row pins it to the bottom of
+          the column when the description is short. */}
+      <div className="flex min-w-0 flex-col gap-3 p-5 sm:p-6 lg:w-[calc((100%-1rem)/2)] lg:flex-shrink-0">
+        {/* Title + description sizing matches EventCard below the
+            featured hero — same `text-base font-semibold` for the
+            title and `text-sm` for the description, so the typography
+            reads consistent down the page even though the featured
+            card is laid out larger. */}
+        <h2 className="font-heading text-base font-semibold leading-tight text-foreground">
           {event.title}
         </h2>
         {event.description && (
-          <p className="line-clamp-4 text-sm leading-relaxed text-muted-foreground sm:text-base">
+          <p className="line-clamp-4 text-sm leading-relaxed text-muted-foreground">
             {event.description}
           </p>
         )}
-        <div className="mt-auto flex items-center gap-2 pt-2">
+
+        {/* Outcomes list with odds. flex-1 lets this section absorb
+            the remaining vertical space in the info column; overflow
+            + mask-image gradient fades the bottom 25% so an
+            outcome list too long for the container trails off
+            smoothly instead of getting hard-clipped or pushing the
+            CTA below the fold. */}
+        {event.outcomes.length > 0 && (
+          <div
+            className="min-h-0 flex-1 overflow-hidden"
+            style={{
+              WebkitMaskImage:
+                "linear-gradient(to bottom, black 75%, transparent 100%)",
+              maskImage:
+                "linear-gradient(to bottom, black 75%, transparent 100%)",
+            }}
+          >
+            <ul className="space-y-1.5">
+              {event.outcomes.map((o) => (
+                <li
+                  key={o.id}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  <span className="truncate font-medium text-foreground">
+                    {o.label}
+                  </span>
+                  <span className="flex-shrink-0 font-heading font-bold tabular-nums text-foreground">
+                    {o.odds.toFixed(2)}×
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Place a bet — routes to the event page (or sign-in for
+            signed-out viewers). stopPropagation on the inner Link
+            click stops the parent Link from also navigating, so the
+            sign-in redirect for unauthed viewers doesn't race the
+            outer "go to event" nav. */}
+        <Button asChild variant="accent" size="lg" className="w-full">
+          <Link to={betHref} onClick={(e) => e.stopPropagation()}>
+            {user ? "Place a bet" : "Sign in to bet"}
+          </Link>
+        </Button>
+
+        <div className="flex items-center gap-2 pt-2">
           <img
             src={event.influencer.avatarUrl}
             alt={event.influencer.displayName}
