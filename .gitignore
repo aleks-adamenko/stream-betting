@@ -39,3 +39,9 @@ dist-ssr
 
 # Claude Code local settings (per-user permissions)
 .claude/settings.local.json
+
+# Supabase CLI per-machine state (project ref cache, etc.) — never
+# useful to share across the team. `**/` so it ignores both the
+# root-level `supabase/.temp/` and the per-app one inside
+# `apps/user-app/supabase/.temp/`.
+**/supabase/.temp/

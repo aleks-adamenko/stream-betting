@@ -47,20 +47,81 @@ export function HlsPlayer({
     setLoading(true);
     setError(null);
     let hls: Hls | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let destroyed = false;
 
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    // Live streams (Cloudflare specifically) often take 5–30 s after
+    // ingest starts before the .m3u8 manifest is reachable. hls.js's
+    // default behaviour on an early 404 is to log a fatal error and
+    // stop trying — leaving the viewer staring at the poster forever.
+    // We work around that by re-creating the hls.js instance with a
+    // backoff every time it bails out, until the source either plays
+    // (`playing` event fires) or the component unmounts.
+    let retryDelayMs = 2000;
+    const MAX_RETRY_DELAY_MS = 15_000;
+
+    function startNativeHls() {
+      // Safari path — `<video src=...>` handles HLS natively. No
+      // hls.js needed. The video's own `error` event drives retry.
       video.src = src;
-    } else if (Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      video.addEventListener("error", scheduleRetry, { once: true });
+    }
+
+    function startHlsJs() {
+      if (!Hls.isSupported()) {
+        setError("This browser cannot play HLS streams.");
+        setLoading(false);
+        return;
+      }
+      // Light retry config on the hls.js side too — covers transient
+      // segment 404s once the playlist is up but a specific .ts isn't.
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        manifestLoadingMaxRetry: 6,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingMaxRetry: 6,
+        fragLoadingMaxRetry: 6,
+      });
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) setError("Stream is unavailable. Trying again…");
+        if (!data.fatal) return;
+        // Fatal — tear down and schedule a fresh attempt. Don't show
+        // the error UI; viewers don't need to know about Cloudflare's
+        // warm-up window. The poster + spinner stay on screen.
+        hls?.destroy();
+        hls = null;
+        scheduleRetry();
       });
+    }
+
+    function scheduleRetry() {
+      if (destroyed) return;
+      retryTimer = setTimeout(() => {
+        if (destroyed) return;
+        retryDelayMs = Math.min(retryDelayMs * 1.5, MAX_RETRY_DELAY_MS);
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          startNativeHls();
+        } else {
+          startHlsJs();
+        }
+        tryPlay();
+      }, retryDelayMs);
+    }
+
+    function tryPlay() {
+      if (!autoPlay) return;
+      video.muted = initialMuted;
+      void video.play().catch(() => {
+        // Autoplay blocked — wait for user gesture; ignore.
+      });
+    }
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      startNativeHls();
     } else {
-      setError("This browser cannot play HLS streams.");
-      setLoading(false);
-      return;
+      startHlsJs();
     }
 
     const onPlaying = () => setLoading(false);
@@ -68,14 +129,11 @@ export function HlsPlayer({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("waiting", onWaiting);
 
-    if (autoPlay) {
-      video.muted = initialMuted;
-      void video.play().catch(() => {
-        // Autoplay was blocked — fine, user can tap to start.
-      });
-    }
+    tryPlay();
 
     return () => {
+      destroyed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("waiting", onWaiting);
       hls?.destroy();

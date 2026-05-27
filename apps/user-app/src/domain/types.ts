@@ -27,6 +27,11 @@ export interface StreamEvent {
   description: string;
   coverUrl: string;
   videoUrl?: string | null;
+  /** HLS manifest URL for the live stream. Populated when the creator
+   *  has hit Publish and we've provisioned a Cloudflare Stream live
+   *  input. Fed straight to HlsPlayer; legacy `videoUrl` is the
+   *  fallback for events imported from social embeds. */
+  playbackUrl?: string | null;
   status: EventStatus;
   category: string;
   rules: string;

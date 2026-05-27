@@ -11,10 +11,10 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
     "@liverush/design-tokens": "workspace:*",
     "@liverush/lib": "workspace:*",
     "@liverush/ui": "workspace:*",
-    "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-checkbox": "^1.3.2",
     "@radix-ui/react-dialog": "^1.1.14",

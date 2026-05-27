@@ -16,6 +16,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { LiveBadge } from "@/components/feed/LiveBadge";
 import { HlsPlayer } from "@/components/stream/HlsPlayer";
+import {
+  CloudflareStreamPlayer,
+  isCloudflareStreamUrl,
+} from "@/components/stream/CloudflareStreamPlayer";
 import { RoundStatus } from "@/components/stream/RoundStatus";
 import {
   SocialVideoEmbed,
@@ -158,8 +162,20 @@ export default function EventDetails() {
                   title={event.title}
                   fullscreen={isFullscreen}
                 />
+              ) : isCloudflareStreamUrl(event.playbackUrl) ? (
+                <CloudflareStreamPlayer
+                  src={event.playbackUrl!}
+                  poster={event.coverUrl}
+                  autoPlay
+                  muted
+                />
               ) : (
-                <HlsPlayer src={TEST_STREAM} poster={event.coverUrl} autoPlay muted />
+                <HlsPlayer
+                  src={event.playbackUrl ?? TEST_STREAM}
+                  poster={event.coverUrl}
+                  autoPlay
+                  muted
+                />
               )
             ) : (
               <img

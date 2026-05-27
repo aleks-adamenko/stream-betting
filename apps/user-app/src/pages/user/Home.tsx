@@ -9,6 +9,10 @@ import { LiveBadge } from "@/components/feed/LiveBadge";
 import { StreamCard } from "@/components/feed/StreamCard";
 import { HlsPlayer } from "@/components/stream/HlsPlayer";
 import {
+  CloudflareStreamPlayer,
+  isCloudflareStreamUrl,
+} from "@/components/stream/CloudflareStreamPlayer";
+import {
   SocialVideoEmbed,
   resolveSocialEmbedUrl,
 } from "@/components/stream/SocialVideoEmbed";
@@ -224,13 +228,26 @@ function FeaturedPlayer({ event }: { event: StreamEvent }) {
       to={`/event/${event.id}`}
       // Horizontal 16:9 player — matches a video frame's natural ratio
       // so external Instagram / TikTok / WebRTC sources don't end up
-      // letterboxed inside a portrait container.
+      // letterboxed inside a portrait container. Cloudflare HLS streams
+      // play through the same HlsPlayer as the fallback test stream.
       className="group relative block aspect-video w-full overflow-hidden rounded-2xl border border-border/30 bg-black shadow-lg"
     >
       {socialUrl ? (
         <SocialVideoEmbed url={socialUrl} title={event.title} fit="contain" />
+      ) : isCloudflareStreamUrl(event.playbackUrl) ? (
+        <CloudflareStreamPlayer
+          src={event.playbackUrl!}
+          poster={event.coverUrl}
+          autoPlay
+          muted
+        />
       ) : (
-        <HlsPlayer src={TEST_STREAM} poster={event.coverUrl} autoPlay muted />
+        <HlsPlayer
+          src={event.playbackUrl ?? TEST_STREAM}
+          poster={event.coverUrl}
+          autoPlay
+          muted
+        />
       )}
 
       {/* Top-left badges */}

@@ -71,6 +71,12 @@ export interface Database {
             | "external_url"
             | null;
           broadcast_delay_sec: 0 | 5 | 10 | 15 | null;
+          // Cloudflare Stream integration: public HLS manifest URL
+          // (safe to expose). Populated by the provision-stream Edge
+          // Function when the creator publishes a draft. Sensitive
+          // ingest credentials (the WHIP URL with the publish secret)
+          // live in `event_streams`.
+          playback_url: string | null;
         };
         Insert: Omit<Database["public"]["Tables"]["events"]["Row"], "created_at"> & {
           created_at?: string;
@@ -120,6 +126,31 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["creator_profiles"]["Insert"]>;
         Relationships: [];
+      };
+      event_streams: {
+        Row: {
+          event_id: string;
+          cf_input_uid: string;
+          whip_url: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["event_streams"]["Row"],
+          "created_at"
+        > & {
+          created_at?: string;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["event_streams"]["Insert"]
+        >;
+        Relationships: [
+          {
+            foreignKeyName: "event_streams_event_id_fkey";
+            columns: ["event_id"];
+            referencedRelation: "events";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       event_chat_messages: {
         Row: {
@@ -420,6 +451,17 @@ export interface Database {
       send_chat_message: {
         Args: { p_event_id: string; p_body: string };
         Returns: Database["public"]["Tables"]["event_chat_messages"]["Row"];
+      };
+      get_stream_credentials: {
+        Args: { p_event_id: string };
+        // Returns a setof (table-returning function). The studio
+        // unwraps `[row]` from data on success. Cloudflare's WHIP URL
+        // contains the publish secret in the path — no separate
+        // stream_key field is needed.
+        Returns: Array<{
+          whip_url: string;
+          playback_url: string | null;
+        }>;
       };
       add_event_outcome: {
         Args: {

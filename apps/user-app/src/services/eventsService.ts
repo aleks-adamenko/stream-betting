@@ -30,6 +30,7 @@ const EVENT_SELECT = `
   started_at,
   viewers_count,
   total_pool,
+  playback_url,
   influencer:influencers!events_influencer_id_fkey (
     id, handle, display_name, avatar_url, followers, socials
   ),
@@ -104,6 +105,7 @@ function mapEvent(row: EventRow): StreamEvent {
     description: row.description ?? "",
     coverUrl: row.cover_url ?? "",
     videoUrl: row.video_url ?? null,
+    playbackUrl: row.playback_url ?? null,
     category: row.category,
     rules: row.rules ?? "",
     roundFormat: row.round_format,

@@ -18,6 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useEventChat, type ChatMessage } from "@/hooks/useEventChat";
 import { useEventViewers } from "@/hooks/useEventViewers";
 import { supabase } from "@/integrations/supabase/client";
+import { WhipPublisher } from "@/lib/whip";
 
 /**
  * Full-screen "live" view for the creator. Lives outside StudioLayout
@@ -41,6 +42,9 @@ export default function LiveStream() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // WHIP publisher — created on first start, reused for orientation
+  // changes (replaceVideoTrack), released on stop / unmount.
+  const publisherRef = useRef<WhipPublisher | null>(null);
   const [phase, setPhase] = useState<
     "idle" | "requesting" | "live" | "ending" | "error" | "unsupported"
   >("idle");
@@ -112,7 +116,19 @@ export default function LiveStream() {
     }
   }, [event, phase]);
 
-  const stopStream = useCallback(() => {
+  const stopStream = useCallback(async () => {
+    // Tear down the WHIP publisher first — it stops the local tracks
+    // and DELETEs the WHIP resource on Mux so the ingest session ends
+    // cleanly. Local stream + video element clear out below as a
+    // belt-and-braces fallback.
+    if (publisherRef.current) {
+      try {
+        await publisherRef.current.stop();
+      } catch {
+        // best-effort
+      }
+      publisherRef.current = null;
+    }
     const stream = streamRef.current;
     if (stream) {
       for (const track of stream.getTracks()) track.stop();
@@ -125,7 +141,11 @@ export default function LiveStream() {
 
   // Always release the camera when this page unmounts so we don't
   // leave the indicator light on after the creator navigates away.
-  useEffect(() => () => stopStream(), [stopStream]);
+  useEffect(() => {
+    return () => {
+      void stopStream();
+    };
+  }, [stopStream]);
 
   const startMutation = useMutation({
     mutationFn: async () => {
@@ -148,8 +168,13 @@ export default function LiveStream() {
   const finishMutation = useMutation({
     mutationFn: async () => {
       if (!eventId) throw new Error("Missing event id");
-      const { error } = await supabase.rpc("finish_event", {
-        p_event_id: eventId,
+      // Go through the end-stream Edge Function so Mux's live stream
+      // gets torn down (DELETE on liveStreams) and the event_streams
+      // row is cleaned up. The function calls finish_event internally
+      // to flip status. Service-role can't, because finish_event reads
+      // auth.uid().
+      const { error } = await supabase.functions.invoke("end-stream", {
+        body: { event_id: eventId },
       });
       if (error) throw error;
     },
@@ -167,25 +192,72 @@ export default function LiveStream() {
     setErrorMessage(null);
     setPhase("requesting");
     try {
+      if (!eventId) throw new Error("Missing event id");
+
+      // 1) Fetch the Cloudflare WHIP URL. The studio user MUST be the
+      //    creator of the event for the RPC to return anything (RLS).
+      //    Cloudflare's WHIP URL contains the publish secret in the
+      //    path, so it's the only credential we need.
+      const { data: credRows, error: credErr } = await supabase.rpc(
+        "get_stream_credentials",
+        { p_event_id: eventId },
+      );
+      if (credErr) throw credErr;
+      const creds = Array.isArray(credRows) ? credRows[0] : credRows;
+      if (!creds?.whip_url) {
+        throw new Error(
+          "No stream credentials found for this event. Try unpublishing and re-publishing the draft.",
+        );
+      }
+
+      // 2) Decide camera orientation based on the device. Mobile in
+      //    portrait → 720x1280 (9:16); rotated landscape OR desktop →
+      //    1280x720 (16:9). Mux ingests whatever native aspect we
+      //    send and LL-HLS preserves it for viewers.
+      const isMobile = window.matchMedia(
+        "(max-width: 767px), (pointer: coarse)",
+      ).matches;
+      const portrait = window.matchMedia("(orientation: portrait)").matches;
+      const wantsPortrait = isMobile && portrait;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: wantsPortrait ? 720 : 1280 },
+          height: { ideal: wantsPortrait ? 1280 : 720 },
         },
         audio: true,
       });
       streamRef.current = stream;
+
+      // 3) Attach to the local preview so the creator sees what's
+      //    being broadcast. object-contain on the <video> element
+      //    means we never lie about the framing (vs. cover, which
+      //    would crop edges out of the viewer-side view).
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {
-          // playsinline + muted should cover autoplay restrictions;
-          // ignore the rejection so the page still flips to "live".
+          // playsinline + muted cover autoplay restrictions; ignore.
         });
       }
 
-      // Only flip the DB status if it isn't already 'live'. Resuming
-      // after a refresh keeps the same row state.
+      // 4) Hand the stream off to the WHIP publisher. WhipPublisher
+      //    handles ICE / SDP / codec preferences / DELETE on stop.
+      const publisher = new WhipPublisher({
+        onStatusChange: (status) => {
+          if (status === "failed") {
+            setErrorMessage("Lost connection to the stream. Try again.");
+            setPhase("error");
+          }
+        },
+        onError: (err) => {
+          console.error("WHIP publisher error:", err);
+        },
+      });
+      publisherRef.current = publisher;
+      await publisher.start(stream, creds.whip_url);
+
+      // 5) Flip DB status to 'live' (or no-op if already live after a
+      //    refresh).
       if (event?.status === "scheduled") {
         await startMutation.mutateAsync();
       }
@@ -204,8 +276,53 @@ export default function LiveStream() {
                 : "Couldn't start the stream.";
       setErrorMessage(message);
       setPhase("error");
+      // If we failed mid-setup, release whatever we acquired.
+      void stopStream();
     }
   };
+
+  // Orientation change handler — when the creator rotates their phone
+  // mid-stream we re-grab the camera at the new dims and hot-swap the
+  // track on the WHIP sender. Viewers see the new aspect on the next
+  // HLS segment (~2s).
+  useEffect(() => {
+    if (phase !== "live") return;
+    const isMobile = window.matchMedia("(pointer: coarse)").matches;
+    if (!isMobile) return;
+    const orientation = window.screen?.orientation;
+    if (!orientation) return;
+
+    const handler = async () => {
+      const portrait = window.matchMedia("(orientation: portrait)").matches;
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: portrait ? 720 : 1280 },
+            height: { ideal: portrait ? 1280 : 720 },
+          },
+          audio: true,
+        });
+        const newVideoTrack = newStream.getVideoTracks()[0];
+        if (newVideoTrack && publisherRef.current) {
+          await publisherRef.current.replaceVideoTrack(newVideoTrack);
+          // Swap the local preview too, and replace the held
+          // MediaStream so future stopStream() cleans up correctly.
+          const oldStream = streamRef.current;
+          streamRef.current = newStream;
+          if (videoRef.current) videoRef.current.srcObject = newStream;
+          if (oldStream) {
+            for (const t of oldStream.getTracks()) t.stop();
+          }
+        }
+      } catch (err) {
+        console.warn("Orientation change re-capture failed", err);
+      }
+    };
+
+    orientation.addEventListener("change", handler);
+    return () => orientation.removeEventListener("change", handler);
+  }, [phase]);
 
   const handleEnd = async () => {
     if (
@@ -218,7 +335,7 @@ export default function LiveStream() {
     setPhase("ending");
     try {
       await finishMutation.mutateAsync();
-      stopStream();
+      await stopStream();
       toast.success("Stream ended");
       navigate("/events", { replace: true });
     } catch (err) {
@@ -249,11 +366,14 @@ export default function LiveStream() {
     <div className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-black text-white">
       {/* Video — always mounted so srcObject can attach on first
           start without a flicker. Hidden until a stream is live. */}
+      {/* object-contain (not cover) on purpose: the creator sees the
+          full broadcast frame including any letterboxing, instead of a
+          crop that hides what viewers will actually see. */}
       <video
         ref={videoRef}
         className={
           phase === "live"
-            ? "absolute inset-0 h-full w-full -scale-x-100 object-cover"
+            ? "absolute inset-0 h-full w-full -scale-x-100 object-contain"
             : "hidden"
         }
         autoPlay

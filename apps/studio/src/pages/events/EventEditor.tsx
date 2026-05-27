@@ -112,6 +112,31 @@ function toLocalDateTimeInput(iso: string | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Earliest start-time the user is allowed to schedule — the next
+ *  whole minute. Refreshed every 30s by the component so it stays
+ *  current as time ticks forward.
+ */
+function getMinScheduledAtIsoLocal(): string {
+  const d = new Date();
+  d.setSeconds(0, 0);
+  d.setMinutes(d.getMinutes() + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Sensible default scheduled time for a brand-new draft — now + 1h,
+ *  rounded down to the nearest 5-minute mark. Means the Save button
+ *  can activate as soon as the creator types a title (the other DB-
+ *  required field is already filled).
+ */
+function getDefaultScheduledAtIsoLocal(): string {
+  const d = new Date();
+  d.setHours(d.getHours() + 1);
+  d.setMinutes(Math.floor(d.getMinutes() / 5) * 5, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function centsToDollarsString(cents: number | null | undefined): string {
   if (cents == null) return "";
   return (cents / 100).toFixed(2);
@@ -199,7 +224,23 @@ export default function EventEditor() {
     useState<BetWindowOpens>("on_live");
   const [betWindowLocks, setBetWindowLocks] =
     useState<BetWindowLocks>("manual");
-  const [scheduledAt, setScheduledAt] = useState<string>("");
+  // New events start with a sensible future scheduled time so Save
+  // can unlock with only a typed title (the DB requires scheduled_at).
+  // Existing events overwrite this in the load effect below.
+  const [scheduledAt, setScheduledAt] = useState<string>(() =>
+    isNew ? getDefaultScheduledAtIsoLocal() : "",
+  );
+  // Refreshed every 30s so the datetime-local input's `min` keeps
+  // tracking real time forward (no picking past minutes).
+  const [minScheduledAt, setMinScheduledAt] = useState<string>(() =>
+    getMinScheduledAtIsoLocal(),
+  );
+  useEffect(() => {
+    const id = setInterval(() => {
+      setMinScheduledAt(getMinScheduledAtIsoLocal());
+    }, 30_000);
+    return () => clearInterval(id);
+  }, []);
   const [sourceType, setSourceType] = useState<SourceType>("external_url");
   const [videoUrl, setVideoUrl] = useState<string>("");
   const [status, setStatus] = useState<string>("draft");
@@ -311,13 +352,14 @@ export default function EventEditor() {
     maxCents >= minCents &&
     maxCents <= 1_000_000;
 
-  // Minimums needed to call create_event / update_event without the DB
-  // rejecting the row. We keep this loose so partial drafts can be saved.
+  // Minimums needed to call create_event / update_event without the
+  // DB rejecting the row. Save activates as soon as the creator has
+  // typed a title — outcomes can be added later, scheduledAt is pre-
+  // filled, and roundDuration is only required when format='time'.
   const canSave =
     title.trim().length >= 3 &&
     !!scheduledAt &&
     (roundFormat !== "time" || Number(roundDurationSec) > 0) &&
-    validOutcomes.length >= 2 &&
     outcomeDuplicates.size === 0;
 
   // Compliance checks shown in the Review section. All must pass before
@@ -545,90 +587,96 @@ export default function EventEditor() {
   };
 
   // ---- Save / publish / delete mutations ----
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!canSave) throw new Error("Fill the required fields first");
+  //
+  // `runSave` is the underlying side-effecting logic. We extract it
+  // out of the mutation so publishMutation can call it first on a
+  // brand-new event (so the Publish button can be active before
+  // there's a saved row, instead of forcing a two-click save → publish
+  // dance).
+  const runSave = async (): Promise<string> => {
+    if (!canSave) throw new Error("Fill the required fields first");
 
-      const isoScheduled = new Date(scheduledAt).toISOString();
-      const duration =
-        roundFormat === "time" ? Number(roundDurationSec) || null : null;
+    const isoScheduled = new Date(scheduledAt).toISOString();
+    const duration =
+      roundFormat === "time" ? Number(roundDurationSec) || null : null;
 
-      const rpcArgs = {
-        p_title: title.trim(),
-        p_cover_url: coverUrl,
-        p_description: description.trim() || null,
-        p_rules: rules.trim() || null,
-        p_category: category,
-        p_round_format: roundFormat,
-        p_round_duration_sec: duration,
-        p_scheduled_at: isoScheduled,
-        p_video_url: videoUrl.trim() || null,
-        p_void_conditions: voidConditions.trim() || null,
-        p_min_bet_cents: minCents,
-        p_max_bet_cents: maxCents,
-        p_bet_window_opens: betWindowOpens,
-        p_bet_window_locks: betWindowLocks,
-        p_source_type: sourceType,
-        // Broadcast delay is now enforced platform-side; no per-event
-        // override gets sent.
-      };
+    const rpcArgs = {
+      p_title: title.trim(),
+      p_cover_url: coverUrl,
+      p_description: description.trim() || null,
+      p_rules: rules.trim() || null,
+      p_category: category,
+      p_round_format: roundFormat,
+      p_round_duration_sec: duration,
+      p_scheduled_at: isoScheduled,
+      p_video_url: videoUrl.trim() || null,
+      p_void_conditions: voidConditions.trim() || null,
+      p_min_bet_cents: minCents,
+      p_max_bet_cents: maxCents,
+      p_bet_window_opens: betWindowOpens,
+      p_bet_window_locks: betWindowLocks,
+      p_source_type: sourceType,
+      // Broadcast delay is now enforced platform-side; no per-event
+      // override gets sent.
+    };
 
-      let savedId = eventId;
-      if (isNew) {
-        const { data, error } = await supabase.rpc("create_event", rpcArgs);
-        if (error) throw error;
-        savedId = data.id;
-      } else {
-        const { error } = await supabase.rpc("update_event", {
-          p_event_id: eventId!,
-          ...rpcArgs,
+    let savedId = eventId;
+    if (isNew) {
+      const { data, error } = await supabase.rpc("create_event", rpcArgs);
+      if (error) throw error;
+      savedId = data.id;
+    } else {
+      const { error } = await supabase.rpc("update_event", {
+        p_event_id: eventId!,
+        ...rpcArgs,
+      });
+      if (error) throw error;
+    }
+
+    // Reconcile outcomes: add new, update changed, delete removed.
+    const existingIds = new Set((loaded?.outcomes ?? []).map((o) => o.id));
+    const keptIds = new Set(
+      outcomes.filter((o) => o.id).map((o) => o.id!),
+    );
+    for (const ex of loaded?.outcomes ?? []) {
+      if (!keptIds.has(ex.id)) {
+        const { error } = await supabase.rpc("delete_event_outcome", {
+          p_outcome_id: ex.id,
         });
         if (error) throw error;
       }
+    }
+    for (const [idx, o] of outcomes.entries()) {
+      const trimmedLabel = o.label.trim();
+      if (!trimmedLabel) continue;
+      const parsedOdds = parseFloat(o.odds);
+      const odds =
+        Number.isFinite(parsedOdds) && parsedOdds > 1
+          ? parsedOdds
+          : parseFloat(DEFAULT_ODDS);
+      if (o.id && existingIds.has(o.id)) {
+        const { error } = await supabase.rpc("update_event_outcome", {
+          p_outcome_id: o.id,
+          p_label: trimmedLabel,
+          p_odds: odds,
+          p_sort_order: idx,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.rpc("add_event_outcome", {
+          p_event_id: savedId!,
+          p_label: trimmedLabel,
+          p_odds: odds,
+          p_sort_order: idx,
+        });
+        if (error) throw error;
+      }
+    }
+    return savedId!;
+  };
 
-      // Reconcile outcomes: add new, update changed, delete removed.
-      const existingIds = new Set(
-        (loaded?.outcomes ?? []).map((o) => o.id),
-      );
-      const keptIds = new Set(
-        outcomes.filter((o) => o.id).map((o) => o.id!),
-      );
-      for (const ex of loaded?.outcomes ?? []) {
-        if (!keptIds.has(ex.id)) {
-          const { error } = await supabase.rpc("delete_event_outcome", {
-            p_outcome_id: ex.id,
-          });
-          if (error) throw error;
-        }
-      }
-      for (const [idx, o] of outcomes.entries()) {
-        const trimmedLabel = o.label.trim();
-        if (!trimmedLabel) continue;
-        const parsedOdds = parseFloat(o.odds);
-        const odds =
-          Number.isFinite(parsedOdds) && parsedOdds > 1
-            ? parsedOdds
-            : parseFloat(DEFAULT_ODDS);
-        if (o.id && existingIds.has(o.id)) {
-          const { error } = await supabase.rpc("update_event_outcome", {
-            p_outcome_id: o.id,
-            p_label: trimmedLabel,
-            p_odds: odds,
-            p_sort_order: idx,
-          });
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.rpc("add_event_outcome", {
-            p_event_id: savedId!,
-            p_label: trimmedLabel,
-            p_odds: odds,
-            p_sort_order: idx,
-          });
-          if (error) throw error;
-        }
-      }
-      return savedId!;
-    },
+  const saveMutation = useMutation({
+    mutationFn: runSave,
     onSuccess: (savedId) => {
       toast.success("Event saved");
       void queryClient.invalidateQueries({
@@ -647,11 +695,17 @@ export default function EventEditor() {
 
   const publishMutation = useMutation({
     mutationFn: async () => {
-      if (!eventId) throw new Error("Save the event first");
-      const { error } = await supabase.rpc("publish_event", {
-        p_event_id: eventId,
+      // Always save the latest form state first — for a new draft
+      // this creates the row, for an existing one it flushes any
+      // un-saved edits before publishing. Then we provision the Mux
+      // live stream + flip status via the `provision-stream` Edge
+      // Function. Idempotent.
+      const id = await runSave();
+      const { error } = await supabase.functions.invoke("provision-stream", {
+        body: { event_id: id },
       });
       if (error) throw error;
+      return id;
     },
     onSuccess: () => {
       toast.success("Event published");
@@ -885,16 +939,14 @@ export default function EventEditor() {
                 variant="accent"
                 aria-label="Publish"
                 title={
-                  isNew
-                    ? "Save the draft first to enable publishing"
-                    : !verifiedCreator
-                      ? "Publishing unlocks once your account is verified"
-                      : !allComplianceMet
-                        ? "Complete every field above to publish"
-                        : "Publish"
+                  !verifiedCreator
+                    ? "Publishing unlocks once your account is verified"
+                    : !allComplianceMet
+                      ? "Complete every field above to publish"
+                      : "Publish"
                 }
                 onClick={() => publishMutation.mutate()}
-                disabled={isNew || !canPublish || publishMutation.isPending}
+                disabled={!canPublish || publishMutation.isPending}
                 className="w-10 px-0 sm:w-auto sm:px-5"
               >
                 {publishMutation.isPending ? (
@@ -1372,6 +1424,7 @@ export default function EventEditor() {
               id="scheduled-at"
               type="datetime-local"
               value={scheduledAt}
+              min={minScheduledAt}
               onChange={(e) => setScheduledAt(e.target.value)}
               disabled={!editable}
               className="pl-9"

@@ -133,8 +133,12 @@ export default function EventList() {
 
   const publishMutation = useMutation({
     mutationFn: async (eventId: string) => {
-      const { error } = await supabase.rpc("publish_event", {
-        p_event_id: eventId,
+      // Go through the provision-stream Edge Function so Mux gets a
+      // live stream + the events row gets stamped with the playback
+      // id. The function calls publish_event internally to flip
+      // status. Idempotent on event_id.
+      const { error } = await supabase.functions.invoke("provision-stream", {
+        body: { event_id: eventId },
       });
       if (error) throw error;
       return eventId;
