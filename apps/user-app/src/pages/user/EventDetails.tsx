@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -117,20 +117,12 @@ export default function EventDetails() {
     );
   }
 
+  // Deleted / never-existed event → bounce to home. We don't show a
+  // "not found" interstitial because most of these come from stale
+  // share links and the creator/viewer expectation is "where is it?"
+  // not "why is it missing?". Home gives them somewhere to go.
   if (!event) {
-    return (
-      <PageContainer>
-        <div className="rounded-xl border border-border/40 bg-card p-8 text-center">
-          <h1 className="font-heading text-xl font-semibold">Event not found</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            We couldn't find that event. It may have ended or been removed.
-          </p>
-          <Button asChild variant="secondary" size="sm" className="mt-4">
-            <Link to="/discover">Back to Discover</Link>
-          </Button>
-        </div>
-      </PageContainer>
-    );
+    return <Navigate to="/" replace />;
   }
 
   const isLive = event.status === "live";
@@ -224,7 +216,7 @@ export default function EventDetails() {
               </div>
             )}
 
-            {/* Tap-to-expand overlay — mobile only, non-fullscreen, sits below the title overlay so the Place a bet button stays clickable */}
+            {/* Tap-to-expand overlay — mobile only, non-fullscreen */}
             {!isFullscreen && (
               <button
                 type="button"
@@ -234,45 +226,23 @@ export default function EventDetails() {
               />
             )}
 
-            {/* Title + organizer overlay — sits on top of the video with a bottom-up dark gradient. Hidden in fullscreen (replaced by FullscreenBetOverlay). */}
-            <div
-              className={cn(
-                "pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-4 pt-16 transition-opacity duration-200",
-                (overlaysHidden || isFullscreen) && "opacity-0 lg:opacity-100",
-              )}
-            >
-              <div className="flex items-end justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <h1 className="font-heading text-base font-extrabold leading-tight text-white drop-shadow sm:text-lg">
-                    {event.title}
-                  </h1>
-                  <div className="mt-2 flex items-center gap-1.5">
-                    <img
-                      src={event.influencer.avatarUrl}
-                      alt={event.influencer.displayName}
-                      className="h-6 w-6 flex-shrink-0 rounded-full object-cover ring-2 ring-white/40"
-                    />
-                    <span className="truncate text-sm font-semibold text-white">
-                      {event.influencer.displayName}
-                    </span>
-                    <BadgeCheck className="h-4 w-4 flex-shrink-0 fill-primary text-white" />
-                    <span className="truncate text-sm text-white/85">
-                      {compactFormatter.format(event.influencer.followers)} followers
-                    </span>
-                  </div>
-                </div>
-                {isLive && (
-                  <Button
-                    type="button"
-                    variant="accent"
-                    onClick={handleHeaderBet}
-                    className="pointer-events-auto flex-shrink-0 lg:hidden"
-                  >
-                    {user ? "Place a bet" : "Sign in to bet"}
-                  </Button>
-                )}
+            {/* Mobile-only "Place a bet" floater — used to live inside
+                the bottom-gradient title overlay we removed. We keep
+                the affordance because it's the fastest path to the
+                bet panel on a phone, just without the dark gradient
+                behind it. */}
+            {isLive && !isFullscreen && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-end px-4 pb-4 lg:hidden">
+                <Button
+                  type="button"
+                  variant="accent"
+                  onClick={handleHeaderBet}
+                  className="pointer-events-auto"
+                >
+                  {user ? "Place a bet" : "Sign in to bet"}
+                </Button>
               </div>
-            </div>
+            )}
 
             {/* Fullscreen-only overlays: X close + bet controls + drag-down close */}
             {isFullscreen && (
@@ -299,16 +269,16 @@ export default function EventDetails() {
               />
             )}
 
-          {/* Description (mobile: paired with the Rules button in the same row) */}
-          <div className="flex items-start gap-3 lg:block">
-            <p className="flex-1 text-sm leading-relaxed text-muted-foreground sm:text-base">
-              {event.description}
-            </p>
+          {/* Rules button — mobile only. Description used to share
+              this row but has moved into the EventInfoBlock at the
+              bottom of the page (or under Rules on desktop), so the
+              Rules button gets its own line. */}
+          <div className="lg:hidden">
             <Button
               type="button"
               variant="secondary"
               onClick={() => setRulesModalOpen(true)}
-              className="flex-shrink-0 lg:hidden"
+              className="w-full sm:w-auto"
             >
               Rules
             </Button>
@@ -326,6 +296,16 @@ export default function EventDetails() {
               </p>
             </div>
           </section>
+
+          {/* Event info — desktop placement. Title + creator + follower
+              count + description in one card under Rules. The same
+              block also lives inside the aside (mobile-only) so on
+              phones it ends up below the chat container. Rendered
+              twice with hidden/lg:block toggles so the mobile and
+              desktop positions are independent. */}
+          <div className="hidden lg:block">
+            <EventInfoBlock event={event} />
+          </div>
 
           {/* Rewards banner — desktop only; mobile renders this after the bet panel inside the aside */}
           <Link
@@ -363,6 +343,13 @@ export default function EventDetails() {
           <div className="order-3 lg:order-3">
             <ChatPanel eventId={event.id} />
           </div>
+          {/* Event info — mobile placement, below the chat container.
+              On desktop this same block already renders inside the
+              main column under Rules; lg:hidden removes the dupe so
+              we don't render twice on desktop. */}
+          <div className="order-4 lg:hidden">
+            <EventInfoBlock event={event} />
+          </div>
         </aside>
       </div>
 
@@ -373,6 +360,43 @@ export default function EventDetails() {
         rules={event.rules}
       />
     </PageContainer>
+  );
+}
+
+/**
+ * Title + creator + follower count + description, rendered as a single
+ * card. Replaces the old dark-gradient overlay that used to sit at the
+ * bottom of the video container. We render this component twice in
+ * EventDetails — once under Rules on desktop, once under ChatPanel on
+ * mobile — both consume the same StreamEvent so the content stays in
+ * sync if data changes.
+ */
+function EventInfoBlock({ event }: { event: StreamEvent }) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border/30 bg-card p-5 sm:p-6">
+      <h1 className="font-heading text-lg font-extrabold leading-tight sm:text-xl">
+        {event.title}
+      </h1>
+      <div className="mt-3 flex items-center gap-2">
+        <img
+          src={event.influencer.avatarUrl}
+          alt={event.influencer.displayName}
+          className="h-8 w-8 flex-shrink-0 rounded-full object-cover ring-2 ring-border/40"
+        />
+        <span className="truncate text-sm font-semibold text-foreground">
+          {event.influencer.displayName}
+        </span>
+        <BadgeCheck className="h-4 w-4 flex-shrink-0 fill-primary text-white" />
+        <span className="truncate text-sm text-muted-foreground">
+          {compactFormatter.format(event.influencer.followers)} followers
+        </span>
+      </div>
+      {event.description && (
+        <p className="mt-4 text-sm leading-relaxed text-muted-foreground sm:text-base">
+          {event.description}
+        </p>
+      )}
+    </section>
   );
 }
 

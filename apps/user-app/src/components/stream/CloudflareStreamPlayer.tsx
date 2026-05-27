@@ -36,17 +36,30 @@ export function CloudflareStreamPlayer({
   muted = true,
   className,
 }: CloudflareStreamPlayerProps) {
-  // Pass behaviour flags via Cloudflare's documented query params so
-  // the embed renders the way the rest of the user-app expects:
-  // muted autoplay viewers, with a poster shown until playback starts.
+  // Pass behaviour flags via Cloudflare's documented query params.
+  //
+  // Important: we no longer set `muted=true` even when the prop says
+  // so. Browsers will auto-mute autoplay videos that lack a user
+  // gesture anyway, so setting `muted=true` here was redundant — and
+  // it actively prevented the player's built-in unmute control from
+  // working (the URL flag re-applied on every state change, locking
+  // the player in mute). The user can now click the unmute icon and
+  // actually hear audio.
+  //
+  // The `muted` prop is still accepted for API parity but only
+  // matters when explicitly passed as `false` for "default unmuted"
+  // playback (rare; mostly for already-engaged player sessions).
   const params = new URLSearchParams();
   if (autoPlay) params.set("autoplay", "true");
-  if (muted) params.set("muted", "true");
   if (poster) params.set("poster", poster);
   // Hides the giant Cloudflare logo overlay; the player controls
   // remain visible.
   params.set("letterboxColor", "transparent");
   const url = `${src}?${params.toString()}`;
+  // Silence the unused-var warning for the prop while we keep it as
+  // part of the component's public surface (callers in EventDetails
+  // and Home still pass it). Remove if we later drop the prop.
+  void muted;
 
   return (
     <div className={cn("relative h-full w-full overflow-hidden bg-black", className)}>
