@@ -39,7 +39,12 @@ type BetWindowLocks =
   | "1m_after"
   | "2m_after"
   | "5m_after";
-type SourceType = "browser_camera" | "external_rtmp" | "external_url";
+// `external_rtmp` is intentionally not in this union anymore. The DB
+// enum still accepts it (so historical rows continue to load), but the
+// editor no longer offers it as a creatable option — see SOURCE_TYPES
+// below. If we ever add OBS / RTMPS publishing back, add the value
+// here and an entry in SOURCE_TYPES.
+type SourceType = "browser_camera" | "external_url";
 
 const COVER_MAX_BYTES = 300 * 1024; // 300 KB
 const COVER_ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"];
@@ -81,19 +86,19 @@ const SOURCE_TYPES: Array<{
 }> = [
   {
     value: "browser_camera",
-    label: "Browser camera (built-in)",
+    label: "Device camera",
     helper: "Stream directly from this device's camera.",
   },
   {
-    value: "external_rtmp",
-    label: "External RTMP (OBS / Streamlabs)",
-    helper: "Coming soon — we'll generate an ingest URL + stream key.",
-    disabled: true,
-  },
-  {
+    // Visible but not selectable yet — we surface the option so creators
+    // know it's planned, but the user-app side that consumes external
+    // links isn't ready to play them next to Cloudflare-ingested
+    // streams. Flip `disabled` off when the social-embed playback path
+    // is verified end-to-end.
     value: "external_url",
-    label: "External stream URL (Instagram / TikTok)",
-    helper: "Paste a public Instagram Reel or TikTok video URL.",
+    label: "External stream link",
+    helper: "Coming soon — paste an Instagram Reel or TikTok URL.",
+    disabled: true,
   },
 ];
 
@@ -241,9 +246,22 @@ export default function EventEditor() {
     }, 30_000);
     return () => clearInterval(id);
   }, []);
-  const [sourceType, setSourceType] = useState<SourceType>("external_url");
+  const [sourceType, setSourceType] = useState<SourceType>("browser_camera");
   const [videoUrl, setVideoUrl] = useState<string>("");
   const [status, setStatus] = useState<string>("draft");
+
+  // Schedule-for-later: when off, Publish flips status to scheduled
+  // with `scheduled_at = now()` and takes the creator straight into
+  // the live page so they can go on air immediately. When on, the
+  // datetime picker is revealed and the user picks a future start
+  // time; Publish then returns them to the events list where the
+  // event waits as scheduled.
+  //
+  // For existing drafts we infer the initial state from the loaded
+  // scheduled_at — if it's already > 5 min ahead of now, the creator
+  // had previously chosen a future time, so default the checkbox to
+  // on. Otherwise off.
+  const [scheduleForLater, setScheduleForLater] = useState<boolean>(false);
 
   // ---- Load existing draft ----
   const { data: loaded, isLoading } = useQuery({
@@ -293,7 +311,25 @@ export default function EventEditor() {
     setBetWindowOpens(loaded.bet_window_opens ?? "on_live");
     setBetWindowLocks(loaded.bet_window_locks ?? "manual");
     setScheduledAt(toLocalDateTimeInput(loaded.scheduled_at));
-    setSourceType(loaded.source_type ?? "external_url");
+    // If the saved scheduled_at is meaningfully in the future, the
+    // creator had previously asked us to schedule — keep the checkbox
+    // checked on reopen. Otherwise default to "publish now".
+    if (loaded.scheduled_at) {
+      const ms = new Date(loaded.scheduled_at).getTime();
+      setScheduleForLater(ms - Date.now() > 5 * 60 * 1000);
+    } else {
+      setScheduleForLater(false);
+    }
+    // Loaded events created when RTMP was selectable could still carry
+    // `external_rtmp` — coerce those (and any other dropped legacy
+    // values) back to the new default so the radio group renders
+    // something selected.
+    setSourceType(
+      loaded.source_type === "browser_camera" ||
+        loaded.source_type === "external_url"
+        ? loaded.source_type
+        : "browser_camera",
+    );
     setVideoUrl(loaded.video_url ?? "");
     setStatus(loaded.status);
     if (loaded.outcomes && loaded.outcomes.length > 0) {
@@ -400,9 +436,16 @@ export default function EventEditor() {
       },
       {
         key: "schedule",
-        label: "Scheduled in the future",
-        passed:
-          !!scheduledAt && new Date(scheduledAt).getTime() > Date.now(),
+        // The schedule check is only meaningful when the creator
+        // opted to schedule for later — going-live-now needs no
+        // future timestamp. publishMutation handles synthesising a
+        // current scheduled_at when the checkbox is off.
+        label: scheduleForLater
+          ? "Scheduled in the future"
+          : "Going live immediately on Publish",
+        passed: scheduleForLater
+          ? !!scheduledAt && new Date(scheduledAt).getTime() > Date.now()
+          : true,
       },
     ];
   }, [
@@ -416,6 +459,7 @@ export default function EventEditor() {
     sourceType,
     videoUrl,
     scheduledAt,
+    scheduleForLater,
   ]);
   const allComplianceMet = complianceChecks.every((c) => c.passed);
   const canPublish = canSave && verifiedCreator && allComplianceMet;
@@ -445,8 +489,16 @@ export default function EventEditor() {
       outcomeDuplicates.size === 0 &&
       betLimitsValid,
     stream:
-      !!scheduledAt &&
-      new Date(scheduledAt).getTime() > Date.now() &&
+      // Schedule clause:
+      //  • If "Schedule for later" is on, require a future
+      //    scheduled_at the same way we used to.
+      //  • If off (Go Live Now), no scheduled_at is needed — the
+      //    publish mutation will stamp it at click time.
+      (scheduleForLater
+        ? !!scheduledAt && new Date(scheduledAt).getTime() > Date.now()
+        : true) &&
+      // Source clause: external link requires a URL; device camera
+      // is self-sufficient.
       (sourceType !== "external_url" || videoUrl.trim().length > 0),
     // Review is a summary step — mark it complete once the rest of the
     // form is ready to publish (without requiring verified-creator,
@@ -477,7 +529,15 @@ export default function EventEditor() {
       return true;
     if (scheduledAt !== toLocalDateTimeInput(loaded.scheduled_at))
       return true;
-    if (sourceType !== (loaded.source_type ?? "external_url")) return true;
+    // Compare against the same coerced default we use when loading the
+    // event, so RTMP-era legacy rows don't mark themselves dirty on
+    // open just because the radio normalised to browser_camera.
+    const loadedSourceType =
+      loaded.source_type === "browser_camera" ||
+      loaded.source_type === "external_url"
+        ? loaded.source_type
+        : "browser_camera";
+    if (sourceType !== loadedSourceType) return true;
     if (videoUrl !== (loaded.video_url ?? "")) return true;
     if (coverUrl !== (loaded.cover_url ?? null)) return true;
 
@@ -596,7 +656,16 @@ export default function EventEditor() {
   const runSave = async (): Promise<string> => {
     if (!canSave) throw new Error("Fill the required fields first");
 
-    const isoScheduled = new Date(scheduledAt).toISOString();
+    // When the creator left "Schedule for later" unchecked we synthesise
+    // the start time at save time (now()), so the DB column — which is
+    // NOT NULL — stays satisfied without leaking the "go live now" UI
+    // choice into the schema. publishMutation reads `scheduleForLater`
+    // directly to decide where to navigate after success.
+    const scheduledAtForSave =
+      scheduleForLater && scheduledAt
+        ? new Date(scheduledAt)
+        : new Date();
+    const isoScheduled = scheduledAtForSave.toISOString();
     const duration =
       roundFormat === "time" ? Number(roundDurationSec) || null : null;
 
@@ -697,9 +766,9 @@ export default function EventEditor() {
     mutationFn: async () => {
       // Always save the latest form state first — for a new draft
       // this creates the row, for an existing one it flushes any
-      // un-saved edits before publishing. Then we provision the Mux
-      // live stream + flip status via the `provision-stream` Edge
-      // Function. Idempotent.
+      // un-saved edits before publishing. Then we provision the
+      // Cloudflare live input + flip status via the `provision-stream`
+      // Edge Function. Idempotent.
       const id = await runSave();
       const { error } = await supabase.functions.invoke("provision-stream", {
         body: { event_id: id },
@@ -707,15 +776,25 @@ export default function EventEditor() {
       if (error) throw error;
       return id;
     },
-    onSuccess: () => {
-      toast.success("Event published");
+    onSuccess: (id) => {
       void queryClient.invalidateQueries({
         queryKey: ["studio", "events", creator?.id],
       });
       void queryClient.invalidateQueries({
         queryKey: ["studio", "event", eventId],
       });
-      navigate("/events");
+      // Two terminal screens:
+      //  • Schedule for later → events list (the creator will come
+      //    back at the scheduled time and click Start stream).
+      //  • Go live now → directly into the LiveStream page so the
+      //    creator can grant camera + start broadcasting in one flow.
+      if (scheduleForLater) {
+        toast.success("Event scheduled");
+        navigate("/events");
+      } else {
+        toast.success("Event published — let's go live");
+        navigate(`/events/${id}/live`);
+      }
     },
     onError: (err) => {
       console.error("Event publish failed", err);
@@ -1417,19 +1496,54 @@ export default function EventEditor() {
         <SectionHeading id="stream-heading" index={3} label="Stream" />
         <div className="space-y-5 p-5 sm:p-6">
 
-        <FieldRow label="Scheduled for" htmlFor="scheduled-at">
-          <div className="relative">
-            <CalendarClock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="scheduled-at"
-              type="datetime-local"
-              value={scheduledAt}
-              min={minScheduledAt}
-              onChange={(e) => setScheduledAt(e.target.value)}
+        {/* Schedule controls — checkbox first (off by default, meaning
+            "publish + go live right now"), then a conditional picker
+            for when the creator wants to set a future start time. */}
+        <FieldRow label="When to go live">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={scheduleForLater}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setScheduleForLater(on);
+                if (on) {
+                  // Switching to scheduled — prefill with a sensible
+                  // future time if the field is empty or in the past.
+                  if (
+                    !scheduledAt ||
+                    new Date(scheduledAt).getTime() <= Date.now()
+                  ) {
+                    setScheduledAt(getDefaultScheduledAtIsoLocal());
+                  }
+                }
+              }}
               disabled={!editable}
-              className="pl-9"
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-primary"
             />
-          </div>
+            <span>
+              <span className="font-medium">Schedule for later</span>
+              <span className="ml-1 text-muted-foreground">
+                — leave unchecked to go live immediately when you hit
+                Publish.
+              </span>
+            </span>
+          </label>
+
+          {scheduleForLater && (
+            <div className="relative mt-3">
+              <CalendarClock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="scheduled-at"
+                type="datetime-local"
+                value={scheduledAt}
+                min={minScheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                disabled={!editable}
+                className="pl-9"
+              />
+            </div>
+          )}
         </FieldRow>
 
         <FieldRow label="Source">
@@ -1469,7 +1583,7 @@ export default function EventEditor() {
           </span>
         </p>
 
-        <LiveStreamTest />
+        <LiveStreamTest title={title} />
         </div>
       </section>
 
@@ -1777,9 +1891,11 @@ function RadioCardGroup<T extends string>({
   }>;
 }) {
   return (
-    // Stack on mobile, evenly spaced columns at sm+ so options like the
-    // 3 Source choices read as a single horizontal row on desktop.
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    // Stack on mobile, evenly spaced columns at sm+. We currently
+    // have 2 Source choices (Device camera + External link),
+    // so 2 columns. Update both the class and the comment if a
+    // third option is added back.
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       {options.map((opt) => {
         const isSelected = value === opt.value;
         const isInteractive = !disabled && !opt.disabled;

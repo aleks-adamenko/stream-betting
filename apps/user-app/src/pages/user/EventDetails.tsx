@@ -284,13 +284,20 @@ export default function EventDetails() {
             )}
           </div>
 
-          {/* Round status — sits below the video container */}
-          {isLive && (
-            <RoundStatus
-              durationSec={event.roundDurationSec ?? 30}
-              className="mx-auto w-full max-w-[420px]"
-            />
-          )}
+          {/* Round status — sits below the video container. Only
+              meaningful for time-limited round formats: a "Single
+              round" event has no per-round timer, so we skip rendering
+              the countdown bar entirely (matches the studio setting
+              the creator chose). */}
+          {isLive &&
+            event.roundFormat === "time" &&
+            event.roundDurationSec &&
+            event.roundDurationSec > 0 && (
+              <RoundStatus
+                durationSec={event.roundDurationSec}
+                className="mx-auto w-full max-w-[420px]"
+              />
+            )}
 
           {/* Description (mobile: paired with the Rules button in the same row) */}
           <div className="flex items-start gap-3 lg:block">

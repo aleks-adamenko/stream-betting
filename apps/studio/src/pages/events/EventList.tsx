@@ -10,6 +10,7 @@ import {
   Radio,
   Send,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@liverush/ui";
@@ -131,6 +132,35 @@ export default function EventList() {
     },
   });
 
+  // Inline delete from the list — uses the same SQL RPC as the editor's
+  // Delete button. RLS decides what can actually be deleted (drafts +
+  // scheduled at the moment; finished/live get a 403 which we surface
+  // as a toast). Confirmation is a plain `confirm()` because the
+  // affordance is destructive but rare enough that bringing in a modal
+  // component would be overkill.
+  const deleteMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      const { error } = await supabase.rpc("delete_event", {
+        p_event_id: eventId,
+      });
+      if (error) throw error;
+      return eventId;
+    },
+    onSuccess: () => {
+      toast.success("Event deleted");
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
+    },
+    onError: (err) => {
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Delete failed";
+      toast.error(message);
+    },
+  });
+
   const publishMutation = useMutation({
     mutationFn: async (eventId: string) => {
       // Go through the provision-stream Edge Function so Mux gets a
@@ -238,17 +268,32 @@ export default function EventList() {
               ? "Available at the scheduled start time"
               : undefined;
 
+            const deleting =
+              deleteMutation.isPending &&
+              deleteMutation.variables === event.id;
+            // Edit + Delete affordances are status-aware:
+            //   • Live: no edit (the event is broadcasting) and no
+            //     delete (destructive while bytes are flying around).
+            //   • Scheduled: edit is allowed, but delete is hidden
+            //     because the SQL side rejects it — a scheduled event
+            //     owns a Cloudflare live input we'd leak. (We could
+            //     wire an "unpublish via end-stream" path later.)
+            //   • Draft / finished / cancelled: both visible. SQL
+            //     gets the final word; errors surface as a toast.
+            const canEdit = !isLive;
+            const canDelete = isDraft || isFinished;
+
             return (
               <li
                 key={event.id}
                 className="rounded-2xl border border-border/40 bg-card p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5"
               >
                 <div className="flex items-center gap-4">
-                  {/* Clickable row body — opens the editor */}
-                  <Link
-                    to={`/events/${event.id}`}
-                    className="flex min-w-0 flex-1 items-center gap-4"
-                  >
+                  {/* Row body — NOT clickable. The Edit icon on the
+                      right is the dedicated affordance to open the
+                      editor. This prevents accidental nav when the
+                      creator only meant to glance at a row. */}
+                  <div className="flex min-w-0 flex-1 items-center gap-4">
                     {event.cover_url ? (
                       <img
                         src={event.cover_url}
@@ -324,10 +369,56 @@ export default function EventList() {
                         </div>
                       )}
                     </div>
-                  </Link>
+                  </div>
 
-                  {/* Right side: status-aware actions */}
+                  {/* Right side: status-aware actions. Edit + Delete
+                      icons sit on every row that isn't currently live;
+                      then the primary status action (Publish / Start /
+                      Resume) trails them. */}
                   <div className="flex flex-shrink-0 items-center gap-2">
+                    {canEdit && (
+                      <Button
+                        asChild
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        title="Edit event"
+                        aria-label="Edit event"
+                      >
+                        <Link to={`/events/${event.id}`}>
+                          <Pencil className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    )}
+
+                    {canDelete && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        disabled={deleting}
+                        title="Delete event"
+                        aria-label="Delete event"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => {
+                          if (
+                            !confirm(
+                              `Delete "${event.title}"? This can't be undone.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          deleteMutation.mutate(event.id);
+                        }}
+                      >
+                        {deleting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    )}
+
                     {isDraft && (
                       <Button
                         type="button"
@@ -351,37 +442,16 @@ export default function EventList() {
                     )}
 
                     {isScheduled && (
-                      <>
-                        {/* Edit (icon) — opens the editor. Editing is
-                            allowed for scheduled events; the editor
-                            itself enforces the per-status field locks. */}
-                        <Button
-                          asChild
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          title="Edit event"
-                          aria-label="Edit event"
-                        >
-                          <Link to={`/events/${event.id}`}>
-                            <Pencil className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                        {/* Start Stream — sends the creator into the
-                            full-screen live view; the live page
-                            actually fires the start_event RPC after
-                            the camera permission lands. */}
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={!canStartStream}
-                          title={startStreamTooltip}
-                          onClick={() => navigate(`/events/${event.id}/live`)}
-                        >
-                          <Radio className="h-4 w-4" />
-                          Start stream
-                        </Button>
-                      </>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!canStartStream}
+                        title={startStreamTooltip}
+                        onClick={() => navigate(`/events/${event.id}/live`)}
+                      >
+                        <Radio className="h-4 w-4" />
+                        Start stream
+                      </Button>
                     )}
 
                     {isLive && (
@@ -394,8 +464,9 @@ export default function EventList() {
                         Resume live
                       </Button>
                     )}
-                    {/* Finished: no actions — just the status pill that
-                        already sits inline with the title. */}
+                    {/* Finished: Edit + Delete only (handled above by
+                        canEdit / canDelete). No primary action — the
+                        stream is over. */}
                   </div>
                 </div>
               </li>

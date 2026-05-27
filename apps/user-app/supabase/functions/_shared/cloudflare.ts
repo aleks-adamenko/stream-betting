@@ -68,12 +68,10 @@ export interface CreatedLiveInput {
  *
  * `recording.mode: "automatic"` is required for HLS playback during
  * the live broadcast — Cloudflare only generates the .m3u8 manifest
- * when recording is enabled. We don't want to keep recordings forever
- * (live-only product) so we set the TTL on the resulting VOD asset.
- * Cloudflare's documented minimum for this field is 30 days.
+ * when recording is enabled. We don't pass `deleteRecordingAfterDays`
+ * because Cloudflare rejected our earlier values; we'll prune
+ * recordings out-of-band if storage starts costing real money.
  */
-const RECORDING_TTL_DAYS = 30;
-
 export async function createLiveInput(name: string): Promise<CreatedLiveInput> {
   const res = await fetch(`${API_BASE}/live_inputs`, {
     method: "POST",
@@ -83,7 +81,6 @@ export async function createLiveInput(name: string): Promise<CreatedLiveInput> {
     },
     body: JSON.stringify({
       meta: { name },
-      deleteRecordingAfterDays: RECORDING_TTL_DAYS,
       recording: { mode: "automatic" },
     }),
   });
