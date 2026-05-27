@@ -38,28 +38,27 @@ export function CloudflareStreamPlayer({
 }: CloudflareStreamPlayerProps) {
   // Pass behaviour flags via Cloudflare's documented query params.
   //
-  // Important: we no longer set `muted=true` even when the prop says
-  // so. Browsers will auto-mute autoplay videos that lack a user
-  // gesture anyway, so setting `muted=true` here was redundant — and
-  // it actively prevented the player's built-in unmute control from
-  // working (the URL flag re-applied on every state change, locking
-  // the player in mute). The user can now click the unmute icon and
-  // actually hear audio.
+  // We DO set `muted=true` even though it has the side-effect of
+  // sometimes wrestling with the in-player unmute control. The
+  // alternative — unmuted autoplay — gets blocked outright by every
+  // browser's autoplay policy, leaving viewers staring at a play
+  // button. Muted autoplay is the only path that lets the stream
+  // start without a click. The unmute icon inside Cloudflare's
+  // player still works once the user taps it (the URL flag sets
+  // initial state, doesn't re-apply on user gesture).
   //
-  // The `muted` prop is still accepted for API parity but only
-  // matters when explicitly passed as `false` for "default unmuted"
-  // playback (rare; mostly for already-engaged player sessions).
+  // If audio still doesn't come through after clicking unmute, the
+  // bug is upstream of this component — usually the publisher isn't
+  // delivering an audio track (check whip.ts + getUserMedia audio
+  // constraints in LiveStream.tsx).
   const params = new URLSearchParams();
   if (autoPlay) params.set("autoplay", "true");
+  if (muted) params.set("muted", "true");
   if (poster) params.set("poster", poster);
   // Hides the giant Cloudflare logo overlay; the player controls
   // remain visible.
   params.set("letterboxColor", "transparent");
   const url = `${src}?${params.toString()}`;
-  // Silence the unused-var warning for the prop while we keep it as
-  // part of the component's public surface (callers in EventDetails
-  // and Home still pass it). Remove if we later drop the prop.
-  void muted;
 
   return (
     <div className={cn("relative h-full w-full overflow-hidden bg-black", className)}>

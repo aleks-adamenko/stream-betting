@@ -87,6 +87,11 @@ export default function LiveStream() {
   // resume after a refresh.
   useEffect(() => {
     if (!event) return;
+    // If the creator just clicked End stream, finishMutation flips
+    // status to 'finished' and our own handleEnd is already navigating
+    // away. Skip the validator so it doesn't surface a false-positive
+    // "isn't ready to stream" toast in the brief overlap window.
+    if (phase === "ending") return;
     if (creator && event.creator_id !== creator.id) {
       navigate("/events", { replace: true });
       return;
@@ -103,7 +108,7 @@ export default function LiveStream() {
       toast.error("Event hasn't started yet — come back at start time.");
       navigate(`/events/${event.id}`, { replace: true });
     }
-  }, [event, creator, navigate]);
+  }, [event, creator, navigate, phase]);
 
   // Pre-set phase to "live" if we land here on an already-live event
   // (e.g. after a page refresh while streaming) — the camera still

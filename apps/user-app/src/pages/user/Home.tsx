@@ -1,6 +1,6 @@
 import { Fragment, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowRight, Users } from "lucide-react";
+import { ArrowRight, BadgeCheck, Users } from "lucide-react";
 
 import { EventCard } from "@/components/feed/EventCard";
 import { FeedArrows } from "@/components/feed/FeedArrows";
@@ -20,7 +20,6 @@ import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEvents } from "@/hooks/useEvents";
-import { oddsPillClasses, oddsRange } from "@/lib/odds";
 import { cn } from "@/lib/utils";
 import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
 import rewardsBannerDesktop from "@/assets/rewards-banner-2.jpg";
@@ -29,6 +28,10 @@ import type { StreamEvent } from "@/domain/types";
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
 const numberFormatter = new Intl.NumberFormat("en-US");
+const compactFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 type FeedTab = "live" | "trending";
 const PATH_TO_FEED: Record<string, FeedTab> = {
@@ -205,73 +208,69 @@ function EventGrid({ events }: { events: StreamEvent[] }) {
 
 /* ---------- featured live section ---------- */
 
+/**
+ * Featured-live hero on the Home page.
+ *
+ * Single rounded container that splits into two columns on desktop:
+ *   • Left: video player (16:9, no own border-radius — parent clips it).
+ *   • Right: event title, description, creator avatar + name + follower
+ *     count. No bet panel here anymore — viewers tap through to the
+ *     event page to actually bet.
+ *
+ * The whole card is a single <Link> so any tap that isn't inside the
+ * player iframe takes the viewer to /event/:id. Iframe controls
+ * (play/pause/volume) stay isolated inside their own document and
+ * don't bubble to the parent.
+ *
+ * On mobile it stacks: video on top, info card under it. Same rounded
+ * outer container clips both into one card.
+ */
 function FeaturedLiveSection({ event }: { event: StreamEvent }) {
-  // Desktop: horizontal player (16:9) + a 420px bet panel matching
-  // the EventDetails layout exactly. Mobile: stacked.
-  return (
-    <section className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8">
-      <div className="min-w-0 flex-1">
-        <FeaturedPlayer event={event} />
-      </div>
-      <div className="w-full lg:w-[420px] lg:flex-shrink-0">
-        <SimpleBetPanel event={event} />
-      </div>
-    </section>
-  );
-}
-
-function FeaturedPlayer({ event }: { event: StreamEvent }) {
-  const socialUrl =
-    event.videoUrl && resolveSocialEmbedUrl(event.videoUrl) ? event.videoUrl : null;
   return (
     <Link
       to={`/event/${event.id}`}
-      // Horizontal 16:9 player — matches a video frame's natural ratio
-      // so external Instagram / TikTok / WebRTC sources don't end up
-      // letterboxed inside a portrait container. Cloudflare HLS streams
-      // play through the same HlsPlayer as the fallback test stream.
-      className="group relative block aspect-video w-full overflow-hidden rounded-2xl border border-border/30 bg-black shadow-lg"
+      className="group relative flex flex-col overflow-hidden rounded-2xl border border-border/30 bg-card shadow-lg transition-shadow hover:shadow-xl lg:flex-row lg:items-stretch"
     >
-      {socialUrl ? (
-        <SocialVideoEmbed url={socialUrl} title={event.title} fit="contain" />
-      ) : isCloudflareStreamUrl(event.playbackUrl) ? (
-        <CloudflareStreamPlayer
-          src={event.playbackUrl!}
-          poster={event.coverUrl}
-          autoPlay
-          muted
-        />
-      ) : (
-        <HlsPlayer
-          src={event.playbackUrl ?? TEST_STREAM}
-          poster={event.coverUrl}
-          autoPlay
-          muted
-        />
-      )}
-
-      {/* Top-left badges */}
-      <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2">
-        <LiveBadge />
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur">
-          <Users className="h-3.5 w-3.5" />
-          {numberFormatter.format(event.viewersCount)} watching
-        </span>
+      {/* Video column — fixed 16:9 aspect. The lg:basis values give the
+          video the larger share of horizontal space, info card the rest. */}
+      <div className="relative aspect-video w-full bg-black lg:aspect-auto lg:basis-2/3 lg:flex-shrink-0">
+        <FeaturedPlayerInner event={event} />
+        {/* Top-left badges — LIVE + viewer count. These stay over the
+            video; everything else (title, creator) has moved into the
+            info column to clean up the player frame. */}
+        <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2">
+          <LiveBadge />
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+            <Users className="h-3.5 w-3.5" />
+            {numberFormatter.format(event.viewersCount)} watching
+          </span>
+        </div>
       </div>
 
-      {/* Bottom gradient + title */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-4 pb-4 pt-16">
-        <h2 className="font-heading text-base font-extrabold leading-tight text-white drop-shadow sm:text-lg">
+      {/* Info column — title / description / creator. mt-auto on the
+          creator row keeps it pinned to the bottom of the column on
+          desktop when the description is short. */}
+      <div className="flex min-w-0 flex-col gap-3 p-5 sm:p-6 lg:flex-1">
+        <h2 className="font-heading text-lg font-extrabold leading-tight sm:text-xl">
           {event.title}
         </h2>
-        <div className="mt-2 flex items-center gap-2">
+        {event.description && (
+          <p className="line-clamp-4 text-sm leading-relaxed text-muted-foreground sm:text-base">
+            {event.description}
+          </p>
+        )}
+        <div className="mt-auto flex items-center gap-2 pt-2">
           <img
             src={event.influencer.avatarUrl}
             alt={event.influencer.displayName}
-            className="h-6 w-6 flex-shrink-0 rounded-full object-cover ring-2 ring-white/40"
+            className="h-8 w-8 flex-shrink-0 rounded-full object-cover ring-2 ring-border/40"
           />
-          <span className="truncate text-sm font-semibold text-white">
+          <span className="truncate text-sm font-semibold text-foreground">
             {event.influencer.displayName}
+          </span>
+          <BadgeCheck className="h-4 w-4 flex-shrink-0 fill-primary text-white" />
+          <span className="truncate text-xs text-muted-foreground">
+            {compactFormatter.format(event.influencer.followers)} followers
           </span>
         </div>
       </div>
@@ -279,54 +278,38 @@ function FeaturedPlayer({ event }: { event: StreamEvent }) {
   );
 }
 
-function SimpleBetPanel({ event }: { event: StreamEvent }) {
-  const { user } = useAuth();
-  const { min: oddsMin, max: oddsMax } = oddsRange(
-    event.outcomes.map((o) => o.odds),
-  );
+/**
+ * The actual stream player choice — externalised so the surrounding
+ * container can own positioning + overlays without nested concerns.
+ * Picks between SocialVideoEmbed (Instagram / TikTok), Cloudflare
+ * iframe (live streams), and HlsPlayer fallback (legacy / test).
+ */
+function FeaturedPlayerInner({ event }: { event: StreamEvent }) {
+  const socialUrl =
+    event.videoUrl && resolveSocialEmbedUrl(event.videoUrl)
+      ? event.videoUrl
+      : null;
 
-  const eventHref = user
-    ? `/event/${event.id}`
-    : `/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`;
-
+  if (socialUrl) {
+    return <SocialVideoEmbed url={socialUrl} title={event.title} fit="contain" />;
+  }
+  if (isCloudflareStreamUrl(event.playbackUrl)) {
+    return (
+      <CloudflareStreamPlayer
+        src={event.playbackUrl!}
+        poster={event.coverUrl}
+        autoPlay
+        muted
+      />
+    );
+  }
   return (
-    <section className="card-elevated flex flex-col overflow-hidden">
-      <div className="flex flex-1 flex-col p-5 sm:p-6">
-        {/* Plain list of outcomes — informational only. The Place bet
-            button below takes the user to the event page to actually bet. */}
-        <ul className="space-y-2">
-          {event.outcomes.map((o) => (
-            <li
-              key={o.id}
-              className="flex items-center justify-between gap-3"
-            >
-              <span className="truncate text-sm font-medium text-foreground">
-                {o.label}
-              </span>
-              <span
-                className={cn(
-                  "inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                  oddsPillClasses(o.odds, oddsMin, oddsMax),
-                )}
-              >
-                {o.odds.toFixed(2)}×
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        <Button
-          asChild
-          variant="accent"
-          size="lg"
-          className="mt-8 w-full"
-        >
-          <Link to={eventHref}>
-            {user ? "Place a bet" : "Sign in to bet"}
-          </Link>
-        </Button>
-      </div>
-    </section>
+    <HlsPlayer
+      src={event.playbackUrl ?? TEST_STREAM}
+      poster={event.coverUrl}
+      autoPlay
+      muted
+    />
   );
 }
 
