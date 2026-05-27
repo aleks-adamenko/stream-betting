@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { Camera, LogOut, Wallet, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import { totalBalanceCents } from "@/lib/balance";
 import {
   uploadAvatar,
@@ -138,6 +140,12 @@ export default function Profile() {
               </Link>
             </Button>
           </div>
+
+          {/* Notifications toggle — global opt-out for transactional
+              emails (event going live, new event from a creator I
+              follow, subscription confirmation). In-app notifications
+              on /notifications are unaffected. */}
+          <NotificationsToggle />
         </div>
 
         {/* Photo upload card */}
@@ -218,5 +226,116 @@ export default function Profile() {
         </div>
       </div>
     </PageContainer>
+  );
+}
+
+/**
+ * Inline toggle for `profiles.notifications_enabled` — controls
+ * whether the user receives transactional event emails (Resend).
+ * In-app notifications on /notifications are always delivered for
+ * registered users; this is email-only opt-out, by product decision.
+ *
+ * The toggle reads its current state from the auth-context profile
+ * and writes via the `set_notifications_enabled` RPC. We also honor
+ * the URL hint `?notifications=off` — emails put that on their
+ * unsubscribe link so clicking through from an inbox drops the
+ * viewer right onto this row with the toggle already flipped.
+ */
+function NotificationsToggle() {
+  const { profile, refreshProfile } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [enabled, setEnabled] = useState(
+    profile?.notifications_enabled ?? true,
+  );
+  const [saving, setSaving] = useState(false);
+
+  // Sync state when the profile loads / changes.
+  useEffect(() => {
+    if (profile) setEnabled(profile.notifications_enabled !== false);
+  }, [profile]);
+
+  // Honor ?notifications=off deep link from email unsubscribe.
+  useEffect(() => {
+    if (searchParams.get("notifications") !== "off") return;
+    if (!profile || profile.notifications_enabled === false) return;
+    void (async () => {
+      setSaving(true);
+      try {
+        const { error } = await supabase.rpc("set_notifications_enabled", {
+          p_enabled: false,
+        });
+        if (error) throw error;
+        await refreshProfile();
+        setEnabled(false);
+        toast.success("Email notifications turned off.");
+      } catch (err) {
+        console.warn("Auto-unsubscribe failed:", err);
+      } finally {
+        setSaving(false);
+        const next = new URLSearchParams(searchParams);
+        next.delete("notifications");
+        setSearchParams(next, { replace: true });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
+
+  const toggle = async () => {
+    const next = !enabled;
+    setSaving(true);
+    setEnabled(next); // optimistic
+    try {
+      const { error } = await supabase.rpc("set_notifications_enabled", {
+        p_enabled: next,
+      });
+      if (error) throw error;
+      await refreshProfile();
+      toast.success(
+        next ? "Email notifications turned on." : "Email notifications turned off.",
+      );
+    } catch (err) {
+      setEnabled(!next); // revert
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Couldn't update notifications";
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 flex items-center gap-3 rounded-2xl bg-muted/50 p-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-foreground">
+          Email notifications
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Get notified by email when events you've subscribed to go live,
+          and when creators you follow schedule a new event. In-app
+          notifications are always on.
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label="Toggle email notifications"
+        onClick={toggle}
+        disabled={saving}
+        className={cn(
+          "relative h-7 w-12 flex-shrink-0 rounded-full transition-colors disabled:opacity-50",
+          enabled ? "bg-primary" : "bg-muted-foreground/30",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-all",
+            enabled ? "left-6" : "left-1",
+          )}
+        />
+      </button>
+    </div>
   );
 }

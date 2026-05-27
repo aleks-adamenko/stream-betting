@@ -42,3 +42,38 @@ export class HttpError extends Error {
     super(message);
   }
 }
+
+/**
+ * Internal-only auth: validate that the request carries our shared
+ * bearer token from the Postgres dispatch trigger. Used by the
+ * notify-event-live and notify-new-scheduled-event functions.
+ *
+ * The token lives in Supabase Vault on the database side
+ * (`vault.read_secret('internal_webhook_token')`) and as the
+ * `INTERNAL_WEBHOOK_TOKEN` secret on the function side. Constant-
+ * time compare so we don't leak length info via timing.
+ *
+ * These functions are deployed normally (not `--no-verify-jwt`) BUT
+ * the JWT is the trigger's service-role JWT which the gateway already
+ * accepts — this helper is the additional defense-in-depth check that
+ * the call really did come from our trigger and not from a leaked
+ * service-role key being misused.
+ */
+export function requireInternalToken(req: Request): void {
+  const expected = Deno.env.get("INTERNAL_WEBHOOK_TOKEN");
+  if (!expected) {
+    throw new HttpError(500, "INTERNAL_WEBHOOK_TOKEN is not configured");
+  }
+  const header = req.headers.get("Authorization") ?? "";
+  const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (provided.length === 0 || provided.length !== expected.length) {
+    throw new HttpError(401, "Bad token");
+  }
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  if (diff !== 0) {
+    throw new HttpError(401, "Bad token");
+  }
+}

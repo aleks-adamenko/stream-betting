@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Bell,
   CalendarClock,
   CheckCircle2,
   ExternalLink,
@@ -131,6 +132,33 @@ export default function EventList() {
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as unknown as EventRow[];
+    },
+  });
+
+  // Subscriber counts for all the creator's scheduled events. Fans
+  // out N parallel RPC calls (the count predicate is fast +
+  // index-friendly). Refreshes whenever the events list refreshes.
+  const scheduledIds = (events ?? [])
+    .filter((e) => e.status === "scheduled")
+    .map((e) => e.id);
+  const subscriberCounts = useQuery({
+    queryKey: ["studio", "event-subscriber-counts", scheduledIds.join(",")],
+    enabled: scheduledIds.length > 0,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        scheduledIds.map(async (id) => {
+          const { data, error } = await supabase.rpc(
+            "get_event_subscriber_count",
+            { p_event_id: id },
+          );
+          if (error) {
+            console.warn("subscriber count failed for", id, error.message);
+            return [id, 0] as const;
+          }
+          return [id, (data as number) ?? 0] as const;
+        }),
+      );
+      return Object.fromEntries(entries) as Record<string, number>;
     },
   });
 
@@ -340,6 +368,22 @@ export default function EventList() {
                         >
                           {STATUS_LABEL[event.status] ?? event.status}
                         </span>
+                        {/* Subscriber pill — only on scheduled rows
+                            (where the creator can still gain a count
+                            before the event starts). Hidden when 0
+                            so an empty list doesn't broadcast "no
+                            one cares yet". */}
+                        {isScheduled &&
+                          (subscriberCounts.data?.[event.id] ?? 0) > 0 && (
+                            <span
+                              className="hidden sm:inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary"
+                              title="People subscribed for go-live notification"
+                            >
+                              <Bell className="h-3 w-3" />
+                              {subscriberCounts.data?.[event.id] ?? 0}{" "}
+                              subscribed
+                            </span>
+                          )}
                         {!isFinished && (
                           <span className="text-muted-foreground">
                             {new Date(event.scheduled_at).toLocaleString()}

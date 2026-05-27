@@ -28,6 +28,7 @@ import {
 import { PageContainer } from "@/components/layout/PageContainer";
 import { eventsKeys, useEvent } from "@/hooks/useEvents";
 import { supabase } from "@/integrations/supabase/client";
+import { useEventSubscription } from "@/hooks/useEventSubscription";
 import { useEventViewers } from "@/hooks/useEventViewers";
 import { useAuth } from "@/contexts/AuthContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
@@ -938,6 +939,15 @@ function BetPanel({ event }: { event: StreamEvent }) {
       <p className="mt-2 text-center text-[11px] text-muted-foreground">
         Virtual balance only. Bets settle once the round ends.
       </p>
+
+      {/* Subscriber count line stays visible while the event is live
+          as a social-proof signal. NotifyMeBlock hides its own button
+          here too if the event is past the scheduled state — actually
+          we let it stay so viewers who didn't pre-subscribe can still
+          tap and follow the creator for next time. */}
+      <div className="mt-4">
+        <NotifyMeBlock event={event} />
+      </div>
       </div>
     </section>
   );
@@ -1004,15 +1014,97 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
         </ul>
       </div>
 
-      <Button
-        onClick={() => toast.success("We'll ping you when it starts.")}
-        size="lg"
-        className="w-full gap-2"
-      >
-        <Bell className="h-4 w-4" /> Notify me when live
-      </Button>
+      <NotifyMeBlock event={event} />
       </div>
     </section>
+  );
+}
+
+/**
+ * Notify-me-when-live CTA + subscriber-count caption. Reused on the
+ * UpcomingPanel (here) and on the live/finished view via FinishedPanel
+ * so viewers can see the count throughout the event's lifecycle.
+ *
+ *   • Anon visitors: click the button → routed to /auth/sign-in with
+ *     a `next` redirect back here. They tap Notify again on return.
+ *   • Authenticated + not yet subscribed: primary CTA, calls
+ *     subscribe_event RPC + fires the confirmation email.
+ *   • Already subscribed: outline CTA showing "Subscribed ✓",
+ *     clicking unsubscribes.
+ *
+ * The counter line below the button is hidden when count = 0 (don't
+ * advertise an empty audience). It stays visible across scheduled,
+ * live, and finished states as a social-proof signal.
+ */
+function NotifyMeBlock({ event }: { event: StreamEvent }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const {
+    isSubscribed,
+    isSubscribedLoading,
+    count,
+    subscribe,
+    unsubscribe,
+    isPending,
+  } = useEventSubscription(event.id);
+
+  // Hide the Notify button once the event has ended — there's nothing
+  // future to subscribe to. We keep the counter visible (handled
+  // below) as social proof.
+  const isFinished = event.status === "finished";
+  // While live, viewers might still want to "follow" the creator for
+  // the next one; we keep the button visible but with the same flow.
+  // (Subscribing to a live event subscribes you to the creator's
+  // future events too.)
+  const showButton = !isFinished;
+
+  const onClick = async () => {
+    if (!user) {
+      navigate(`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`);
+      return;
+    }
+    try {
+      if (isSubscribed) {
+        await unsubscribe();
+        toast.success("You'll no longer get notifications for this event.");
+      } else {
+        await subscribe();
+        toast.success("We'll email you when it goes live.");
+      }
+    } catch (err) {
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Something went wrong";
+      toast.error(message);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {showButton && (
+        <Button
+          onClick={onClick}
+          size="lg"
+          variant={isSubscribed ? "secondary" : "default"}
+          disabled={isPending || isSubscribedLoading}
+          className="w-full gap-2"
+        >
+          <Bell className="h-4 w-4" />
+          {!user
+            ? "Notify me when live"
+            : isSubscribed
+              ? "Subscribed ✓"
+              : "Notify me when live"}
+        </Button>
+      )}
+      {count > 0 && (
+        <p className="text-center text-xs text-muted-foreground">
+          🔔 {count.toLocaleString()}{" "}
+          {count === 1 ? "person" : "people"} subscribed to this event
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1070,6 +1162,12 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
       <Button asChild variant="secondary" size="lg" className="w-full">
         <Link to="/discover">Discover upcoming events</Link>
       </Button>
+
+      {/* Subscriber count stays visible even after the event has
+          finished — social proof showing how many people cared
+          about this one. NotifyMeBlock auto-hides its button when
+          status is finished. */}
+      <NotifyMeBlock event={event} />
       </div>
     </section>
   );

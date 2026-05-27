@@ -77,6 +77,13 @@ export interface Database {
           // ingest credentials (the WHIP URL with the publish secret)
           // live in `event_streams`.
           playback_url: string | null;
+          // Notification dispatch idempotency stamps. Set by the
+          // notify-event-live / notify-new-scheduled-event Edge
+          // Functions once they've actually sent the relevant emails.
+          // The events_notify_dispatch trigger guards on these so a
+          // status flip / title edit can't re-fire the notification.
+          live_notified_at: string | null;
+          scheduled_notified_at: string | null;
         };
         Insert: Omit<Database["public"]["Tables"]["events"]["Row"], "created_at"> & {
           created_at?: string;
@@ -216,6 +223,9 @@ export interface Database {
           display_name: string | null;
           avatar_url: string | null;
           balance_cents: number;
+          // Global on/off for transactional emails. Defaults true.
+          // In-app notifications are not affected by this flag.
+          notifications_enabled: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -225,11 +235,58 @@ export interface Database {
           display_name?: string | null;
           avatar_url?: string | null;
           balance_cents?: number;
+          notifications_enabled?: boolean;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
+      };
+      event_subscribers: {
+        Row: {
+          event_id: string;
+          user_id: string;
+          created_at: string;
+        };
+        Insert: Database["public"]["Tables"]["event_subscribers"]["Row"];
+        Update: Partial<
+          Database["public"]["Tables"]["event_subscribers"]["Insert"]
+        >;
+        Relationships: [
+          {
+            foreignKeyName: "event_subscribers_event_id_fkey";
+            columns: ["event_id"];
+            referencedRelation: "events";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      creator_followers: {
+        Row: {
+          creator_id: string;
+          follower_user_id: string;
+          // Last time we sent a "creator scheduled / went live with a
+          // new event" email to this follower. Drives the 1h throttle.
+          last_notified_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          creator_id: string;
+          follower_user_id: string;
+          last_notified_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["creator_followers"]["Insert"]
+        >;
+        Relationships: [
+          {
+            foreignKeyName: "creator_followers_creator_id_fkey";
+            columns: ["creator_id"];
+            referencedRelation: "creator_profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       bets: {
         Row: {
@@ -462,6 +519,22 @@ export interface Database {
           whip_url: string;
           playback_url: string | null;
         }>;
+      };
+      subscribe_event: {
+        Args: { p_event_id: string };
+        Returns: Database["public"]["Tables"]["event_subscribers"]["Row"];
+      };
+      unsubscribe_event: {
+        Args: { p_event_id: string };
+        Returns: void;
+      };
+      get_event_subscriber_count: {
+        Args: { p_event_id: string };
+        Returns: number;
+      };
+      set_notifications_enabled: {
+        Args: { p_enabled: boolean };
+        Returns: void;
       };
       add_event_outcome: {
         Args: {
