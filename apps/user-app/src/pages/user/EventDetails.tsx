@@ -433,15 +433,26 @@ function EventInfoBlock({ event }: { event: StreamEvent }) {
     isPending,
   } = useCreatorFollow(event.influencer.id);
   const followerCount = count || event.influencer.followers;
-  const onFollowClick = () => {
+  const onFollowClick = async () => {
     if (!user) {
       navigate(
         `/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`,
       );
       return;
     }
-    if (isFollowing) void unfollow();
-    else void follow();
+    // Await + try/catch so a Postgres-side failure (RLS, missing
+    // column, etc.) surfaces as a toast instead of being silently
+    // swallowed by a fire-and-forget `void mutation()`. We hit this
+    // exact silent-failure footgun on first ship — bare `void
+    // follow()` hid a RPC error and the button "did nothing".
+    try {
+      if (isFollowing) await unfollow();
+      else await follow();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      toast.error(message);
+    }
   };
 
   return (
