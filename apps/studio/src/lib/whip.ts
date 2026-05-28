@@ -168,6 +168,16 @@ export class WhipPublisher {
     // WHIP ingest expects H.264 baseline for video and Opus for audio.
     // Both sender refs are stashed so the creator can rotate their
     // phone mid-broadcast (replaceVideoTrack / replaceAudioTrack).
+    const trackKinds = stream.getTracks().map((t) => t.kind);
+    console.info("[whip] adding tracks:", trackKinds);
+    if (!trackKinds.includes("audio")) {
+      // Cloudflare's WHIP ingest sometimes refuses to render the
+      // session when audio is absent — log loudly so the operator
+      // sees this before chasing other failure modes.
+      console.warn(
+        "[whip] No audio track in MediaStream — Cloudflare may reject this session.",
+      );
+    }
     for (const track of stream.getTracks()) {
       const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
       pinCodecPreferences(transceiver, track.kind);
@@ -249,6 +259,14 @@ export class WhipPublisher {
     await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
     // connectionstatechange listener will flip status to "live" once
     // ICE completes.
+
+    // Log the negotiated SDP so we can spot codec/profile mismatches
+    // from devtools. The summary helper picks out the m= lines and
+    // the codecs each side announced — short enough to scan, complete
+    // enough to diagnose the "media flows but Cloudflare drops it"
+    // case.
+    logSdpSummary("OFFER ", finalOffer.sdp);
+    logSdpSummary("ANSWER", answerSdp);
 
     // Start the diagnostic stats poller. Logs once a second so we
     // can confirm media is actually leaving the browser. The
@@ -490,6 +508,35 @@ function pinCodecPreferences(
     // Some browsers throw if any unsupported codec is in the list;
     // ignore and fall back to default ordering.
   }
+}
+
+/** Print the m= sections and codec rtpmaps of a session SDP. The
+ *  raw SDP is too noisy to skim in devtools, but the m-line +
+ *  rtpmap lines together tell us what each side proposed and what
+ *  was accepted — the standard diagnostic for "media flows but
+ *  the server can't decode it" situations. */
+function logSdpSummary(label: string, sdp: string | undefined): void {
+  if (!sdp) {
+    console.warn(`[whip] ${label} SDP missing`);
+    return;
+  }
+  const lines = sdp.split(/\r?\n/);
+  const summary: string[] = [];
+  for (const line of lines) {
+    if (
+      line.startsWith("m=") ||
+      line.startsWith("a=rtpmap:") ||
+      line.startsWith("a=fmtp:") ||
+      line.startsWith("a=mid:") ||
+      line.startsWith("a=sendrecv") ||
+      line.startsWith("a=sendonly") ||
+      line.startsWith("a=recvonly") ||
+      line.startsWith("a=inactive")
+    ) {
+      summary.push(line);
+    }
+  }
+  console.info(`[whip] ${label} SDP summary:\n${summary.join("\n")}`);
 }
 
 /** Resolves once ICE gathering finishes, or `timeoutMs` elapses
