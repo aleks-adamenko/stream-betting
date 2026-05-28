@@ -3,6 +3,10 @@ import { Link } from "react-router-dom";
 import { Heart, MessageCircle, Share2, Bookmark, Users, Calendar } from "lucide-react";
 
 import { LiveBadge } from "./LiveBadge";
+import {
+  CloudflareStreamPlayer,
+  isCloudflareStreamUrl,
+} from "@/components/stream/CloudflareStreamPlayer";
 import type { StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { oddsPillClasses, oddsRange } from "@/lib/odds";
@@ -42,13 +46,28 @@ export function StreamCard({ event }: StreamCardProps) {
           to={primaryHref}
           className="group relative block aspect-[9/16] max-h-[calc(100dvh-220px)] min-h-[320px] w-full overflow-hidden bg-muted"
         >
-          <img
-            src={event.coverUrl}
-            alt={event.title}
-            loading="lazy"
-            className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30" />
+          {/* Live cards swap the cover for an inline WHEP player as
+              soon as the card scrolls into view. The player itself
+              renders the cover image behind the spinner until the
+              first frame arrives, so there's no flash-of-no-content
+              transition. Non-live cards keep the plain cover image
+              behaviour for the feed scroll performance. */}
+          {isLive && isCloudflareStreamUrl(event.playbackUrl) ? (
+            <CloudflareStreamPlayer
+              src={event.playbackUrl!}
+              poster={event.coverUrl}
+              lazy
+              className="absolute inset-0"
+            />
+          ) : (
+            <img
+              src={event.coverUrl}
+              alt={event.title}
+              loading="lazy"
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
+          )}
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30" />
 
           {/* Top-left badges */}
           <div className="absolute left-3 top-3 flex items-center gap-2">

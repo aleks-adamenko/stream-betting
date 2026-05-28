@@ -28,6 +28,7 @@ import {
 import { PageContainer } from "@/components/layout/PageContainer";
 import { eventsKeys, useEvent } from "@/hooks/useEvents";
 import { supabase } from "@/integrations/supabase/client";
+import { useCreatorFollow } from "@/hooks/useCreatorFollow";
 import { useEventSubscription } from "@/hooks/useEventSubscription";
 import { useEventViewers } from "@/hooks/useEventViewers";
 import { useAuth } from "@/contexts/AuthContext";
@@ -418,12 +419,47 @@ export default function EventDetails() {
  * sync if data changes.
  */
 function EventInfoBlock({ event }: { event: StreamEvent }) {
+  // Source the live follower count from the same RPC the rest of
+  // the app reads — events.influencer.followers is a cached snapshot
+  // that can lag a click behind. Falling back to the static number
+  // while the query loads avoids a flash of "0 followers".
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const {
+    isFollowing,
+    count,
+    follow,
+    unfollow,
+    isPending,
+  } = useCreatorFollow(event.influencer.id);
+  const followerCount = count || event.influencer.followers;
+  const onFollowClick = () => {
+    if (!user) {
+      navigate(
+        `/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`,
+      );
+      return;
+    }
+    if (isFollowing) void unfollow();
+    else void follow();
+  };
+
   return (
     <section className="overflow-hidden rounded-2xl border border-border/30 bg-card p-5 sm:p-6">
       <h1 className="font-heading text-lg font-extrabold leading-tight sm:text-xl">
         {event.title}
       </h1>
-      <div className="mt-3 flex items-center gap-2">
+      {event.description && (
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground sm:text-base">
+          {event.description}
+        </p>
+      )}
+      {/* Creator row — moved BELOW the description per the latest
+          IA pass so the viewer reads the event hook first, then who's
+          behind it. The Follow / Following button sits to the right
+          of the follower count; tapping when signed-out routes to
+          sign-in then returns here. */}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <img
           src={event.influencer.avatarUrl}
           alt={event.influencer.displayName}
@@ -434,14 +470,33 @@ function EventInfoBlock({ event }: { event: StreamEvent }) {
         </span>
         <BadgeCheck className="h-4 w-4 flex-shrink-0 fill-primary text-white" />
         <span className="truncate text-sm text-muted-foreground">
-          {compactFormatter.format(event.influencer.followers)} followers
+          {compactFormatter.format(followerCount)} followers
         </span>
+        {/* `group` so the "Following" label swaps to "Unfollow" on
+            hover — the standard social-platform toggle pattern.
+            Mobile / touch (no hover) sees "Following" + the
+            outline-style variant is the affordance. */}
+        <Button
+          type="button"
+          size="sm"
+          variant={isFollowing ? "outline" : "default"}
+          onClick={onFollowClick}
+          disabled={isPending}
+          className={cn(
+            "ml-auto h-8 px-3 text-xs font-semibold",
+            isFollowing && "group hover:border-destructive hover:text-destructive",
+          )}
+        >
+          {isFollowing ? (
+            <>
+              <span className="group-hover:hidden">Following</span>
+              <span className="hidden group-hover:inline">Unfollow</span>
+            </>
+          ) : (
+            "Follow"
+          )}
+        </Button>
       </div>
-      {event.description && (
-        <p className="mt-4 text-sm leading-relaxed text-muted-foreground sm:text-base">
-          {event.description}
-        </p>
-      )}
     </section>
   );
 }

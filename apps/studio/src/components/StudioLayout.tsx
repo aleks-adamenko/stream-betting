@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   LogOut,
@@ -13,7 +14,13 @@ import {
 import { cn } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { NavBrushBg } from "@/components/NavBrushBg";
+import { supabase } from "@/integrations/supabase/client";
 import logoUrl from "@/assets/live-rush-white-logo.png";
+
+const compactFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 type NavItem = {
   to: string;
@@ -43,6 +50,25 @@ export function StudioLayout() {
   const { creator, signOut } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Live follower count for the sidebar identity strip. Sourced from
+  // the same RPC the user-app reads so the number stays consistent
+  // across surfaces. RPC is anon-readable; the staleTime keeps it
+  // from spamming on every layout re-render.
+  const { data: followerCount } = useQuery({
+    queryKey: ["creator-follower-count", creator?.id],
+    enabled: !!creator?.id,
+    staleTime: 30_000,
+    queryFn: async () => {
+      if (!creator?.id) return 0;
+      const { data, error } = await supabase.rpc(
+        "get_creator_follower_count",
+        { p_creator_id: creator.id },
+      );
+      if (error) throw error;
+      return (data as number) ?? 0;
+    },
+  });
 
   const handleSignOut = async () => {
     await signOut();
@@ -168,6 +194,13 @@ export function StudioLayout() {
               {creator?.handle && (
                 <p className="truncate text-[11px] text-white/70">@{creator.handle}</p>
               )}
+              {/* Follower count below the handle. Always visible —
+                  0 followers is information too, and the line
+                  height stays stable so the sidebar identity strip
+                  doesn't reflow as the count loads. */}
+              <p className="truncate text-[11px] text-white/60">
+                {compactFormatter.format(followerCount ?? 0)} followers
+              </p>
             </div>
           </div>
 

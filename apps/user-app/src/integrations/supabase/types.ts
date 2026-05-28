@@ -536,6 +536,22 @@ export interface Database {
         Args: { p_enabled: boolean };
         Returns: void;
       };
+      follow_creator: {
+        Args: { p_creator_id: string };
+        Returns: Database["public"]["Tables"]["creator_followers"]["Row"];
+      };
+      unfollow_creator: {
+        Args: { p_creator_id: string };
+        Returns: void;
+      };
+      is_following_creator: {
+        Args: { p_creator_id: string };
+        Returns: boolean;
+      };
+      get_creator_follower_count: {
+        Args: { p_creator_id: string };
+        Returns: number;
+      };
       add_event_outcome: {
         Args: {
           p_event_id: string;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Volume2, VolumeX } from "lucide-react";
+import { Loader2, Volume2, VolumeX } from "lucide-react";
 import { WebRTCPlayer } from "@eyevinn/webrtc-player";
 
 import { cn } from "@/lib/utils";
@@ -8,21 +8,28 @@ import { cn } from "@/lib/utils";
  * Cloudflare Stream live broadcast viewer.
  *
  * Uses Eyevinn's @eyevinn/webrtc-player to consume the live stream
- * over WHEP (WebRTC playback). Why this and not a custom WHEP
- * client: Cloudflare's own docs recommend it, and rolling our own
- * WHEP client was the source of debug pain in earlier iterations —
- * subtle issues around DTLS setup roles, ICE timing, and transceiver
- * direction are all handled by the library.
+ * over WHEP (WebRTC playback). Cloudflare doesn't generate HLS for
+ * WHIP-published streams (only RTMPS feeds the HLS transcoder), so
+ * WHEP is the only correct playback path for our ingest pipeline.
  *
- * Why not the /iframe player: that polls for an HLS manifest, but
- * Cloudflare doesn't generate HLS for WHIP-published streams (only
- * RTMPS feeds the HLS transcoder). Iframe + WHIP = indefinite
- * "Stream has not started yet" cover. WHEP is the only correct
- * playback path for WHIP ingest.
+ * Loading UX:
+ *   • Until the inbound MediaStream actually fires the `playing`
+ *     event we show the cover image + a centered spinner overlay.
+ *   • The `<video>` is rendered with opacity-0 underneath the
+ *     spinner so swapping in feels instantaneous (no remount).
  *
- * Latency: ~sub-second, same as before. Mobile autoplay: the
- * native <video> with `muted` attribute + library-driven playback
- * works on iOS Safari without the cross-origin-iframe restriction.
+ * Lazy mounting (for in-feed players, e.g. StreamCard on the home
+ * feed): if `lazy` is true, we delay opening the WHEP connection
+ * until the player's container scrolls into view, and tear it down
+ * again once it leaves. This avoids holding dozens of simultaneous
+ * WebRTC sessions for off-screen feed cards.
+ *
+ * Audio toggle: muted by default for autoplay compatibility. The
+ * unmute button at the bottom-center flips it. We use
+ * `player.unmute()` (the library's API) AND `muted={muted}` (the
+ * React-tracked prop) — the bare `muted` attribute alone caused
+ * React to re-apply `true` on every render and override the user's
+ * unmute click.
  */
 
 interface CloudflareStreamPlayerProps {
@@ -31,21 +38,53 @@ interface CloudflareStreamPlayerProps {
   src: string;
   poster?: string;
   className?: string;
+  /** When true, only open the WHEP connection while the container
+   *  is in the viewport. Tears down the connection when scrolled
+   *  off-screen so a feed of N live cards doesn't hold N WebRTC
+   *  sessions open. Default false — for the event page / featured
+   *  hero we want the stream playing the moment the page loads. */
+  lazy?: boolean;
 }
 
 export function CloudflareStreamPlayer({
   src,
   poster,
   className,
+  lazy = false,
 }: CloudflareStreamPlayerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<WebRTCPlayer | null>(null);
   const [muted, setMuted] = useState(true);
   const [hasMedia, setHasMedia] = useState(false);
+  // `inView` only matters when `lazy` is true. We default to !lazy
+  // so eagerly-mounted players (event page, featured hero) start
+  // immediately without waiting for an IntersectionObserver tick.
+  const [inView, setInView] = useState(!lazy);
 
-  // Spin up the WHEP player when the WHEP URL is available and
-  // tear it down on unmount / src change. The library handles
-  // SDP / ICE / DTLS internally.
+  // Lazy-mount: IntersectionObserver flips `inView` true/false as
+  // the container enters / leaves the viewport. The setup effect
+  // below keys off `inView`, so a player can be created/destroyed
+  // multiple times as the user scrolls past.
+  useEffect(() => {
+    if (!lazy) return;
+    const node = containerRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setInView(entry.isIntersecting),
+      // 0.25 means: connect when 25% of the card is visible. Keeps
+      // us from opening a session for a card that's just barely
+      // entered the viewport on a fast scroll.
+      { threshold: 0.25 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [lazy]);
+
+  // Spin up the WHEP player when the WHEP URL is available + we're
+  // in view (eager mounts treat inView as always true). Tear down
+  // on unmount / src change / scroll-off. The library handles SDP /
+  // ICE / DTLS internally.
   //
   // StrictMode protection: in development React intentionally runs
   // this effect twice on mount (mount → cleanup → mount). Each run
@@ -53,12 +92,12 @@ export function CloudflareStreamPlayer({
   // server's first session is still being torn down when the second
   // POST arrives, so Cloudflare returns 409 Conflict and the second
   // session never starts → broken player. We defer the real setup
-  // by a microtask + small timeout so the cleanup from the first
-  // run cancels it before a single WHEP request is made; the second
-  // run is then the only one that actually fires.
+  // by a small timeout so the cleanup from the first run cancels
+  // it before a single WHEP request is made; the second run is then
+  // the only one that actually fires.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !src) return;
+    if (!video || !src || !inView) return;
 
     let cancelled = false;
     let player: WebRTCPlayer | null = null;
@@ -135,26 +174,26 @@ export function CloudflareStreamPlayer({
       }
       setHasMedia(false);
     };
-  }, [src]);
+  }, [src, inView]);
 
-  // Apply mute state through the library's own API. The library
-  // manages audio routing internally, so toggling `video.muted`
-  // directly is not enough — its mute()/unmute() methods are what
-  // actually flip the audio track on/off in the inbound MediaStream.
-  // We mirror onto `video.muted` as a belt-and-braces fallback for
-  // browsers that key off the HTMLMediaElement attribute.
+  // Apply mute state through the library's own API AND mirror onto
+  // `video.muted` via the `muted={muted}` prop binding below. The
+  // library manages audio routing internally; the React prop binding
+  // ensures the underlying HTMLMediaElement's `muted` property tracks
+  // state across re-renders. Using a bare `muted` attribute caused
+  // React to re-apply `true` on every render and silently override
+  // the user's unmute click.
   useEffect(() => {
     const player = playerRef.current;
-    const video = videoRef.current;
     if (player) {
       if (muted) player.mute();
       else player.unmute();
     }
-    if (video) video.muted = muted;
   }, [muted]);
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         "relative h-full w-full overflow-hidden bg-black",
         className,
@@ -170,22 +209,42 @@ export function CloudflareStreamPlayer({
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}
+      {/* Loading spinner overlaid on the cover until media starts.
+          The semi-opaque scrim improves contrast over busy cover
+          art without fully hiding the brand image. We only show it
+          while we actually expect media — for lazy players that
+          haven't scrolled into view yet, no spinner. */}
+      {!hasMedia && inView && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30">
+          <Loader2 className="h-10 w-10 animate-spin text-white drop-shadow-lg" />
+        </div>
+      )}
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        muted
+        muted={muted}
         className={cn(
           "absolute inset-0 h-full w-full bg-black object-contain transition-opacity",
           hasMedia ? "opacity-100" : "opacity-0",
         )}
       />
-      {hasMedia && (
+      {/* Sound toggle — bottom-center, same on desktop + mobile.
+          Hidden in lazy/feed mode because a wall of unmuted cards
+          is hostile UX; the detail page is where viewers control
+          audio. stopPropagation so a click on the toggle inside a
+          link-wrapped feed card (like StreamCard) doesn't also
+          navigate. */}
+      {hasMedia && !lazy && (
         <button
           type="button"
-          onClick={() => setMuted((m) => !m)}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setMuted((m) => !m);
+          }}
           aria-label={muted ? "Unmute" : "Mute"}
-          className="absolute bottom-3 right-3 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white shadow-md backdrop-blur-sm transition-colors hover:bg-black/80"
+          className="absolute bottom-3 left-1/2 z-10 inline-flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full bg-black/60 text-white shadow-md backdrop-blur-sm transition-colors hover:bg-black/80"
         >
           {muted ? (
             <VolumeX className="h-5 w-5" />
