@@ -1,11 +1,15 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
-import { UserPlus } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { UserMinus, UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { LiveBadge } from "@/components/feed/LiveBadge";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { useAuth } from "@/contexts/AuthContext";
+import { useCreatorFollow } from "@/hooks/useCreatorFollow";
 import { useEvents } from "@/hooks/useEvents";
+import { cn } from "@/lib/utils";
 import type { Influencer, StreamEvent } from "@/domain/types";
 
 interface CreatorAggregate {
@@ -67,6 +71,31 @@ const numberFmt = new Intl.NumberFormat("en-US", {
 
 function CreatorCard({ data }: { data: CreatorAggregate }) {
   const { creator, totalChallenges, liveEvents } = data;
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  // Live follower count + follow state from the same RPC the rest
+  // of the app reads. Fall back to event.influencer.followers (a
+  // cached snapshot from the event row) while the query loads so
+  // the card doesn't flicker through "0 followers" on first mount.
+  const { isFollowing, count, follow, unfollow, isPending } =
+    useCreatorFollow(creator.id);
+  const followerCount = count || creator.followers;
+
+  const onFollowClick = async () => {
+    if (!user) {
+      navigate(`/auth/sign-in?next=${encodeURIComponent("/following")}`);
+      return;
+    }
+    try {
+      if (isFollowing) await unfollow();
+      else await follow();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Something went wrong";
+      toast.error(message);
+    }
+  };
+
   return (
     <article className="flex flex-col rounded-2xl border border-border/40 bg-card p-5 shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl">
       <div className="flex flex-col items-center text-center">
@@ -83,10 +112,7 @@ function CreatorCard({ data }: { data: CreatorAggregate }) {
 
       <div className="mt-4 grid grid-cols-2 gap-2">
         <Stat label="Challenges" value={totalChallenges.toString()} />
-        <Stat
-          label="Followers"
-          value={numberFmt.format(creator.followers)}
-        />
+        <Stat label="Followers" value={numberFmt.format(followerCount)} />
       </div>
 
       {liveEvents.length > 0 ? (
@@ -120,8 +146,34 @@ function CreatorCard({ data }: { data: CreatorAggregate }) {
         </div>
       )}
 
-      <Button size="lg" className="mt-5 w-full">
-        <UserPlus className="h-4 w-4" /> Follow
+      {/* Wired up to useCreatorFollow. Matches the event-page
+          Follow/Unfollow button: outline+destructive on hover when
+          following, primary fill when not. Group hover swaps the
+          icon + label on desktop; mobile relies on the variant
+          change to telegraph the state. */}
+      <Button
+        size="lg"
+        variant={isFollowing ? "outline" : "default"}
+        onClick={onFollowClick}
+        disabled={isPending}
+        className={cn(
+          "mt-5 w-full",
+          isFollowing &&
+            "group hover:border-destructive hover:text-destructive",
+        )}
+      >
+        {isFollowing ? (
+          <>
+            <UserPlus className="h-4 w-4 group-hover:hidden" />
+            <UserMinus className="hidden h-4 w-4 group-hover:inline" />
+            <span className="group-hover:hidden">Following</span>
+            <span className="hidden group-hover:inline">Unfollow</span>
+          </>
+        ) : (
+          <>
+            <UserPlus className="h-4 w-4" /> Follow
+          </>
+        )}
       </Button>
     </article>
   );
