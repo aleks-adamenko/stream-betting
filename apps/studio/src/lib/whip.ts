@@ -472,10 +472,21 @@ export class WhipPublisher {
 // Helpers
 // =========================================================================
 
-/** Restrict the transceiver's offered codecs to H.264 baseline +
- *  Opus, which is what Cloudflare's WHIP ingest accepts. Older browsers
- *  may not support setCodecPreferences — in that case we skip and let
- *  the answer SDP do the codec selection. */
+/** Restrict the transceiver's offered codecs to a Cloudflare-friendly
+ *  set. For video that means H.264 *constrained baseline* with
+ *  packetization-mode=1 — Cloudflare's WebRTC ingest decoder will
+ *  silently drop frames when handed any other H.264 profile (main,
+ *  high), even though signaling negotiates them happily. The symptom
+ *  is "WHIP returns 201, ICE connects, RTP packets fly, but Cloudflare
+ *  shows zero bitrate and a blank preview" — which is exactly the bug
+ *  we're chasing. For audio: Opus is the only WHIP-supported codec.
+ *
+ *  We pass ONLY the matching codecs to setCodecPreferences (no other
+ *  H.264 profiles as fallback). If we left main/high in the list, the
+ *  browser would offer them, Cloudflare's answer might pick the first
+ *  in order, and we'd be right back at the silent-drop failure mode.
+ *
+ *  Older browsers without setCodecPreferences silently fall through. */
 function pinCodecPreferences(
   transceiver: RTCRtpTransceiver,
   kind: string,
@@ -486,26 +497,48 @@ function pinCodecPreferences(
   const caps = RTCRtpSender.getCapabilities(kind);
   if (!caps) return;
 
-  const preferred =
-    kind === "video"
-      ? caps.codecs.filter(
-          (c) => c.mimeType.toLowerCase() === "video/h264",
-        )
-      : caps.codecs.filter(
-          (c) => c.mimeType.toLowerCase() === "audio/opus",
-        );
+  let preferred: RTCRtpCodecCapability[];
+  if (kind === "video") {
+    // H.264 constrained baseline = profile-idc 0x42 with the
+    // constraint_set1 flag set, which in profile-level-id strings
+    // shows up as `42e0xx`. We also accept `42001f` (baseline) as
+    // a fallback because some Chrome builds advertise that as
+    // constrained-baseline-equivalent. packetization-mode=1 is the
+    // standard WebRTC mode; mode=0 (single-NAL) is rare and not
+    // what Cloudflare expects.
+    preferred = caps.codecs.filter((c) => {
+      if (c.mimeType.toLowerCase() !== "video/h264") return false;
+      const fmtp = (c.sdpFmtpLine ?? "").toLowerCase();
+      const isConstrainedBaseline =
+        fmtp.includes("profile-level-id=42e0") ||
+        fmtp.includes("profile-level-id=42001f");
+      const isMode1 = fmtp.includes("packetization-mode=1");
+      return isConstrainedBaseline && isMode1;
+    });
+    // If the precise filter found nothing (older browser, atypical
+    // capability list), fall back to *any* H.264 — better to try
+    // negotiating something than fail outright.
+    if (preferred.length === 0) {
+      preferred = caps.codecs.filter(
+        (c) => c.mimeType.toLowerCase() === "video/h264",
+      );
+    }
+  } else {
+    preferred = caps.codecs.filter(
+      (c) => c.mimeType.toLowerCase() === "audio/opus",
+    );
+  }
 
   if (preferred.length === 0) return;
 
-  // Move preferred codecs to the front; keep others as fallback.
-  const ordered = [
-    ...preferred,
-    ...caps.codecs.filter((c) => !preferred.includes(c)),
-  ];
+  // IMPORTANT: pass ONLY the preferred codecs to setCodecPreferences
+  // for video. Including other H.264 profiles as fallback risks
+  // Cloudflare's answer picking one its decoder can't handle, which
+  // produces the silent-drop failure mode.
   try {
-    transceiver.setCodecPreferences(ordered);
+    transceiver.setCodecPreferences(preferred);
   } catch {
-    // Some browsers throw if any unsupported codec is in the list;
+    // Some browsers throw if the list is missing required codecs;
     // ignore and fall back to default ordering.
   }
 }
