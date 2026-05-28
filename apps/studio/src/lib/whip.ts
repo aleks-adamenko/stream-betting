@@ -74,6 +74,17 @@ export class WhipPublisher {
    *  be substituted in, or the publisher silently keeps sending the
    *  stopped old track and viewers hear nothing. */
   private audioSender: RTCRtpSender | null = null;
+  /** Periodic keyframe-forcer. Chrome's WebRTC encoder only emits an
+   *  H.264 keyframe at session start + on receiver PLI request; the
+   *  rest is P-frames. Cloudflare's WHIP→HLS transcoder needs keys
+   *  every few seconds to chunk media into HLS segments — without
+   *  them, playback stalls after the first ~10 s when the initial
+   *  segment is consumed and there's no keyframe to start a new one.
+   *  This timer toggles `scaleResolutionDownBy` by a fractional
+   *  amount every 2 s, which triggers Chrome's encoder to emit a
+   *  fresh keyframe without actually changing the encoded resolution
+   *  (the delta is < 1 px). Cleared in stop(). */
+  private keyframeTimer: ReturnType<typeof setInterval> | null = null;
   private status: WhipPublisherStatus = "idle";
 
   constructor(private options: WhipPublisherOptions = {}) {}
@@ -183,6 +194,36 @@ export class WhipPublisher {
     await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
     // connectionstatechange listener will flip status to "live" once
     // ICE completes.
+
+    // Start the periodic keyframe-forcer — see field comment on
+    // keyframeTimer for the why.
+    this.startKeyframeForcer();
+  }
+
+  /** Toggle `scaleResolutionDownBy` between 1.0 and 1.001 every 2 s.
+   *  Each setParameters call triggers Chrome to re-evaluate the
+   *  encoding pipeline, which in turn forces a fresh keyframe. The
+   *  delta is < 1 px so the actual encoded resolution is unchanged. */
+  private startKeyframeForcer(): void {
+    if (this.keyframeTimer || !this.videoSender) return;
+    let useNudge = false;
+    this.keyframeTimer = setInterval(async () => {
+      const sender = this.videoSender;
+      if (!sender) return;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].scaleResolutionDownBy = useNudge ? 1.001 : 1.0;
+        useNudge = !useNudge;
+        await sender.setParameters(params);
+      } catch {
+        // Some browser/encoder combos reject setParameters mid-flight;
+        // non-fatal — the worst case is no keyframe nudge, which is
+        // where we were before this code existed.
+      }
+    }, 2000);
   }
 
   /** Swap the currently-published video track for a new one. Used
@@ -211,6 +252,11 @@ export class WhipPublisher {
    *  marks the ingest as cleanly ended), close the peer connection,
    *  stop the local media tracks (camera light turns off). */
   async stop(): Promise<void> {
+    if (this.keyframeTimer) {
+      clearInterval(this.keyframeTimer);
+      this.keyframeTimer = null;
+    }
+
     // Best-effort DELETE to the server. If the network is gone or
     // the server has already cleaned up, ignore the error — the
     // local teardown below is what actually matters for the camera
