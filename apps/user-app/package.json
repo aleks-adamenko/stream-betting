@@ -11,6 +11,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@eyevinn/webrtc-player": "^0.13.0",
     "@hookform/resolvers": "^3.10.0",
     "@liverush/design-tokens": "workspace:*",
     "@liverush/lib": "workspace:*",

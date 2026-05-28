@@ -261,8 +261,19 @@ export default function LiveStream() {
       //    being broadcast. object-contain on the <video> element
       //    means we never lie about the framing (vs. cover, which
       //    would crop edges out of the viewer-side view).
+      //
+      //    The local preview gets a VIDEO-ONLY clone of the
+      //    MediaStream — not the full stream that's about to be
+      //    handed to the WHIP publisher. Sharing the audio track
+      //    between a <video> element (even one with `muted` set)
+      //    and the WebRTC sender has historically caused Chrome's
+      //    audio encoder to emit zero packets, which Cloudflare's
+      //    WHIP ingest treats as a broken session and tears down
+      //    after ~30 s. Isolating the audio track to a single
+      //    consumer (the publisher) sidesteps that.
+      const previewStream = new MediaStream(stream.getVideoTracks());
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        videoRef.current.srcObject = previewStream;
         await videoRef.current.play().catch(() => {
           // playsinline + muted cover autoplay restrictions; ignore.
         });

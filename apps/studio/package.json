@@ -11,10 +11,11 @@
     "lint": "echo 'no lint configured yet'"
   },
   "dependencies": {
+    "@eyevinn/whip-web-client": "^1.1.7",
+    "@hookform/resolvers": "^3.10.0",
     "@liverush/design-tokens": "workspace:*",
     "@liverush/lib": "workspace:*",
     "@liverush/ui": "workspace:*",
-    "@hookform/resolvers": "^3.10.0",
     "@supabase/supabase-js": "^2.105.4",
     "@tanstack/react-query": "^5.83.0",
     "class-variance-authority": "^0.7.1",

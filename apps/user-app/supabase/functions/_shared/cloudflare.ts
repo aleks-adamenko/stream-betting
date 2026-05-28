@@ -52,9 +52,12 @@ interface CloudflareLiveInputResponse {
 
 /**
  * Result shape returned to the caller (the provision-stream function).
- * We keep `whip_url` and `playback_url` as the two fields the rest of
- * the app needs; the rest of Cloudflare's response (rtmps/srt) is
- * discarded for now — easy to surface later if we want OBS fallback.
+ * - `whipUrl`: contains the publish secret in its path. Creator-only,
+ *   gated by RLS via the get_stream_credentials RPC.
+ * - `playbackUrl`: the WHEP (WebRTC playback) URL viewers use to
+ *   subscribe to the live broadcast. Public; stored in
+ *   `events.playback_url`. The browser opens its own
+ *   RTCPeerConnection to this URL — see CloudflareStreamPlayer.
  */
 export interface CreatedLiveInput {
   uid: string;
@@ -66,11 +69,15 @@ export interface CreatedLiveInput {
  * Create a Cloudflare Stream live input. `name` is purely operational
  * (shows up in the dashboard list).
  *
- * `recording.mode: "automatic"` is required for HLS playback during
- * the live broadcast — Cloudflare only generates the .m3u8 manifest
- * when recording is enabled. We don't pass `deleteRecordingAfterDays`
- * because Cloudflare rejected our earlier values; we'll prune
- * recordings out-of-band if storage starts costing real money.
+ * `recording.mode: "automatic"` is set even though Cloudflare doesn't
+ * currently record WHIP-published streams — when they add that
+ * support we get it for free, and it's harmless until then.
+ *
+ * Critical Cloudflare behaviour: a live input ingested via WHIP only
+ * exposes WHEP for playback. The HLS/DASH transcoder is RTMPS-only.
+ * Don't use the /iframe URL for WHIP-published streams — it polls for
+ * an HLS manifest that will never appear. Use webRTCPlayback.url +
+ * a WHEP client instead.
  */
 export async function createLiveInput(name: string): Promise<CreatedLiveInput> {
   const res = await fetch(`${API_BASE}/live_inputs`, {
@@ -101,18 +108,18 @@ export async function createLiveInput(name: string): Promise<CreatedLiveInput> {
     );
   }
 
+  // Prefer the API-returned WHEP URL; fall back to the documented
+  // URL pattern if Cloudflare's response shape ever shifts. Pattern
+  // is intentionally encoded here so the rest of the app never has
+  // to know it.
+  const whepUrl =
+    result.webRTCPlayback?.url ??
+    `https://${customerCode}.cloudflarestream.com/${result.uid}/webRTC/play`;
+
   return {
     uid: result.uid,
     whipUrl,
-    // Cloudflare's iframe embed URL. Important: HLS playback is NOT
-    // generated for WHIP-ingested live streams during the broadcast —
-    // Cloudflare expects you to use WHEP (WebRTC playback). The
-    // /iframe endpoint loads Cloudflare's player which speaks WHEP
-    // internally and gives us sub-second viewer latency for free.
-    // (HLS does become available later as a VOD recording, but we
-    // don't expose that as the canonical playback URL since the
-    // product is live-only.)
-    playbackUrl: `https://${customerCode}.cloudflarestream.com/${result.uid}/iframe`,
+    playbackUrl: whepUrl,
   };
 }
 
