@@ -108,6 +108,19 @@ export function useCreatorFollow(creatorId: string | undefined) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.count(creatorId),
       });
+      // unfollow_creator now also nukes every event_subscribers row
+      // this user has for events owned by the unfollowed creator
+      // (so they truly stop getting emails). Blow the entire
+      // event-subscription cache for this session so any open
+      // "Notify me when live" buttons re-fetch and reflect the new
+      // unsubscribed state immediately. Cheaper than tracking which
+      // specific event ids were affected.
+      void queryClient.invalidateQueries({
+        queryKey: ["event-subscription"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["event-subscription-count"],
+      });
     },
   });
 
