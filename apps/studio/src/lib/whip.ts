@@ -74,6 +74,12 @@ export class WhipPublisher {
    *  be substituted in, or the publisher silently keeps sending the
    *  stopped old track and viewers hear nothing. */
   private audioSender: RTCRtpSender | null = null;
+  /** Diagnostic stats poller. Logs outbound RTP byte/packet counts
+   *  and the selected ICE candidate pair every second so we can see
+   *  from devtools whether media is leaving the browser at all
+   *  (versus the WHIP handshake having succeeded but ICE never
+   *  reaching `connected`). Cleared in stop(). */
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
   private status: WhipPublisherStatus = "idle";
 
   constructor(private options: WhipPublisherOptions = {}) {}
@@ -89,10 +95,27 @@ export class WhipPublisher {
     this.stream = stream;
     this.setStatus("connecting");
 
+    // Multiple STUN servers for redundancy. A single STUN endpoint
+    // sometimes rate-limits high-volume browser clients silently —
+    // when that happens the only srflx candidate never gathers and
+    // ICE has nothing but host candidates to try, which fails on any
+    // non-LAN target. Listing several gives the gatherer a fallback.
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        { urls: "stun:stun.cloudflare.com:3478" },
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:global.stun.twilio.com:3478" },
+      ],
+      // bundlePolicy 'max-bundle' keeps audio + video on one
+      // transport — fewer candidate pairs to check, faster connect.
+      bundlePolicy: "max-bundle",
     });
     this.pc = pc;
+
+    // Track ICE-restart attempts so we don't loop forever if the
+    // network is genuinely broken.
+    let iceRestartAttempts = 0;
+    const MAX_ICE_RESTARTS = 2;
 
     pc.addEventListener("connectionstatechange", () => {
       switch (pc.connectionState) {
@@ -103,6 +126,23 @@ export class WhipPublisher {
           this.setStatus("reconnecting");
           break;
         case "failed":
+          // Try an ICE restart before giving up. This forces a fresh
+          // candidate gather and re-negotiation, which recovers from
+          // transient NAT timeouts and STUN throttling without the
+          // user having to click anything. We POST the new offer to
+          // the same WHIP resource URL Cloudflare returned earlier.
+          if (
+            iceRestartAttempts < MAX_ICE_RESTARTS &&
+            this.resourceUrl !== null
+          ) {
+            iceRestartAttempts += 1;
+            this.setStatus("reconnecting");
+            this.restartIce().catch((err) => {
+              this.setStatus("failed");
+              this.options.onError?.(err as Error);
+            });
+            break;
+          }
           this.setStatus("failed");
           this.options.onError?.(
             new Error("WebRTC connection to the ingest server failed"),
@@ -112,6 +152,16 @@ export class WhipPublisher {
           // Triggered by our own stop() — leave status alone.
           break;
       }
+    });
+
+    // Visibility for diagnostics — chrome://webrtc-internals will
+    // surface these too, but having them in the page console makes
+    // remote debugging much cheaper.
+    pc.addEventListener("iceconnectionstatechange", () => {
+      console.info("[whip] iceConnectionState =", pc.iceConnectionState);
+    });
+    pc.addEventListener("icegatheringstatechange", () => {
+      console.info("[whip] iceGatheringState =", pc.iceGatheringState);
     });
 
     // Add tracks as send-only and pin codec preferences. Cloudflare's
@@ -147,12 +197,28 @@ export class WhipPublisher {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    // Wait for ICE gathering to complete so the offer SDP has the
-    // full candidate list. Cloudflare's WHIP endpoint expects
-    // trickle-less offers (most WHIP servers do).
-    await waitForIceGatheringComplete(pc);
+    // Wait for ICE gathering to complete so the offer SDP carries
+    // the full candidate list. Cloudflare's WHIP endpoint is trickle-
+    // less. We wait up to 5 s — long enough for slow STUN responses
+    // (the previous 3 s budget was occasionally too tight, leaving
+    // the offer with only host candidates and ICE no path to
+    // Cloudflare).
+    await waitForIceGatheringComplete(pc, 5000);
     const finalOffer = pc.localDescription;
     if (!finalOffer) throw new Error("Failed to build local description");
+
+    // Sanity-check: if after the wait we still have no srflx
+    // candidate, every STUN we tried failed silently. That's the
+    // exact failure mode where signaling succeeds but media never
+    // flows. Surface it loudly instead of letting the user stare at
+    // a spinner.
+    const hasSrflx = finalOffer.sdp?.includes("typ srflx") ?? false;
+    if (!hasSrflx) {
+      console.warn(
+        "[whip] No server-reflexive candidate gathered — STUN may be blocked or rate-limited. " +
+          "ICE will likely fail on any non-LAN target.",
+      );
+    }
 
     // 5) Negotiate with Cloudflare. The publish secret is in the URL
     //    path itself, so no Authorization header is needed.
@@ -183,6 +249,137 @@ export class WhipPublisher {
     await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
     // connectionstatechange listener will flip status to "live" once
     // ICE completes.
+
+    // Start the diagnostic stats poller. Logs once a second so we
+    // can confirm media is actually leaving the browser. The
+    // failure mode we're chasing is "WHIP signaling succeeds but
+    // Cloudflare's ingest never sees a single RTP packet" — this
+    // turns that opaque condition into an observable one.
+    this.startStatsPoller();
+  }
+
+  /** Poll RTCPeerConnection.getStats() every second and log a
+   *  one-line summary: ICE candidate-pair state, the local/remote
+   *  candidate types of the selected pair, and outbound bytes/packets
+   *  per kind. From devtools you can read this off directly without
+   *  opening chrome://webrtc-internals. */
+  private startStatsPoller(): void {
+    if (this.statsTimer || !this.pc) return;
+    let prev = { videoBytes: 0, audioBytes: 0 };
+    this.statsTimer = setInterval(async () => {
+      const pc = this.pc;
+      if (!pc || pc.connectionState === "closed") return;
+      try {
+        const report = await pc.getStats();
+        let videoBytes = 0;
+        let audioBytes = 0;
+        let videoPackets = 0;
+        let audioPackets = 0;
+        let selectedPairId: string | undefined;
+        const candidates = new Map<string, RTCIceCandidateStats>();
+        const pairs = new Map<string, RTCIceCandidatePairStats>();
+        report.forEach((stat) => {
+          if (stat.type === "outbound-rtp") {
+            const s = stat as RTCOutboundRtpStreamStats;
+            if (s.kind === "video") {
+              videoBytes = s.bytesSent ?? 0;
+              videoPackets = s.packetsSent ?? 0;
+            } else if (s.kind === "audio") {
+              audioBytes = s.bytesSent ?? 0;
+              audioPackets = s.packetsSent ?? 0;
+            }
+          } else if (stat.type === "transport") {
+            const s = stat as RTCTransportStats;
+            if (s.selectedCandidatePairId) {
+              selectedPairId = s.selectedCandidatePairId;
+            }
+          } else if (stat.type === "candidate-pair") {
+            pairs.set(stat.id, stat as RTCIceCandidatePairStats);
+          } else if (
+            stat.type === "local-candidate" ||
+            stat.type === "remote-candidate"
+          ) {
+            candidates.set(stat.id, stat as RTCIceCandidateStats);
+          }
+        });
+        // Find the active pair: prefer the transport's selectedPairId,
+        // fall back to whichever pair reports state=succeeded.
+        let pair = selectedPairId ? pairs.get(selectedPairId) : undefined;
+        if (!pair) {
+          for (const p of pairs.values()) {
+            if (p.state === "succeeded") {
+              pair = p;
+              break;
+            }
+          }
+        }
+        const localCand = pair?.localCandidateId
+          ? candidates.get(pair.localCandidateId)
+          : undefined;
+        const remoteCand = pair?.remoteCandidateId
+          ? candidates.get(pair.remoteCandidateId)
+          : undefined;
+        const dv = videoBytes - prev.videoBytes;
+        const da = audioBytes - prev.audioBytes;
+        prev = { videoBytes, audioBytes };
+        console.info(
+          `[whip] pc=${pc.connectionState} ice=${pc.iceConnectionState} ` +
+            `pair=${pair?.state ?? "none"} ` +
+            `local=${localCand?.candidateType ?? "?"}/${localCand?.protocol ?? "?"} ` +
+            `remote=${remoteCand?.candidateType ?? "?"}/${remoteCand?.address ?? "?"} ` +
+            `video=${videoBytes}B (+${dv}/s, ${videoPackets}pkt) ` +
+            `audio=${audioBytes}B (+${da}/s, ${audioPackets}pkt)`,
+        );
+      } catch (err) {
+        console.warn("[whip] getStats failed:", err);
+      }
+    }, 1000);
+  }
+
+  /** Restart ICE on the existing peer connection and re-PATCH the
+   *  fresh offer to Cloudflare's WHIP resource URL. Recovers from a
+   *  transient NAT timeout / STUN throttle without tearing the
+   *  publisher down. Caller (`connectionstatechange` listener) is
+   *  responsible for capping attempts so we don't loop. */
+  private async restartIce(): Promise<void> {
+    const pc = this.pc;
+    const resourceUrl = this.resourceUrl;
+    if (!pc || !resourceUrl) {
+      throw new Error("restartIce called without an active session");
+    }
+
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    await waitForIceGatheringComplete(pc, 5000);
+    const finalOffer = pc.localDescription;
+    if (!finalOffer?.sdp) throw new Error("ICE restart: empty local SDP");
+
+    // WHIP servers conventionally accept a PATCH on the resource URL
+    // for renegotiation (RFC 9725 / draft-ietf-wish-whip). Cloudflare
+    // supports it. If it 405s we fall back to a full POST to the
+    // original WHIP endpoint, but that would require re-saving the
+    // resource URL — caller decides whether to retry that path.
+    const response = await fetch(resourceUrl, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/sdp" },
+      body: finalOffer.sdp,
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `ICE restart PATCH rejected (${response.status}): ${body || response.statusText}`,
+      );
+    }
+
+    // Some WHIP servers return a 204 with no body on PATCH; only
+    // setRemoteDescription if we got an answer back.
+    const ct = response.headers.get("Content-Type") ?? "";
+    if (ct.includes("application/sdp")) {
+      const answerSdp = await response.text();
+      if (answerSdp) {
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      }
+    }
   }
 
   /** Swap the currently-published video track for a new one. Used
@@ -211,6 +408,11 @@ export class WhipPublisher {
    *  marks the ingest as cleanly ended), close the peer connection,
    *  stop the local media tracks (camera light turns off). */
   async stop(): Promise<void> {
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer);
+      this.statsTimer = null;
+    }
+
     // Best-effort DELETE to the server. If the network is gone or
     // the server has already cleaned up, ignore the error — the
     // local teardown below is what actually matters for the camera
@@ -290,11 +492,15 @@ function pinCodecPreferences(
   }
 }
 
-/** Resolves once ICE gathering finishes, or 3 s elapses (whichever
- *  comes first). Cloudflare's WHIP endpoint expects a complete offer;
- *  some networks never reach "complete" but produce enough candidates
- *  in the first second. */
-function waitForIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
+/** Resolves once ICE gathering finishes, or `timeoutMs` elapses
+ *  (whichever comes first). Cloudflare's WHIP endpoint expects a
+ *  complete offer; some networks never reach "complete" but produce
+ *  enough candidates in the first second. Default budget bumped to
+ *  5 s to accommodate slow STUN responses on flaky connections. */
+function waitForIceGatheringComplete(
+  pc: RTCPeerConnection,
+  timeoutMs = 5000,
+): Promise<void> {
   if (pc.iceGatheringState === "complete") return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
@@ -306,6 +512,6 @@ function waitForIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
       if (pc.iceGatheringState === "complete") done();
     };
     pc.addEventListener("icegatheringstatechange", check);
-    const timer = setTimeout(done, 3000);
+    const timer = setTimeout(done, timeoutMs);
   });
 }
