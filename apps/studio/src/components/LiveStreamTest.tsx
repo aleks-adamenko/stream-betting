@@ -207,18 +207,31 @@ export function LiveStreamTest({ title }: LiveStreamTestProps = {}) {
             so they never trap clicks. */}
 
         {/* Top-left header strip: LIVE pill + viewer count + title,
-            mirroring the real LiveStream page. */}
-        <div className="pointer-events-none absolute left-3 right-3 top-3 z-10 flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded-full bg-destructive px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-            Live
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
-            <Users className="h-3 w-3" />
-            <span className="tabular-nums">128</span>
-          </span>
-          <span className="hidden truncate text-xs font-medium text-white/80 sm:block">
-            {title?.trim() || "Your event title"}
+            mirroring the real LiveStream page. Two-row flex-column
+            layout: row 1 = Live + viewers + title, row 2 = the
+            betting countdown pill (mocked here at a static value
+            since the preview never actually goes live — same visual
+            as the BettingCountdown compact variant in packages/ui). */}
+        <div className="pointer-events-none absolute left-3 right-3 top-3 z-10 flex flex-col items-start gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-destructive px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+              Live
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur">
+              <Users className="h-3 w-3" />
+              <span className="tabular-nums">128</span>
+            </span>
+            <span className="hidden truncate text-xs font-medium text-white/80 sm:block">
+              {title?.trim() || "Your event title"}
+            </span>
+          </div>
+          {/* Static mock of BettingCountdown variant="compact" — same
+              shape + colors as the real chip on the LiveStream page,
+              so the creator can see exactly where it lands. */}
+          <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold tabular-nums text-white backdrop-blur">
+            <span className="opacity-80">Bets close</span>
+            <span className="font-extrabold">09:42</span>
           </span>
         </div>
 
