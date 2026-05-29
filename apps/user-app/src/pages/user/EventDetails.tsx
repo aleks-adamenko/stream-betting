@@ -7,7 +7,6 @@ import {
   Calendar,
   Users,
   Trophy,
-  Wallet,
   LogIn,
   BadgeCheck,
   X,
@@ -1121,34 +1120,32 @@ function BetPanel({ event }: { event: StreamEvent }) {
       )}
 
       <div className="mt-4 space-y-2">
-        <label className="text-xs font-medium text-muted-foreground" htmlFor="bet-stake">
+        <label className="text-xs font-medium text-muted-foreground">
           Stake
         </label>
-        <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-background px-3 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
-          <Wallet className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">$</span>
-          <input
-            id="bet-stake"
-            type="number"
-            min={MIN_BET_CENTS / 100}
-            max={MAX_BET_CENTS / 100}
-            step="0.01"
-            value={stake}
-            onChange={(e) => setStake(e.target.value)}
-            className="h-10 w-full border-0 bg-transparent text-sm font-semibold focus:outline-none"
-          />
-        </div>
-        <div className="flex gap-1">
-          {STAKE_CHIPS.map((amount) => (
-            <button
-              key={amount}
-              type="button"
-              onClick={() => setStake(String(amount))}
-              className="flex-1 rounded-md border border-border/40 bg-background/60 px-2 py-1 text-xs font-semibold text-foreground/80 transition-colors hover:border-primary/40 hover:bg-primary/[0.03]"
-            >
-              ${amount}
-            </button>
-          ))}
+        {/* Stake chips only — custom-amount input removed. With
+            MAX_BET=$10 the universe of useful values is tiny, so
+            three preset buttons cover everyone. Font weight + size
+            match the Place bet button below for visual parity. */}
+        <div className="grid grid-cols-3 gap-2">
+          {STAKE_CHIPS.map((amount) => {
+            const active = stakeNum === amount;
+            return (
+              <button
+                key={amount}
+                type="button"
+                onClick={() => setStake(String(amount))}
+                className={cn(
+                  "rounded-lg border px-3 py-2.5 text-base font-bold tabular-nums transition-all",
+                  active
+                    ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
+                    : "border-border/40 bg-background/60 text-foreground hover:border-primary/40 hover:bg-primary/[0.03]",
+                )}
+              >
+                ${amount}
+              </button>
+            );
+          })}
         </div>
       </div>
 
