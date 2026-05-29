@@ -262,7 +262,10 @@ export default function EventDetails() {
 
             <div
               className={cn(
-                "pointer-events-none absolute left-4 top-4 flex items-center gap-2 transition-opacity duration-200",
+                // Stacked vertically — Live on top, Viewers underneath —
+                // so the centered "Betting ends in" countdown overlay
+                // doesn't collide with the viewer pill on narrow widths.
+                "pointer-events-none absolute left-4 top-4 flex flex-col items-start gap-1.5 transition-opacity duration-200",
                 overlaysHidden && !isFullscreen && "opacity-0 lg:opacity-100",
               )}
             >
