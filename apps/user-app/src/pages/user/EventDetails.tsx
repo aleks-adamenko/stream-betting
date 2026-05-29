@@ -1462,6 +1462,7 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
   // window closes, so it's the right number to display here. Legacy
   // event_outcomes.odds is ignored.
   const { data: liveOddsData } = useLiveOdds(event.id);
+  const { data: progress } = useEventProgress(event.id);
   const liveOddsById = new Map(
     liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
   );
@@ -1474,6 +1475,12 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
   // the in-between states obvious.
   const isAwaitingResult = event.status === "pending_moderation";
   const isCancelled = event.status === "cancelled";
+  const hadBets = progress.totalPoolCents > 0;
+  // Map declared winning outcome ids → labels for the hero.
+  const winningIds = new Set(event.winningOutcomeIds ?? []);
+  const winningLabels = event.outcomes
+    .filter((o) => winningIds.has(o.id))
+    .map((o) => o.label);
   const headerLabel = isAwaitingResult
     ? "Awaiting result"
     : isCancelled
@@ -1512,45 +1519,80 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
             All bets were refunded.
           </p>
         </div>
-      ) : (
+      ) : !hadBets ? (
+        // Stream ended but nobody ever placed a bet. Showing a
+        // "Winner" line here would be misleading — there's no winner
+        // because there's nothing to win. Keep it short and neutral.
+        <div className="rounded-xl bg-muted/50 p-4 text-center">
+          <p className="font-heading text-sm font-semibold">Stream finished</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            No bets were placed on this event.
+          </p>
+        </div>
+      ) : winningLabels.length > 0 ? (
         <div className="rounded-xl bg-muted/50 p-4 text-center">
           <Trophy className="mx-auto mb-2 h-6 w-6 text-accent" />
-          <p className="font-heading text-base font-semibold">Winner: {event.outcomes[0].label}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Settled at {new Date(event.scheduledAt).toLocaleDateString()}
+          <p className="font-heading text-base font-semibold">
+            {winningLabels.length === 1
+              ? `Winner: ${winningLabels[0]}`
+              : `Winners: ${winningLabels.join(" · ")}`}
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {winningLabels.length > 1
+              ? "Dead heat — pool split across winning outcomes."
+              : "Pari-mutuel pool settled to winning outcome."}
+          </p>
+        </div>
+      ) : (
+        // Legacy `finished` events from before the pari-mutuel pipeline
+        // — no winning_outcome_ids stamped. Show a generic ended message.
+        <div className="rounded-xl bg-muted/50 p-4 text-center">
+          <p className="font-heading text-sm font-semibold">Stream finished</p>
         </div>
       )}
 
-      <div>
-        <h3 className="mb-2 font-heading text-sm font-semibold">Final odds</h3>
-        <ul className="space-y-2">
-          {event.outcomes.map((o, i) => {
-            const odds = liveOddsById.get(o.id) ?? null;
-            return (
-            <li
-              key={o.id}
-              className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-2"
-            >
-              <span className="flex items-center gap-2 text-sm">
-                {i === 0 && <Trophy className="h-3.5 w-3.5 text-accent" />}
-                {o.label}
-              </span>
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                  odds == null
-                    ? "bg-muted text-muted-foreground"
-                    : oddsPillClasses(odds, oddsMin, oddsMax),
-                )}
-              >
-                {odds == null ? "—" : `${odds.toFixed(2)}×`}
-              </span>
-            </li>
-            );
-          })}
-        </ul>
-      </div>
+      {/* Final odds only make sense when the pool actually had bets.
+          Otherwise we'd be showing "Open" or "—" on every row, which
+          is just noise on a stream that ended empty. */}
+      {hadBets && (
+        <div>
+          <h3 className="mb-2 font-heading text-sm font-semibold">Final odds</h3>
+          <ul className="space-y-2">
+            {event.outcomes.map((o) => {
+              const odds = liveOddsById.get(o.id) ?? null;
+              const isWinner = winningIds.has(o.id);
+              return (
+                <li
+                  key={o.id}
+                  className={cn(
+                    "flex items-center justify-between rounded-lg border px-3 py-2",
+                    isWinner
+                      ? "border-accent/40 bg-accent/[0.06]"
+                      : "border-border/40 bg-background/60",
+                  )}
+                >
+                  <span className="flex items-center gap-2 text-sm">
+                    {isWinner && (
+                      <Trophy className="h-3.5 w-3.5 text-accent" />
+                    )}
+                    {o.label}
+                  </span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                      odds == null
+                        ? "bg-muted text-muted-foreground"
+                        : oddsPillClasses(odds, oddsMin, oddsMax),
+                    )}
+                  >
+                    {odds == null ? "—" : `${odds.toFixed(2)}×`}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <Button asChild variant="secondary" size="lg" className="w-full">
         <Link to="/discover">Discover upcoming events</Link>

@@ -70,6 +70,10 @@ type EventRow = {
   video_url: string | null;
   archived_at: string | null;
   outcomes: Array<{ label: string }>;
+  // PostgREST aggregate — `bets:bets!bets_event_id_fkey(count)` returns
+  // [{ count: <int> }]. We use this to decide Delete vs Archive on
+  // terminal-state events. Drafts always get Delete regardless.
+  bets: Array<{ count: number }>;
 };
 
 type TabId = "all" | "live" | "finished" | "drafts" | "archived";
@@ -155,7 +159,8 @@ export default function EventList() {
           min_bet_cents, max_bet_cents,
           source_type, video_url,
           archived_at,
-          outcomes:event_outcomes!event_outcomes_event_id_fkey ( label )
+          outcomes:event_outcomes!event_outcomes_event_id_fkey ( label ),
+          bets:bets!bets_event_id_fkey ( count )
         `,
         )
         .eq("creator_id", creator!.id)
@@ -477,13 +482,31 @@ export default function EventList() {
             //     (a Cloudflare resource is provisioned).
             //   • Draft: edit + delete. Hard delete is safe — no
             //     bets, no ledger, no Cloudflare resource yet.
-            //   • finished / settled / pending_moderation / cancelled:
-            //     edit hidden; archive replaces delete so the ledger
-            //     audit trail stays intact.
+            //   • Terminal states (finished / cancelled) with zero
+            //     bets ever: hard delete is safe too — nothing in the
+            //     ledger to preserve. We surface a Delete icon so the
+            //     creator doesn't have to flip through an Archive tab
+            //     for events nobody touched.
+            //   • Terminal states with bets (settled, pending_moderation,
+            //     finished/cancelled w/ bets): archive only — ledger
+            //     audit trail must stay intact.
+            const betsCount = event.bets?.[0]?.count ?? 0;
+            const hasBets = betsCount > 0;
             const canEdit = isDraft || isScheduled;
-            const canDelete = isDraft;
             const isArchived = !!event.archived_at;
-            const canArchive = !isArchived && FINISHED_STATUSES.has(event.status);
+            // Delete: draft always; finished/cancelled only if zero bets.
+            // settled / pending_moderation never (always had bets to settle).
+            const canDelete =
+              !isArchived &&
+              (isDraft ||
+                ((event.status === "finished" || event.status === "cancelled") &&
+                  !hasBets));
+            // Archive: any non-archived terminal state with bets (or
+            // settled/pending_moderation which by definition had bets).
+            const canArchive =
+              !isArchived &&
+              FINISHED_STATUSES.has(event.status) &&
+              !canDelete;
             const canUnarchive = isArchived;
             // External user-app affordances — visible for everything
             // except drafts (drafts don't have a public /event/:id

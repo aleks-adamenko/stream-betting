@@ -50,6 +50,10 @@ export interface StreamEvent {
    *  timer is absolute (same value on every client). Null on events
    *  that haven't gone live yet. */
   bettingClosesAt?: string | null;
+  /** Outcome ids the streamer declared as winning. Set by
+   *  declare_winner; one for a clean win, many for dead heat. Null
+   *  until declared (live + pending_moderation pre-declare). */
+  winningOutcomeIds?: string[] | null;
   viewersCount: number;
   influencer: Influencer;
   outcomes: BetOutcome[];
