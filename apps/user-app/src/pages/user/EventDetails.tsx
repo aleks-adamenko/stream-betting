@@ -20,7 +20,7 @@ import {
   CloudflareStreamPlayer,
   isCloudflareStreamUrl,
 } from "@/components/stream/CloudflareStreamPlayer";
-import { RoundStatus } from "@/components/stream/RoundStatus";
+import { BettingCountdown } from "@liverush/ui";
 import {
   SocialVideoEmbed,
   resolveSocialEmbedUrl,
@@ -35,10 +35,25 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
 import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
 import { placeBet } from "@/services/betsService";
-import { betsKeys } from "@/hooks/useMyBets";
+import { betsKeys, useMyBets } from "@/hooks/useMyBets";
+import { useLiveOdds } from "@/hooks/useLiveOdds";
+import { useEventProgress, type EventProgress } from "@/hooks/useEventProgress";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { oddsPillClasses, oddsRange } from "@/lib/odds";
+import {
+  payoutPreview,
+  MAX_BET_CENTS,
+  MIN_BET_CENTS,
+} from "@liverush/lib";
+
+// Stake chips shown beneath the stake input. Capped to MAX_BET so a
+// viewer can't pick a chip that would fail the server-side validator.
+const STAKE_CHIPS = [1, 5, 10];
+
+// Statuses the bet form is allowed to be open in — every betting
+// gate elsewhere (RPC + Realtime status flips) hangs off this.
+const BETTING_OPEN_STATUSES = new Set(["live"]);
 import { useSeo } from "@/lib/useSeo";
 
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
@@ -231,6 +246,21 @@ export default function EventDetails() {
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20" />
             )}
 
+            {/* Betting countdown — absolute against server's
+                betting_closes_at so every viewer sees the same number.
+                Centered at the top of the video container, fades with
+                the rest of the overlays when the user hides them. */}
+            {isLive && event.bettingClosesAt && (
+              <div
+                className={cn(
+                  "pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 transition-opacity duration-200",
+                  overlaysHidden && !isFullscreen && "opacity-0 lg:opacity-100",
+                )}
+              >
+                <BettingCountdown closesAt={event.bettingClosesAt} variant="overlay" />
+              </div>
+            )}
+
             <div
               className={cn(
                 "pointer-events-none absolute left-4 top-4 flex items-center gap-2 transition-opacity duration-200",
@@ -306,15 +336,10 @@ export default function EventDetails() {
               round" event has no per-round timer, so we skip rendering
               the countdown bar entirely (matches the studio setting
               the creator chose). */}
-          {isLive &&
-            event.roundFormat === "time" &&
-            event.roundDurationSec &&
-            event.roundDurationSec > 0 && (
-              <RoundStatus
-                durationSec={event.roundDurationSec}
-                className="mx-auto w-full max-w-[420px]"
-              />
-            )}
+          {/* Legacy RoundStatus removed — the betting countdown
+              lives inside the video container now (top-center
+              overlay), driven by `event.bettingClosesAt` so every
+              viewer sees the same absolute timer. */}
 
           {/* Rules button — mobile only. Description used to share
               this row but has moved into the EventInfoBlock at the
@@ -531,16 +556,35 @@ function FullscreenBetOverlay({
   const [submitting, setSubmitting] = useState(false);
   const [dragY, setDragY] = useState(0);
 
+  // Live pari-mutuel odds — every bet on this event re-flows the
+  // pools, the realtime channel re-fetches, and the displayed odds
+  // shift instantly.
+  const { data: liveOddsData } = useLiveOdds(event.id);
+  const { data: progress } = useEventProgress(event.id);
+  const liveOddsById = new Map(
+    liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
+  );
+  // Strictly the pari-mutuel live odds. Two gates:
+  //   1. Per-spec 8.2: odds only exist once a pool exists.
+  //   2. Per-event readiness: we don't show odds until all three
+  //      settle guards (unique bettors, distinct outcomes, MIN_POOL)
+  //      pass — otherwise viewers see misleading numbers on events
+  //      that are guaranteed to refund.
+  const oddsFor = (outcome: BetOutcome) =>
+    progress.minimumsMet ? (liveOddsById.get(outcome.id) ?? null) : null;
+  // The fallback `1` here is for `oddsPillClasses` color math only —
+  // never rendered as a number in the UI.
+  const displayOddsList = event.outcomes.map((o) => oddsFor(o) ?? 1);
+
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
   const stakeNum = Math.max(0, Number(stake) || 0);
+  const selectedOdds = selected ? oddsFor(selected) : null;
   const potentialPayout = selected
-    ? (stakeNum * selected.odds).toFixed(2)
+    ? (payoutPreview(Math.round(stakeNum * 100), selectedOdds) / 100).toFixed(2)
     : "0.00";
   const stakeExceeds = !!user && stakeNum > balanceDollars;
   const canPlace = !!selected && stakeNum > 0 && !stakeExceeds && !submitting;
-  const { min: oddsMin, max: oddsMax } = oddsRange(
-    event.outcomes.map((o) => o.odds),
-  );
+  const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
 
   // Drag-down to close — listen at window level so iframe taps still work.
   // Below the 8px deadzone the finger movement is treated as a tap; beyond
@@ -661,6 +705,25 @@ function FullscreenBetOverlay({
         <X className="h-5 w-5" />
       </button>
 
+      {/* Readiness banner — sits just above the bottom controls when
+          the event hasn't cleared its settle minimums yet. Same data
+          as the side-panel readiness card, compressed to one line so
+          it doesn't crowd the fullscreen layout. */}
+      {user && !progress.minimumsMet && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-32 flex justify-center px-4 sm:bottom-36">
+          <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 text-[11px] font-medium text-white backdrop-blur">
+            <span className="text-white/70">Min for payout</span>
+            <span className="font-semibold">
+              {progress.uniqueBettors}/{progress.minUniqueBettors} bettors
+            </span>
+            <span className="text-white/40">·</span>
+            <span className="font-semibold">
+              {progress.outcomesWithBets}/{progress.minOutcomesWithBets} outcomes
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Bottom controls — only when authenticated. Anonymous users see a single
           centered Sign in to bet CTA so the video can be enjoyed unobstructed. */}
       {user ? (
@@ -671,6 +734,7 @@ function FullscreenBetOverlay({
               <div className="flex flex-col items-start gap-1.5">
                 {event.outcomes.map((o) => {
                   const active = selected?.id === o.id;
+                  const odds = oddsFor(o);
                   return (
                     <button
                       key={o.id}
@@ -689,17 +753,19 @@ function FullscreenBetOverlay({
                           "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
                           active
                             ? "bg-white text-primary"
-                            : oddsPillClasses(o.odds, oddsMin, oddsMax),
+                            : odds == null
+                              ? "bg-white/15 text-white/80"
+                              : oddsPillClasses(odds, oddsMin, oddsMax),
                         )}
                       >
-                        {o.odds.toFixed(2)}×
+                        {odds == null ? "Open" : `${odds.toFixed(2)}×`}
                       </span>
                     </button>
                   );
                 })}
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {[5, 10, 25, 50].map((amount) => {
+                {STAKE_CHIPS.map((amount) => {
                   const active = stakeNum === amount;
                   return (
                     <button
@@ -725,7 +791,12 @@ function FullscreenBetOverlay({
                   Potential payout
                 </p>
                 <p className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white drop-shadow">
-                  ${potentialPayout}
+                  {progress.minimumsMet ? `$${potentialPayout}` : "—"}
+                </p>
+                <p className="mt-0.5 text-[9px] leading-tight text-white/60">
+                  {progress.minimumsMet
+                    ? "Indicative — final at settlement"
+                    : "Shown after minimums clear"}
                 </p>
               </div>
               <Button
@@ -853,12 +924,48 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  // Live pari-mutuel odds — each bet tick re-runs compute_live_odds via
+  // a Realtime subscription on event_outcomes.
+  const { data: liveOddsData } = useLiveOdds(event.id);
+  const { data: progress } = useEventProgress(event.id);
+  const liveOddsById = new Map(
+    liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
+  );
+  // Gate odds on settlement readiness — see FullscreenBetOverlay above
+  // for the rationale.
+  const oddsFor = (outcome: BetOutcome) =>
+    progress.minimumsMet ? (liveOddsById.get(outcome.id) ?? null) : null;
+  const displayOddsList = event.outcomes.map((o) => oddsFor(o) ?? 1);
+
+  // One bet per (user, event). If the viewer has already placed a bet
+  // on this event, show their position instead of the form.
+  const { data: myBets } = useMyBets();
+  const existingBet = myBets?.find(
+    (b) =>
+      b.event_id === event.id &&
+      (b.status === "open" ||
+        b.status === "placed" ||
+        b.status === "won_pending_payout" ||
+        b.status === "won"),
+  );
+
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
   const stakeNum = Math.max(0, Number(stake) || 0);
-  const potentialPayout = selected ? (stakeNum * selected.odds).toFixed(2) : "0.00";
+  const selectedOdds = selected ? oddsFor(selected) : null;
+  const potentialPayout = selected
+    ? (payoutPreview(Math.round(stakeNum * 100), selectedOdds) / 100).toFixed(2)
+    : "0.00";
   const stakeExceedsBalance = !!user && stakeNum > balanceDollars;
-  const canPlace = !!selected && stakeNum > 0 && (!user || !stakeExceedsBalance) && !submitting;
-  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
+  const stakeOverMax = stakeNum > MAX_BET_CENTS / 100;
+  const stakeUnderMin = stakeNum > 0 && stakeNum < MIN_BET_CENTS / 100;
+  const canPlace =
+    !!selected &&
+    stakeNum > 0 &&
+    !stakeOverMax &&
+    !stakeUnderMin &&
+    (!user || !stakeExceedsBalance) &&
+    !submitting;
+  const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
 
   async function handlePlaceBet() {
     if (!user) {
@@ -881,6 +988,68 @@ function BetPanel({ event }: { event: StreamEvent }) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Already bet → swap the form for a position summary. One bet per
+  // event is enforced by the server too (place_bet rejects with
+  // `already_bet` if a non-refunded/non-lost bet exists).
+  if (existingBet) {
+    const outcomeLabel =
+      event.outcomes.find((o) => o.id === existingBet.outcome_id)?.label ??
+      "—";
+    const placementOdds = Number(
+      existingBet.odds_snapshot ?? existingBet.odds_decimal ?? 0,
+    );
+    return (
+      <section className="card-elevated overflow-hidden">
+        <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
+          <div className="flex items-center gap-2">
+            <Trophy className="h-5 w-5 fill-[#FED448] text-[#FED448]" />
+            <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
+              Your bet
+            </h2>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
+            Placed
+          </span>
+        </div>
+        <div className="space-y-3 p-5 sm:p-6">
+          <div className="rounded-xl border border-border/40 bg-background/50 p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Outcome
+            </p>
+            <p className="mt-1 font-heading text-base font-semibold">
+              {outcomeLabel}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-muted/50 p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Stake
+              </p>
+              <p className="mt-1 font-heading text-lg font-bold tabular-nums">
+                ${(existingBet.amount_cents / 100).toFixed(2)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-muted/50 p-3">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Odds at placement
+              </p>
+              <p className="mt-1 font-heading text-lg font-bold tabular-nums">
+                {placementOdds > 0 ? `${placementOdds.toFixed(2)}×` : "—"}
+              </p>
+            </div>
+          </div>
+          <p className="text-center text-[11px] text-muted-foreground">
+            One bet per event. Live odds keep moving — final payout is set
+            at settlement.
+          </p>
+          <Button asChild variant="secondary" size="lg" className="w-full">
+            <Link to="/my-bets">View in My Bets</Link>
+          </Button>
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -915,6 +1084,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
       <ul className="space-y-2">
         {event.outcomes.map((o) => {
           const active = selected?.id === o.id;
+          const odds = oddsFor(o);
           return (
             <li key={o.id}>
               <button
@@ -933,16 +1103,22 @@ function BetPanel({ event }: { event: StreamEvent }) {
                     "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
                     active
                       ? "bg-primary text-primary-foreground"
-                      : oddsPillClasses(o.odds, oddsMin, oddsMax),
+                      : odds == null
+                        ? "bg-muted text-muted-foreground"
+                        : oddsPillClasses(odds, oddsMin, oddsMax),
                   )}
                 >
-                  {o.odds.toFixed(2)}×
+                  {odds == null ? "Open" : `${odds.toFixed(2)}×`}
                 </span>
               </button>
             </li>
           );
         })}
       </ul>
+
+      {!progress.minimumsMet && (
+        <ReadinessCard progress={progress} className="mt-3" />
+      )}
 
       <div className="mt-4 space-y-2">
         <label className="text-xs font-medium text-muted-foreground" htmlFor="bet-stake">
@@ -954,14 +1130,16 @@ function BetPanel({ event }: { event: StreamEvent }) {
           <input
             id="bet-stake"
             type="number"
-            min={1}
+            min={MIN_BET_CENTS / 100}
+            max={MAX_BET_CENTS / 100}
+            step="0.01"
             value={stake}
             onChange={(e) => setStake(e.target.value)}
             className="h-10 w-full border-0 bg-transparent text-sm font-semibold focus:outline-none"
           />
         </div>
         <div className="flex gap-1">
-          {[5, 10, 25, 50].map((amount) => (
+          {STAKE_CHIPS.map((amount) => (
             <button
               key={amount}
               type="button"
@@ -976,8 +1154,15 @@ function BetPanel({ event }: { event: StreamEvent }) {
 
       <div className="mt-4 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
         <span className="text-muted-foreground">Potential payout</span>
-        <span className="font-heading text-base font-bold text-foreground">${potentialPayout}</span>
+        <span className="font-heading text-base font-bold text-foreground">
+          {progress.minimumsMet ? `$${potentialPayout}` : "—"}
+        </span>
       </div>
+      <p className="mt-1 text-center text-[11px] text-muted-foreground">
+        {progress.minimumsMet
+          ? "Indicative — final calculated at settlement."
+          : "Payout shown once the event clears the minimums above."}
+      </p>
 
       {stakeExceedsBalance && (
         <p className="mt-2 text-center text-xs font-medium text-destructive">
@@ -1016,6 +1201,80 @@ function BetPanel({ event }: { event: StreamEvent }) {
       </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Inline card surfaced by BetPanel while the event hasn't yet cleared
+ * the three settle guards (unique bettors, distinct outcomes with
+ * bets, MIN_POOL). Mirrors the server-side checks in `settle_event`
+ * so viewers never see misleading "Open" odds without knowing the
+ * event might refund.
+ */
+function ReadinessCard({
+  progress,
+  className,
+}: {
+  progress: EventProgress;
+  className?: string;
+}) {
+  const items = [
+    {
+      label: `Min ${progress.minUniqueBettors} participants`,
+      have: progress.uniqueBettors,
+      need: progress.minUniqueBettors,
+    },
+    {
+      label: `Min ${progress.minOutcomesWithBets} different outcomes`,
+      have: progress.outcomesWithBets,
+      need: progress.minOutcomesWithBets,
+    },
+  ];
+  return (
+    <div
+      className={cn(
+        "rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-3",
+        className,
+      )}
+    >
+      <p className="font-heading text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+        Event needs minimum bets to start
+      </p>
+      <ul className="mt-2 space-y-1 text-xs">
+        {items.map((item) => {
+          const cleared = item.have >= item.need;
+          return (
+            <li
+              key={item.label}
+              className="flex items-center justify-between gap-2"
+            >
+              <span
+                className={cn(
+                  cleared
+                    ? "text-foreground/80 line-through decoration-success/60"
+                    : "text-foreground",
+                )}
+              >
+                {item.label}
+              </span>
+              <span
+                className={cn(
+                  "font-semibold tabular-nums",
+                  cleared
+                    ? "text-success"
+                    : "text-amber-700 dark:text-amber-300",
+                )}
+              >
+                {item.have}/{item.need}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-2 text-[10px] leading-tight text-muted-foreground">
+        If the event doesn't reach these minimums, all bets refund in full.
+      </p>
+    </div>
   );
 }
 
@@ -1173,29 +1432,58 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
 
 function FinishedPanel({ event }: { event: StreamEvent }) {
   const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
+  // `pending_moderation` and `settled` ride the same "Ended" panel as
+  // `finished`, but the header chip and the hero block change to make
+  // the in-between states obvious.
+  const isAwaitingResult = event.status === "pending_moderation";
+  const isCancelled = event.status === "cancelled";
+  const headerLabel = isAwaitingResult
+    ? "Awaiting result"
+    : isCancelled
+      ? "Cancelled"
+      : "Ended";
   return (
     <section className="card-elevated overflow-hidden">
       <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
         <div className="flex items-center gap-2">
           <Trophy className="h-5 w-5 text-[#FED448]" />
           <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
-            Final result
+            {isAwaitingResult ? "Betting closed" : "Final result"}
           </h2>
         </div>
         <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
-          Ended
+          {headerLabel}
         </span>
       </div>
 
       <div className="space-y-4 p-5 sm:p-6">
 
-      <div className="rounded-xl bg-muted/50 p-4 text-center">
-        <Trophy className="mx-auto mb-2 h-6 w-6 text-accent" />
-        <p className="font-heading text-base font-semibold">Winner: {event.outcomes[0].label}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Settled at {new Date(event.scheduledAt).toLocaleDateString()}
-        </p>
-      </div>
+      {isAwaitingResult ? (
+        <div className="rounded-xl bg-amber-500/10 p-4 text-center">
+          <p className="font-heading text-sm font-semibold text-amber-700 dark:text-amber-300">
+            Awaiting result
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Betting is closed. Settlement happens once the streamer's call
+            is reviewed.
+          </p>
+        </div>
+      ) : isCancelled ? (
+        <div className="rounded-xl bg-muted/50 p-4 text-center">
+          <p className="font-heading text-sm font-semibold">Event cancelled</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            All bets were refunded.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl bg-muted/50 p-4 text-center">
+          <Trophy className="mx-auto mb-2 h-6 w-6 text-accent" />
+          <p className="font-heading text-base font-semibold">Winner: {event.outcomes[0].label}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Settled at {new Date(event.scheduledAt).toLocaleDateString()}
+          </p>
+        </div>
+      )}
 
       <div>
         <h3 className="mb-2 font-heading text-sm font-semibold">Final odds</h3>

@@ -1,7 +1,10 @@
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  Archive,
+  ArchiveRestore,
   Bell,
   CalendarClock,
   CheckCircle2,
@@ -20,12 +23,17 @@ import { Button } from "@liverush/ui";
 import { cn } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { dollars, mockEventCommission } from "@/lib/balance";
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
   scheduled: "Scheduled",
   live: "Live",
+  // After declare_winner, before moderator approval.
+  pending_moderation: "Pending settlement",
+  // After moderator approves payouts. We show "Finished" everywhere
+  // the viewer/creator sees it — the schema name `settled` stays in
+  // the DB but never reaches the UI.
+  settled: "Finished",
   finished: "Finished",
   cancelled: "Cancelled",
 };
@@ -34,6 +42,8 @@ const STATUS_CLASS: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
   scheduled: "bg-primary/10 text-primary",
   live: "bg-destructive/15 text-destructive",
+  pending_moderation: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  settled: "bg-success/15 text-success",
   finished: "bg-success/15 text-success",
   cancelled: "bg-muted text-muted-foreground",
 };
@@ -58,8 +68,26 @@ type EventRow = {
   max_bet_cents: number | null;
   source_type: string | null;
   video_url: string | null;
+  archived_at: string | null;
   outcomes: Array<{ label: string }>;
 };
+
+type TabId = "all" | "live" | "finished" | "drafts" | "archived";
+
+const FINISHED_STATUSES = new Set([
+  "finished",
+  "settled",
+  "pending_moderation",
+  "cancelled",
+]);
+
+const TABS: Array<{ id: TabId; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "live", label: "Live" },
+  { id: "finished", label: "Finished" },
+  { id: "drafts", label: "Drafts" },
+  { id: "archived", label: "Archived" },
+];
 
 /**
  * Mirror of the per-step completion predicates inside EventEditor — kept
@@ -126,6 +154,7 @@ export default function EventList() {
           rules, round_format, round_duration_sec,
           min_bet_cents, max_bet_cents,
           source_type, video_url,
+          archived_at,
           outcomes:event_outcomes!event_outcomes_event_id_fkey ( label )
         `,
         )
@@ -169,6 +198,10 @@ export default function EventList() {
   // as a toast). Confirmation is a plain `confirm()` because the
   // affordance is destructive but rare enough that bringing in a modal
   // component would be overkill.
+  // Tab state — drives the filter applied to the events list below.
+  // Default to "All" so the creator sees their whole catalogue.
+  const [activeTab, setActiveTab] = useState<TabId>("all");
+
   const deleteMutation = useMutation({
     mutationFn: async (eventId: string) => {
       const { error } = await supabase.rpc("delete_event", {
@@ -191,6 +224,87 @@ export default function EventList() {
       toast.error(message);
     },
   });
+
+  // Archive = soft-delete for events that have / could have financial
+  // history (anything past the live broadcast). Hides from the list
+  // and the user-app feed; ledger / payouts / bets stay intact.
+  const archiveMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      const { error } = await supabase.rpc("archive_event", {
+        p_event_id: eventId,
+      });
+      if (error) throw error;
+      return eventId;
+    },
+    onSuccess: () => {
+      toast.success("Event archived");
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
+    },
+    onError: (err) => {
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Archive failed";
+      toast.error(message);
+    },
+  });
+
+  const unarchiveMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      const { error } = await supabase.rpc("unarchive_event", {
+        p_event_id: eventId,
+      });
+      if (error) throw error;
+      return eventId;
+    },
+    onSuccess: () => {
+      toast.success("Event restored");
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
+    },
+    onError: (err) => {
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Restore failed";
+      toast.error(message);
+    },
+  });
+
+  // Per-tab event counts for the tab bar pills. Computed off the
+  // unfiltered list so counts are stable across tab switches.
+  const tabCounts = useMemo(() => {
+    const counts: Record<TabId, number> = {
+      all: 0, live: 0, finished: 0, drafts: 0, archived: 0,
+    };
+    for (const e of events ?? []) {
+      if (e.archived_at) {
+        counts.archived += 1;
+        continue; // archived rows don't appear in any non-archived tab
+      }
+      counts.all += 1;
+      if (e.status === "live") counts.live += 1;
+      else if (e.status === "draft") counts.drafts += 1;
+      else if (FINISHED_STATUSES.has(e.status)) counts.finished += 1;
+    }
+    return counts;
+  }, [events]);
+
+  const filteredEvents = useMemo(() => {
+    if (!events) return [];
+    return events.filter((e) => {
+      if (activeTab === "archived") return !!e.archived_at;
+      if (e.archived_at) return false; // hide archived from all other tabs
+      if (activeTab === "all") return true;
+      if (activeTab === "live") return e.status === "live";
+      if (activeTab === "drafts") return e.status === "draft";
+      if (activeTab === "finished") return FINISHED_STATUSES.has(e.status);
+      return true;
+    });
+  }, [events, activeTab]);
 
   const publishMutation = useMutation({
     mutationFn: async (eventId: string) => {
@@ -268,13 +382,61 @@ export default function EventList() {
         </div>
       )}
 
+      {/* Tab bar — same visual language as the user-app filter chips
+          and the Balance page filter pills. */}
       {!isLoading && events && events.length > 0 && (
+        <nav className="flex gap-1 overflow-x-auto rounded-2xl border border-border/40 bg-card p-1 shadow-sm">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition-colors sm:text-sm",
+                activeTab === tab.id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-secondary/40",
+              )}
+            >
+              {tab.label}
+              <span
+                className={cn(
+                  "rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                  activeTab === tab.id
+                    ? "bg-primary/20 text-primary"
+                    : "bg-muted text-muted-foreground/80",
+                )}
+              >
+                {tabCounts[tab.id]}
+              </span>
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {!isLoading && events && events.length > 0 && filteredEvents.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-border/60 p-10 text-center">
+          <p className="text-sm text-muted-foreground">
+            {activeTab === "archived"
+              ? "No archived events. Archive a finished event from the All / Finished tab to keep your list clean."
+              : "Nothing in this tab yet."}
+          </p>
+        </div>
+      )}
+
+      {!isLoading && filteredEvents.length > 0 && (
         <ul className="space-y-3">
-          {events.map((event) => {
+          {filteredEvents.map((event) => {
             const isDraft = event.status === "draft";
             const isScheduled = event.status === "scheduled";
             const isLive = event.status === "live";
-            const isFinished = event.status === "finished";
+            // After Phase 1 the natural "ended" cluster spans the three
+            // terminal statuses. Used for the "hide scheduled_at /
+            // hide delete" UX so the row reads cleanly post-end.
+            const isFinished =
+              event.status === "finished" ||
+              event.status === "settled" ||
+              event.status === "pending_moderation";
             const stepsDone = isDraft
               ? completedStepsCount(event)
               : TOTAL_STEPS;
@@ -302,17 +464,27 @@ export default function EventList() {
             const deleting =
               deleteMutation.isPending &&
               deleteMutation.variables === event.id;
-            // Edit + Delete affordances are status-aware:
+            const archiving =
+              archiveMutation.isPending &&
+              archiveMutation.variables === event.id;
+            const unarchiving =
+              unarchiveMutation.isPending &&
+              unarchiveMutation.variables === event.id;
+            // Edit + destructive affordances are status-aware:
             //   • Live: no edit (the event is broadcasting) and no
-            //     delete (destructive while bytes are flying around).
-            //   • Scheduled: edit is allowed, but delete is hidden
-            //     because the SQL side rejects it — a scheduled event
-            //     owns a Cloudflare live input we'd leak. (We could
-            //     wire an "unpublish via end-stream" path later.)
-            //   • Draft / finished / cancelled: both visible. SQL
-            //     gets the final word; errors surface as a toast.
-            const canEdit = !isLive;
-            const canDelete = isDraft || isFinished;
+            //     destructive action (mid-stream).
+            //   • Scheduled: edit allowed, no destructive action
+            //     (a Cloudflare resource is provisioned).
+            //   • Draft: edit + delete. Hard delete is safe — no
+            //     bets, no ledger, no Cloudflare resource yet.
+            //   • finished / settled / pending_moderation / cancelled:
+            //     edit hidden; archive replaces delete so the ledger
+            //     audit trail stays intact.
+            const canEdit = isDraft || isScheduled;
+            const canDelete = isDraft;
+            const isArchived = !!event.archived_at;
+            const canArchive = !isArchived && FINISHED_STATUSES.has(event.status);
+            const canUnarchive = isArchived;
             // External user-app affordances — visible for everything
             // except drafts (drafts don't have a public /event/:id
             // page yet, so the link would 404 / redirect home).
@@ -390,39 +562,11 @@ export default function EventList() {
                             {new Date(event.scheduled_at).toLocaleString()}
                           </span>
                         )}
-                        {/* Commission pill on finished rows so the
-                            creator can see what they earned and
-                            whether it's already cleared without
-                            opening the Balance page. Same color
-                            language as the Balance ledger: amber for
-                            pending, green for approved. Deterministic
-                            per event id (see mockEventCommission) so
-                            the pill stays stable across refreshes. */}
-                        {isFinished &&
-                          (() => {
-                            const c = mockEventCommission(event.id);
-                            const isPending = c.status === "pending_approval";
-                            return (
-                              <span
-                                className={cn(
-                                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
-                                  isPending
-                                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                                    : "bg-success/15 text-success",
-                                )}
-                                title={
-                                  isPending
-                                    ? "Commission is awaiting platform approval"
-                                    : "Commission approved — available in your balance"
-                                }
-                              >
-                                {isPending ? "Pending approval" : "Approved"}
-                                <span className="font-bold">
-                                  · {dollars(c.amount_cents)}
-                                </span>
-                              </span>
-                            );
-                          })()}
+                        {/* Real commission data lives in the
+                            payouts table now — surfaced on the
+                            Balance page. We could join it here too,
+                            but the per-row pill added noise once the
+                            status badge already conveyed the state. */}
                       </div>
 
                       {/* Draft completion bar — only shown for drafts. */}
@@ -530,6 +674,49 @@ export default function EventList() {
                           <Loader2 className="h-5 w-5 animate-spin" />
                         ) : (
                           <Trash2 className="h-5 w-5" />
+                        )}
+                      </button>
+                    )}
+
+                    {canArchive && (
+                      <button
+                        type="button"
+                        disabled={archiving}
+                        title="Archive event (keeps payouts + history intact)"
+                        aria-label="Archive event"
+                        onClick={() => {
+                          if (
+                            !confirm(
+                              `Archive "${event.title}"? It disappears from your list and the public feed. Bets, payouts and ledger history stay intact and viewers can still open it from their My Bets.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          archiveMutation.mutate(event.id);
+                        }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {archiving ? (
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                        ) : (
+                          <Archive className="h-5 w-5" />
+                        )}
+                      </button>
+                    )}
+
+                    {canUnarchive && (
+                      <button
+                        type="button"
+                        disabled={unarchiving}
+                        title="Restore event to the active list"
+                        aria-label="Unarchive event"
+                        onClick={() => unarchiveMutation.mutate(event.id)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md text-primary transition-opacity hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {unarchiving ? (
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                        ) : (
+                          <ArchiveRestore className="h-5 w-5" />
                         )}
                       </button>
                     )}

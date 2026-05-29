@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 import { Button, Input } from "@liverush/ui";
-import { cn } from "@liverush/lib";
+import { cn, MIN_BET_CENTS, MAX_BET_CENTS } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { LiveStreamTest } from "@/components/LiveStreamTest";
@@ -103,8 +103,11 @@ const SOURCE_TYPES: Array<{
 ];
 
 const DEFAULT_ODDS = "2.00";
-const DEFAULT_MIN_BET_CENTS = 100; // $1.00 in v0's virtual currency
-const DEFAULT_MAX_BET_CENTS = 10_000; // $100.00
+// Stake caps are platform-enforced now — single source of truth lives
+// in @liverush/lib (mirrored in the SQL get_betting_constants()
+// function). The editor just clamps user input to the same bounds.
+const DEFAULT_MIN_BET_CENTS = MIN_BET_CENTS; // $1.00 platform floor
+const DEFAULT_MAX_BET_CENTS = MAX_BET_CENTS; // $10.00 platform ceiling
 
 // =========================================================================
 // Helpers
@@ -229,6 +232,11 @@ export default function EventEditor() {
     useState<BetWindowOpens>("on_live");
   const [betWindowLocks, setBetWindowLocks] =
     useState<BetWindowLocks>("manual");
+  // Phase 1 betting MVP: pari-mutuel hard betting window in minutes
+  // (5-30). Replaces the legacy bet_window_locks dropdown for new
+  // events. The legacy column is still saved for back-compat reads,
+  // but the runtime uses betting_window_minutes via start_event.
+  const [bettingWindowMinutes, setBettingWindowMinutes] = useState<number>(10);
   // New events start with a sensible future scheduled time so Save
   // can unlock with only a typed title (the DB requires scheduled_at).
   // Existing events overwrite this in the load effect below.
@@ -277,6 +285,7 @@ export default function EventEditor() {
           void_conditions,
           min_bet_cents, max_bet_cents,
           bet_window_opens, bet_window_locks,
+          betting_window_minutes,
           source_type, broadcast_delay_sec,
           outcomes:event_outcomes!event_outcomes_event_id_fkey (
             id, label, odds, sort_order
@@ -310,6 +319,13 @@ export default function EventEditor() {
     );
     setBetWindowOpens(loaded.bet_window_opens ?? "on_live");
     setBetWindowLocks(loaded.bet_window_locks ?? "manual");
+    setBettingWindowMinutes(
+      typeof loaded.betting_window_minutes === "number" &&
+        loaded.betting_window_minutes >= 5 &&
+        loaded.betting_window_minutes <= 30
+        ? loaded.betting_window_minutes
+        : 10,
+    );
     setScheduledAt(toLocalDateTimeInput(loaded.scheduled_at));
     // If the saved scheduled_at is meaningfully in the future, the
     // creator had previously asked us to schedule — keep the checkbox
@@ -384,9 +400,9 @@ export default function EventEditor() {
   const betLimitsValid =
     minCents !== null &&
     maxCents !== null &&
-    minCents >= 100 &&
+    minCents >= MIN_BET_CENTS &&
     maxCents >= minCents &&
-    maxCents <= 1_000_000;
+    maxCents <= MAX_BET_CENTS;
 
   // Minimums needed to call create_event / update_event without the
   // DB rejecting the row. Save activates as soon as the creator has
@@ -526,6 +542,8 @@ export default function EventEditor() {
     if (betWindowOpens !== (loaded.bet_window_opens ?? "on_live"))
       return true;
     if (betWindowLocks !== (loaded.bet_window_locks ?? "manual"))
+      return true;
+    if (bettingWindowMinutes !== (loaded.betting_window_minutes ?? 10))
       return true;
     if (scheduledAt !== toLocalDateTimeInput(loaded.scheduled_at))
       return true;
@@ -700,6 +718,20 @@ export default function EventEditor() {
         ...rpcArgs,
       });
       if (error) throw error;
+    }
+
+    // Persist the new pari-mutuel betting window minutes via the
+    // dedicated set_event_betting_window RPC. (Kept separate from
+    // update_event so we don't bloat its already-wide signature.)
+    if (savedId) {
+      const { error: windowErr } = await supabase.rpc(
+        "set_event_betting_window",
+        {
+          p_event_id: savedId,
+          p_minutes: bettingWindowMinutes,
+        },
+      );
+      if (windowErr) throw windowErr;
     }
 
     // Reconcile outcomes: add new, update changed, delete removed.
@@ -1365,7 +1397,7 @@ export default function EventEditor() {
 
         <FieldRow
           label="Bet amount limits"
-          helper="Per-user, per-outcome. Values in platform currency units."
+          helper={`Per-user, per-event stake range. Platform caps: $${(MIN_BET_CENTS / 100).toFixed(2)}–$${(MAX_BET_CENTS / 100).toFixed(2)}.`}
         >
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -1378,7 +1410,8 @@ export default function EventEditor() {
               <Input
                 id="min-bet"
                 type="number"
-                min={1}
+                min={MIN_BET_CENTS / 100}
+                max={MAX_BET_CENTS / 100}
                 step="0.01"
                 value={minBetDollars}
                 onChange={(e) => setMinBetDollars(e.target.value)}
@@ -1395,7 +1428,8 @@ export default function EventEditor() {
               <Input
                 id="max-bet"
                 type="number"
-                min={1}
+                min={MIN_BET_CENTS / 100}
+                max={MAX_BET_CENTS / 100}
                 step="0.01"
                 value={maxBetDollars}
                 onChange={(e) => setMaxBetDollars(e.target.value)}
@@ -1405,14 +1439,15 @@ export default function EventEditor() {
           </div>
           {!betLimitsValid && (minBetDollars || maxBetDollars) && (
             <p className="text-xs text-destructive">
-              Min must be ≥ 1, max must be ≥ min and ≤ 10,000.
+              Min must be ≥ ${(MIN_BET_CENTS / 100).toFixed(2)}, max must be ≥
+              min and ≤ ${(MAX_BET_CENTS / 100).toFixed(2)}.
             </p>
           )}
         </FieldRow>
 
         <FieldRow
           label="When can viewers bet?"
-          helper="Locking bets manually is recommended for skill challenges — it gives you control over when betting closes based on what's happening on stream."
+          helper="Betting opens when the stream goes live and closes after the window below — a hard cutoff. The cutoff matches the pari-mutuel rules: once it passes, no new bets, and the streamer can declare a winner."
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
@@ -1440,27 +1475,32 @@ export default function EventEditor() {
             </div>
             <div className="space-y-1">
               <label
-                htmlFor="window-locks"
+                htmlFor="window-minutes"
                 className="text-xs font-medium text-muted-foreground"
               >
-                Locks
+                Window (minutes after live)
               </label>
-              <select
-                id="window-locks"
-                value={betWindowLocks}
-                onChange={(e) =>
-                  setBetWindowLocks(e.target.value as BetWindowLocks)
-                }
+              <Input
+                id="window-minutes"
+                type="number"
+                min={5}
+                max={30}
+                step={1}
+                value={String(bettingWindowMinutes)}
+                onChange={(e) => {
+                  const next = parseInt(e.target.value, 10);
+                  if (Number.isFinite(next)) {
+                    setBettingWindowMinutes(
+                      Math.min(30, Math.max(5, next)),
+                    );
+                  }
+                }}
                 disabled={!editable}
-                className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-base disabled:opacity-60 sm:text-sm"
-              >
-                {BET_WINDOW_LOCKS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                    {o.recommended ? " — recommended" : ""}
-                  </option>
-                ))}
-              </select>
+                className="h-10"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                5–30 minutes. Default 10.
+              </p>
             </div>
           </div>
         </FieldRow>

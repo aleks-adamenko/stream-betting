@@ -1,4 +1,10 @@
-export type EventStatus = "scheduled" | "live" | "finished";
+export type EventStatus =
+  | "scheduled"
+  | "live"
+  | "pending_moderation"
+  | "settled"
+  | "finished"
+  | "cancelled";
 export type RoundFormat = "time" | "event";
 
 export interface Influencer {
@@ -39,6 +45,11 @@ export interface StreamEvent {
   roundDurationSec?: number;
   scheduledAt: string;
   startedAt?: string;
+  /** Hard betting cutoff stamped server-side by `start_event` when
+   *  the event flips to `live`. Used by the countdown overlay so the
+   *  timer is absolute (same value on every client). Null on events
+   *  that haven't gone live yet. */
+  bettingClosesAt?: string | null;
   viewersCount: number;
   influencer: Influencer;
   outcomes: BetOutcome[];

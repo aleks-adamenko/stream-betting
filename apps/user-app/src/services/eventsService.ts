@@ -3,8 +3,17 @@ import type { Database } from "@/integrations/supabase/types";
 import type { EventStatus, Influencer, StreamEvent } from "@/domain/types";
 
 // Statuses user-app surfaces. `draft` is creator-only (hidden by RLS too)
-// and `cancelled` is filtered out client-side as well for defense in depth.
-const PUBLIC_STATUSES = ["scheduled", "live", "finished"] as const;
+// and `cancelled` is filtered out client-side too. `pending_moderation`
+// and `settled` both surface as "Finished" cards in the feed — the UX
+// difference (winner declared vs. payouts released) lives in the bet
+// panel on the detail page, not the listing.
+const PUBLIC_STATUSES = [
+  "scheduled",
+  "live",
+  "pending_moderation",
+  "settled",
+  "finished",
+] as const;
 
 type EventRow = Database["public"]["Tables"]["events"]["Row"] & {
   influencer: Database["public"]["Tables"]["influencers"]["Row"] | null;
@@ -28,6 +37,7 @@ const EVENT_SELECT = `
   status,
   scheduled_at,
   started_at,
+  betting_closes_at,
   viewers_count,
   total_pool,
   playback_url,
@@ -115,6 +125,7 @@ function mapEvent(row: EventRow): StreamEvent {
     status: row.status as EventStatus,
     scheduledAt: row.scheduled_at,
     startedAt: row.started_at ?? undefined,
+    bettingClosesAt: row.betting_closes_at ?? null,
     viewersCount: row.viewers_count,
     totalPool: Number(row.total_pool),
     influencer,
@@ -140,6 +151,10 @@ export async function listEvents(): Promise<StreamEvent[]> {
     .from("events")
     .select(EVENT_SELECT)
     .in("status", PUBLIC_STATUSES as unknown as string[])
+    // Archived events disappear from the public feed but stay
+    // reachable by id (see getEvent below) so viewers can still open
+    // their settled bets from My Bets.
+    .is("archived_at", null)
     .order("created_at", { ascending: false })
     .order("scheduled_at", { ascending: true });
 
@@ -148,6 +163,11 @@ export async function listEvents(): Promise<StreamEvent[]> {
 }
 
 export async function getEvent(id: string): Promise<StreamEvent | null> {
+  // No archived filter here on purpose: a viewer with a payout on a
+  // newly-archived event must still be able to open /event/:id from
+  // My Bets and see the post-settlement detail page (winner, payout
+  // amount, rules). Archive is a creator-side visibility flag, not a
+  // historical wipe.
   const { data, error } = await supabase
     .from("events")
     .select(EVENT_SELECT)

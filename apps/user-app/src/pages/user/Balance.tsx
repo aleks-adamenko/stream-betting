@@ -1,5 +1,6 @@
 import { useState, type ComponentType } from "react";
-import { Banknote, Bitcoin, Wallet } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Banknote, Bitcoin, CheckCircle2, Clock, Trophy, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { TopUpModal } from "@/components/balance/TopUpModal";
 import { WithdrawModal } from "@/components/balance/WithdrawModal";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePayouts } from "@/hooks/usePayouts";
 import { MOCK_USDT_CENTS } from "@/lib/balance";
 import { cn } from "@/lib/utils";
 
@@ -137,6 +139,16 @@ export default function Balance() {
   const [txFilter, setTxFilter] = useState<TxFilter>("all");
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const { data: payouts } = usePayouts();
+
+  // Pending payouts feed the "In review" section above the
+  // transaction history. Once approved (status='completed') they
+  // disappear from the in-review list — the credit has already
+  // landed on `profile.balance_cents` so the user can see it in the
+  // header card.
+  const inReviewPayouts = (payouts ?? []).filter(
+    (p) => p.status === "pending" || p.status === "approved",
+  );
 
   const filteredTx = MOCK_TRANSACTIONS.filter((tx) => {
     if (txFilter === "all") return true;
@@ -192,6 +204,71 @@ export default function Balance() {
             Transfer
           </Button>
         </div>
+
+        {/* Payouts in review — winners + refunds waiting for moderator
+            approval. The list disappears when nothing is pending. */}
+        {inReviewPayouts.length > 0 && (
+          <section className="mt-10">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="font-heading text-lg font-semibold">
+                Payouts in review
+              </h2>
+              <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                {inReviewPayouts.length}{" "}
+                {inReviewPayouts.length === 1 ? "row" : "rows"}
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {inReviewPayouts.map((p) => {
+                const Icon = p.type === "refund" ? Wallet : Trophy;
+                return (
+                  <li
+                    key={p.id}
+                    className="flex items-center gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/[0.04] p-4 shadow-sm"
+                  >
+                    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-heading text-sm font-semibold text-foreground">
+                        {p.type === "refund" ? "Refund pending" : "Win pending"}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        <Link
+                          to={`/event/${p.event_id}`}
+                          className="hover:text-primary hover:underline"
+                        >
+                          {p.event_title ?? p.event_id}
+                        </Link>{" "}
+                        · {txDate(p.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                      <p className="font-heading text-sm font-bold tabular-nums text-amber-700 dark:text-amber-300">
+                        +{dollars(p.amount_cents)}
+                      </p>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                        <Clock className="h-3 w-3" />
+                        Pending moderation
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {/* Completed payouts roll into the user's balance, so the
+                follow-on `payout_credit` ledger entry isn't surfaced
+                here — the credit just appears in the Your balance card
+                above. We render a separate "recently approved"
+                hint chip when something flips. */}
+            {payouts && payouts.some((p) => p.status === "completed") && (
+              <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                Approved payouts are added to your balance above.
+              </p>
+            )}
+          </section>
+        )}
 
         {/* Transaction history */}
         <section className="mt-10">

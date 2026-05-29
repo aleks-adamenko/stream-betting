@@ -20,3 +20,7 @@ export {
   DialogDescription,
 } from "./dialog";
 export { Badge, badgeVariants, type BadgeProps } from "./badge";
+export {
+  BettingCountdown,
+  type BettingCountdownProps,
+} from "./betting-countdown";

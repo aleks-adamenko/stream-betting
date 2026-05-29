@@ -8,12 +8,12 @@ import { cn } from "@liverush/lib";
 import { StudioPageTabs } from "@/components/StudioPageTabs";
 import { WithdrawModal } from "@/components/balance/WithdrawModal";
 import {
-  MOCK_COMMISSIONS,
   MOCK_USDT_CENTS,
   dollars,
   type CommissionStatus,
   type MockCommission,
 } from "@/lib/balance";
+import { useStudioPayouts, type StudioPayout } from "@/hooks/useStudioPayouts";
 
 /**
  * Creator Balance page — header card with available + pending totals,
@@ -62,17 +62,59 @@ function rowDate(iso: string): string {
   });
 }
 
+// Translate the new `payouts.status` enum onto the legacy
+// CommissionStatus enum the UI already styles. 'pending' / 'approved'
+// → "pending_approval", 'completed' → "payout". Rejected payouts
+// are surfaced as withdrawn only when the local mark-withdrawn flag
+// has been flipped (the mock-withdraw UX still lives on top of this).
+function statusOfPayout(
+  p: StudioPayout,
+  withdrawnIds: Set<string>,
+): CommissionStatus {
+  if (withdrawnIds.has(p.id)) return "withdrawn";
+  if (p.status === "completed") return "payout";
+  if (p.status === "rejected" || p.status === "failed") return "withdrawn";
+  return "pending_approval";
+}
+
 export default function Balance() {
   const [filter, setFilter] = useState<Filter>("all");
   const [withdrawOpen, setWithdrawOpen] = useState(false);
-  // Local copy of the mock ledger so the withdraw modal can flip
-  // rows from "payout" → "withdrawn" and the UI updates instantly.
-  // Persists for the page's lifetime only (page reload resets it).
-  const [commissions, setCommissions] = useState<MockCommission[]>(() =>
-    [...MOCK_COMMISSIONS].sort((a, b) =>
-      b.created_at.localeCompare(a.created_at),
-    ),
-  );
+  const { data: payouts } = useStudioPayouts();
+  // Locally-tracked "withdrawn" payout ids — the WithdrawModal still
+  // mocks the cash-out flow, so we mark approved rows as withdrawn in
+  // this Set to keep the UI feeling responsive without a DB write.
+  // Resets on page reload.
+  const [withdrawnIds, setWithdrawnIds] = useState<Set<string>>(new Set());
+
+  // Build the commission rows the UI renders. Backed by real
+  // `payouts` data but shaped like the legacy MockCommission type so
+  // the existing CommissionRow + STATUS_META tables keep working.
+  const commissions = useMemo<MockCommission[]>(() => {
+    return (payouts ?? [])
+      .map((p) => {
+        const status = statusOfPayout(p, withdrawnIds);
+        if (status === "withdrawn" && p.status !== "completed") {
+          // Don't surface rejected/failed rows yet — Phase 1 has no
+          // moderator escalation surface.
+          return null;
+        }
+        const row: MockCommission = {
+          id: p.id,
+          event_id: p.event_id,
+          event_title: p.event_title ?? p.event_id,
+          amount_cents: p.amount_cents,
+          status,
+          created_at: p.created_at,
+        };
+        if (status === "withdrawn") {
+          row.withdrawn_at = p.completed_at ?? new Date().toISOString();
+        }
+        return row;
+      })
+      .filter((r): r is MockCommission => r !== null)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [payouts, withdrawnIds]);
 
   const totals = useMemo(() => {
     let available = 0;
@@ -91,36 +133,26 @@ export default function Balance() {
 
   const canWithdraw = totals.available > 0;
 
-  // When the modal completes, flip the oldest "payout" rows to
-  // "withdrawn" until the requested amount is covered. Greedy but
-  // deterministic — fine for the demo. Real settlement would attach
-  // a withdrawal_id to each row instead.
+  // Mark the oldest "payout" rows as withdrawn until the requested
+  // amount is covered. Mocked (no DB write) until real withdrawals
+  // ship — real settlement would attach a withdrawal_id to each
+  // payout row instead.
   const markRowsWithdrawn = (amountCents: number) => {
-    setCommissions((prev) => {
-      let remaining = amountCents;
-      const now = new Date().toISOString();
-      // Process oldest first.
-      const sorted = [...prev].sort((a, b) =>
-        a.created_at.localeCompare(b.created_at),
-      );
-      const updated = new Map<string, MockCommission>();
-      for (const c of sorted) {
-        if (remaining <= 0) break;
-        if (c.status !== "payout") continue;
-        if (c.amount_cents <= remaining) {
-          remaining -= c.amount_cents;
-          updated.set(c.id, { ...c, status: "withdrawn", withdrawn_at: now });
-        } else {
-          // Partial withdraws aren't a real concept yet; just leave
-          // remaining payout rows alone once we've covered the
-          // requested amount.
-          remaining = 0;
-        }
+    let remaining = amountCents;
+    const ordered = [...commissions]
+      .filter((c) => c.status === "payout")
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const ids = new Set(withdrawnIds);
+    for (const c of ordered) {
+      if (remaining <= 0) break;
+      if (c.amount_cents <= remaining) {
+        remaining -= c.amount_cents;
+        ids.add(c.id);
+      } else {
+        remaining = 0;
       }
-      return prev
-        .map((c) => updated.get(c.id) ?? c)
-        .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    });
+    }
+    setWithdrawnIds(ids);
   };
 
   return (

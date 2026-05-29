@@ -41,7 +41,14 @@ export interface Database {
           rules: string | null;
           round_format: "time" | "event";
           round_duration_sec: number | null;
-          status: "draft" | "scheduled" | "live" | "finished" | "cancelled";
+          status:
+            | "draft"
+            | "scheduled"
+            | "live"
+            | "pending_moderation"
+            | "settled"
+            | "finished"
+            | "cancelled";
           scheduled_at: string;
           started_at: string | null;
           viewers_count: number;
@@ -84,6 +91,23 @@ export interface Database {
           // status flip / title edit can't re-fire the notification.
           live_notified_at: string | null;
           scheduled_notified_at: string | null;
+          // Phase 1 betting MVP columns. Set by start_event /
+          // declare_winner / settle_event / cancel_event respectively.
+          betting_window_minutes: number | null;
+          betting_opens_at: string | null;
+          betting_closes_at: string | null;
+          betting_window_closed_at: string | null;
+          settled_at: string | null;
+          cancelled_at: string | null;
+          cancelled_reason: string | null;
+          winning_outcome_ids: string[] | null;
+          // Soft-delete columns. archive_event stamps these on the
+          // creator's request without removing any rows; the user-app
+          // feed filters on archived_at IS NULL so archived events
+          // disappear from Discover/Home, but the event detail page
+          // (and viewer's My Bets history) stays reachable.
+          archived_at: string | null;
+          archived_by: string | null;
         };
         Insert: Omit<Database["public"]["Tables"]["events"]["Row"], "created_at"> & {
           created_at?: string;
@@ -199,9 +223,14 @@ export interface Database {
           id: string;
           event_id: string;
           label: string;
+          /** @deprecated Soft-deprecated by the pari-mutuel MVP. Reads
+           *  still work for legacy events; new flow uses pool_cents. */
           odds: number;
           sort_order: number;
           created_at: string;
+          // Per-outcome pari-mutuel accumulator (cents). Updated
+          // atomically inside place_bet's row-locked transaction.
+          pool_cents: number;
         };
         Insert: Omit<Database["public"]["Tables"]["event_outcomes"]["Row"], "created_at"> & {
           created_at?: string;
@@ -296,10 +325,21 @@ export interface Database {
           outcome_id: string;
           amount_cents: number;
           odds_decimal: number;
-          status: "open" | "won" | "lost" | "refunded";
+          status:
+            | "open"
+            | "placed"
+            | "won_pending_payout"
+            | "won"
+            | "lost"
+            | "refunded";
           payout_cents: number | null;
           placed_at: string;
           settled_at: string | null;
+          // Live odds at placement time. UI/history only — settlement
+          // ignores this and uses the actual pool ratios.
+          odds_snapshot: number | null;
+          // Client-generated UUID for idempotent retries.
+          idempotency_key: string | null;
         };
         Insert: Omit<Database["public"]["Tables"]["bets"]["Row"], "id" | "placed_at"> & {
           id?: string;
@@ -323,6 +363,92 @@ export interface Database {
             foreignKeyName: "bets_outcome_id_fkey";
             columns: ["outcome_id"];
             referencedRelation: "event_outcomes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      // ---- Phase 1 betting MVP tables --------------------------------
+      payouts: {
+        Row: {
+          id: string;
+          type: "winner" | "rake_streamer" | "rake_platform" | "residual" | "refund";
+          recipient_id: string | null;
+          recipient_kind: "viewer" | "streamer" | "platform";
+          amount_cents: number;
+          event_id: string;
+          bet_id: string | null;
+          status:
+            | "pending"
+            | "approved"
+            | "completed"
+            | "rejected"
+            | "on_hold"
+            | "failed";
+          reject_reason: string | null;
+          reject_notes: string | null;
+          created_at: string;
+          approved_at: string | null;
+          completed_at: string | null;
+          moderator_id: string | null;
+          retry_count: number;
+          idempotency_key: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "payouts_event_id_fkey";
+            columns: ["event_id"];
+            referencedRelation: "events";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "payouts_bet_id_fkey";
+            columns: ["bet_id"];
+            referencedRelation: "bets";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ledger_entries: {
+        Row: {
+          id: string;
+          account: string;
+          type:
+            | "deposit"
+            | "bet"
+            | "withdrawal"
+            | "payout_pending"
+            | "payout_credit"
+            | "payout_reverse"
+            | "refund"
+            | "rake"
+            | "residual"
+            | "adjustment";
+          amount_cents: number;
+          balance_after_cents: number | null;
+          reference_id: string | null;
+          created_at: string;
+          prev_hash: string | null;
+          self_hash: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      user_bet_caps: {
+        Row: {
+          user_id: string;
+          day: string;
+          total_cents: number;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "user_bet_caps_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
         ];
@@ -363,8 +489,80 @@ export interface Database {
     Views: Record<string, never>;
     Functions: {
       place_bet: {
-        Args: { p_event_id: string; p_outcome_id: string; p_amount_cents: number };
-        Returns: { bet_id: string; new_balance_cents: number; odds: number };
+        Args: {
+          p_event_id: string;
+          p_outcome_id: string;
+          p_amount_cents: number;
+          p_idempotency_key: string;
+        };
+        Returns: {
+          bet_id: string;
+          idempotent_replay: boolean;
+          new_balance_cents: number;
+          live_odds: number | null;
+          total_pool_cents: number;
+          outcome_pool_cents: number;
+        };
+      };
+      compute_live_odds: {
+        Args: { p_event_id: string };
+        Returns: Array<{
+          outcome_id: string;
+          pool_cents: number;
+          total_pool_cents: number;
+          live_odds: number | null;
+        }>;
+      };
+      get_event_progress: {
+        Args: { p_event_id: string };
+        Returns: Array<{
+          unique_bettors_count: number;
+          outcomes_with_bets_count: number;
+          total_pool_cents: number;
+          num_outcomes: number;
+          min_unique_bettors: number;
+          min_outcomes_with_bets: number;
+          min_pool_cents: number;
+          minimums_met: boolean;
+        }>;
+      };
+      close_expired_betting_windows: {
+        Args: Record<string, never>;
+        Returns: {
+          closed_count: number;
+          closed_ids: string[];
+          stale_cancelled_count: number;
+          stale_cancelled_ids: string[];
+          grace_minutes: number;
+        };
+      };
+      declare_winner: {
+        Args: { p_event_id: string; p_winning_outcome_ids: string[] };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      set_event_betting_window: {
+        Args: { p_event_id: string; p_minutes: number };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      cancel_event: {
+        Args: { p_event_id: string; p_reason?: string };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      get_betting_constants: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          min_bet_cents: number;
+          max_bet_cents: number;
+          max_odds_cap: number;
+          rake_bps: number;
+          rake_platform_bps: number;
+          rake_streamer_bps: number;
+          min_unique_bettors: number;
+          min_outcomes_with_bets: number;
+          betting_window_min_min: number;
+          betting_window_min_max: number;
+          daily_cap_cents: number;
+        }>;
       };
       update_profile_display_name: {
         Args: { p_name: string };
@@ -488,6 +686,14 @@ export interface Database {
       delete_event: {
         Args: { p_event_id: string };
         Returns: void;
+      };
+      archive_event: {
+        Args: { p_event_id: string };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
+      };
+      unarchive_event: {
+        Args: { p_event_id: string };
+        Returns: Database["public"]["Tables"]["events"]["Row"];
       };
       publish_event: {
         Args: { p_event_id: string };

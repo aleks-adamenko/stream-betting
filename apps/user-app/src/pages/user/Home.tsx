@@ -73,7 +73,15 @@ function SectionedHome({
     }
     const live = events.filter((e) => e.status === "live");
     const scheduled = events.filter((e) => e.status === "scheduled");
-    const finished = events.filter((e) => e.status === "finished");
+    // Finished now spans the three terminal states (finished +
+    // pending_moderation + settled). The card UI treats them all
+    // the same; the difference only matters on the detail page.
+    const finished = events.filter(
+      (e) =>
+        e.status === "finished" ||
+        e.status === "pending_moderation" ||
+        e.status === "settled",
+    );
     const featured = live[0] ?? null;
     // "Discover more" highlights everything else the user hasn't seen above.
     const seen = new Set<string>();

@@ -1,19 +1,31 @@
 import { Link } from "react-router-dom";
-import { Trophy, Wallet, Clock, X } from "lucide-react";
+import { Trophy, Wallet, Clock, X, CheckCircle2 } from "lucide-react";
 
 import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMyBets } from "@/hooks/useMyBets";
+import type { BetStatus } from "@/services/betsService";
 import { totalBalanceCents } from "@/lib/balance";
 import { cn } from "@/lib/utils";
 
-const STATUS_META = {
+// Status meta covers the legacy "open" alias for backwards compat plus
+// the new lifecycle states from the Phase 1 betting MVP.
+const STATUS_META: Record<
+  BetStatus,
+  { label: string; className: string; icon: typeof Clock }
+> = {
   open: { label: "Open", className: "bg-primary/10 text-primary", icon: Clock },
+  placed: { label: "Placed", className: "bg-primary/10 text-primary", icon: Clock },
+  won_pending_payout: {
+    label: "Won — awaiting payout",
+    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    icon: CheckCircle2,
+  },
   won: { label: "Won", className: "bg-success/15 text-success", icon: Trophy },
   lost: { label: "Lost", className: "bg-destructive/15 text-destructive", icon: X },
   refunded: { label: "Refunded", className: "bg-muted text-muted-foreground", icon: Wallet },
-} as const;
+};
 
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -22,8 +34,14 @@ export default function MyBets() {
   const { data: bets, isLoading } = useMyBets();
 
   const balance = totalBalanceCents(profile?.balance_cents);
-  const openCount = bets?.filter((b) => b.status === "open").length ?? 0;
-  const wonCount = bets?.filter((b) => b.status === "won").length ?? 0;
+  const openCount =
+    bets?.filter(
+      (b) => b.status === "open" || b.status === "placed",
+    ).length ?? 0;
+  const wonCount =
+    bets?.filter(
+      (b) => b.status === "won" || b.status === "won_pending_payout",
+    ).length ?? 0;
   const totalStaked =
     bets?.reduce((sum, b) => sum + b.amount_cents, 0) ?? 0;
 
@@ -65,9 +83,40 @@ export default function MyBets() {
         {bets && bets.length > 0 && (
           <ul className="space-y-3">
             {bets.map((bet) => {
-              const meta = STATUS_META[bet.status];
+              const status = bet.status as BetStatus;
+              const meta = STATUS_META[status] ?? STATUS_META.open;
               const Icon = meta.icon;
-              const potential = bet.amount_cents * Number(bet.odds_decimal);
+              // Two clear numbers per row: how much was staked, and
+              // what the result was. The result line changes wording
+              // by status so the user never has to read the badge to
+              // know what happened.
+              //   • placed/open: "Pending settlement" hint
+              //   • won_pending_payout: "Won (pending payout)" w/ payout
+              //   • won: "Won $X" (actual credit)
+              //   • lost: "Lost"
+              //   • refunded: "Refunded"
+              const odds = Number(bet.odds_snapshot ?? bet.odds_decimal);
+              const oddsText = Number.isFinite(odds) ? `${odds.toFixed(2)}×` : "—";
+              let resultLabel = "";
+              let resultClass = "text-muted-foreground";
+              if (status === "won" && bet.payout_cents != null) {
+                resultLabel = `Won ${dollars(bet.payout_cents)}`;
+                resultClass = "text-success";
+              } else if (status === "won_pending_payout") {
+                resultLabel = bet.payout_cents
+                  ? `Won ${dollars(bet.payout_cents)} (pending payout)`
+                  : "Won — pending payout";
+                resultClass = "text-amber-600 dark:text-amber-400";
+              } else if (status === "lost") {
+                resultLabel = `Lost ${dollars(bet.amount_cents)}`;
+                resultClass = "text-destructive";
+              } else if (status === "refunded") {
+                resultLabel = `Refunded ${dollars(bet.amount_cents)}`;
+                resultClass = "text-foreground";
+              } else {
+                // placed / open
+                resultLabel = `Pending settlement (placed @ ${oddsText})`;
+              }
               return (
                 <li
                   key={bet.id}
@@ -96,12 +145,19 @@ export default function MyBets() {
                   </Link>
                   <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
                     <div className="text-right">
-                      <p className="font-heading text-base font-bold tabular-nums">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Staked
+                      </p>
+                      <p className="font-heading text-base font-bold tabular-nums text-foreground">
                         {dollars(bet.amount_cents)}
                       </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        @ {Number(bet.odds_decimal).toFixed(2)}× ={" "}
-                        {dollars(Math.round(potential))}
+                      <p
+                        className={cn(
+                          "mt-0.5 text-[11px] font-medium tabular-nums",
+                          resultClass,
+                        )}
+                      >
+                        {resultLabel}
                       </p>
                     </div>
                     <span

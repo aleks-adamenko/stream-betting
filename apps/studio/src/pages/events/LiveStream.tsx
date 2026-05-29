@@ -12,12 +12,21 @@ import {
   MicOff,
   PhoneOff,
   Radio,
+  Trophy,
   Users,
   Video,
   VideoOff,
 } from "lucide-react";
 
-import { Button } from "@liverush/ui";
+import {
+  BettingCountdown,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@liverush/ui";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEventChat, type ChatMessage } from "@/hooks/useEventChat";
 import { useEventViewers } from "@/hooks/useEventViewers";
@@ -62,6 +71,21 @@ export default function LiveStream() {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
 
+  // Declare-winner modal — opens after betting_closes_at. Stores the
+  // outcome ids the creator has checked; supports multi-select for
+  // dead heat scenarios.
+  const [declareOpen, setDeclareOpen] = useState(false);
+  const [selectedWinners, setSelectedWinners] = useState<Set<string>>(
+    new Set(),
+  );
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // 5-second tick is plenty for cutoff math — the visual flip from
+    // "End stream" → "Declare winner" doesn't need second-precision.
+    const id = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Real-time viewer count from the shared `event:{id}:viewers`
   // presence channel. `track: false` so the creator doesn't count
   // themselves as a viewer.
@@ -86,7 +110,11 @@ export default function LiveStream() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("events")
-        .select("id, title, status, scheduled_at, creator_id, started_at")
+        .select(
+          `id, title, status, scheduled_at, creator_id, started_at,
+           betting_opens_at, betting_closes_at, winning_outcome_ids,
+           outcomes:event_outcomes!event_outcomes_event_id_fkey ( id, label, sort_order )`,
+        )
         .eq("id", eventId!)
         .maybeSingle();
       if (error) throw error;
@@ -192,6 +220,28 @@ export default function LiveStream() {
       // auth.uid().
       const { error } = await supabase.functions.invoke("end-stream", {
         body: { event_id: eventId },
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "event", eventId],
+      });
+    },
+  });
+
+  // declare_winner: flips status live → pending_moderation and stamps
+  // winning_outcome_ids. A LiveRush moderator then runs settle_event
+  // from the SQL Editor (Phase 1 MVP — no admin UI yet).
+  const declareWinnerMutation = useMutation({
+    mutationFn: async (outcomeIds: string[]) => {
+      if (!eventId) throw new Error("Missing event id");
+      const { error } = await supabase.rpc("declare_winner", {
+        p_event_id: eventId,
+        p_winning_outcome_ids: outcomeIds,
       });
       if (error) throw error;
     },
@@ -427,7 +477,7 @@ export default function LiveStream() {
       await finishMutation.mutateAsync();
       await stopStream();
       toast.success("Stream ended");
-      navigate("/events", { replace: true });
+      navigate("/events", { replace: true }); // landing back on the list, not the editor
     } catch (err) {
       const message =
         typeof err === "object" && err !== null && "message" in err
@@ -437,6 +487,41 @@ export default function LiveStream() {
       // Camera stays running; we don't force-kill it on a failed
       // finish_event because the row may still be live.
       setPhase("live");
+    }
+  };
+
+  // Cutoff math: betting_closes_at is stamped by start_event. Once
+  // it's in the past, the "End stream" CTA in the top bar swaps for
+  // a "Declare winner" CTA that opens the outcomes modal.
+  const bettingClosesAt = event?.betting_closes_at
+    ? new Date(event.betting_closes_at).getTime()
+    : null;
+  const bettingClosed =
+    !!bettingClosesAt && now >= bettingClosesAt;
+  const outcomes = (event?.outcomes ?? [])
+    .slice()
+    .sort(
+      (a: { sort_order: number }, b: { sort_order: number }) =>
+        a.sort_order - b.sort_order,
+    ) as Array<{ id: string; label: string; sort_order: number }>;
+
+  const handleDeclareSubmit = async () => {
+    if (selectedWinners.size === 0) {
+      toast.error("Pick at least one winning outcome");
+      return;
+    }
+    try {
+      await declareWinnerMutation.mutateAsync(Array.from(selectedWinners));
+      await stopStream();
+      toast.success("Stream ended — awaiting platform settlement");
+      setDeclareOpen(false);
+      navigate("/events", { replace: true });
+    } catch (err) {
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Couldn't declare winner";
+      toast.error(message);
     }
   };
 
@@ -472,34 +557,50 @@ export default function LiveStream() {
       />
 
       {/* Top bar — End stream button only visible once we're live. */}
-      <header className="relative z-20 flex items-center justify-between px-4 py-4 sm:px-6">
-        <div className="flex items-center gap-2">
-          {phase === "live" && (
-            <>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive px-3 py-1 text-xs font-bold uppercase tracking-wider">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-                Live
-              </span>
-              {/* Real-time viewer count from the presence channel —
-                  updates instantly as viewers join / leave the event
-                  page in the user-app. */}
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">
-                <Users className="h-3.5 w-3.5" />
-                <span className="tabular-nums">{viewerCount}</span>
-              </span>
-            </>
+      <header className="relative z-20 flex items-start justify-between px-4 py-4 sm:px-6">
+        <div className="flex flex-col items-start gap-2">
+          {/* Top row: Live + viewers + title chip. */}
+          <div className="flex items-center gap-2">
+            {phase === "live" && (
+              <>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive px-3 py-1 text-xs font-bold uppercase tracking-wider">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+                  Live
+                </span>
+                {/* Real-time viewer count from the presence channel —
+                    updates instantly as viewers join / leave the event
+                    page in the user-app. */}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">
+                  <Users className="h-3.5 w-3.5" />
+                  <span className="tabular-nums">{viewerCount}</span>
+                </span>
+              </>
+            )}
+            <p className="hidden text-sm font-medium opacity-80 sm:block">
+              {event?.title}
+            </p>
+          </div>
+          {/* Bottom row: absolute betting countdown — same value all
+              viewers see in the user-app overlay. */}
+          {phase === "live" && event?.betting_closes_at && (
+            <BettingCountdown
+              closesAt={event.betting_closes_at}
+              variant="compact"
+            />
           )}
-          <p className="hidden text-sm font-medium opacity-80 sm:block">
-            {event?.title}
-          </p>
         </div>
         {phase === "live" || phase === "ending" ? (
+          // Single "End stream" button always. Click → open the
+          // declare-winner modal. Inside, we either show the outcome
+          // selector (if betting window has closed) or a "still
+          // accepting bets, cancel will refund everyone" notice
+          // (if the streamer is bailing early).
           <Button
             type="button"
             variant="accent"
             size="sm"
-            onClick={handleEnd}
-            disabled={phase === "ending"}
+            onClick={() => setDeclareOpen(true)}
+            disabled={phase === "ending" || declareWinnerMutation.isPending}
             className="bg-destructive text-white [background:none] hover:bg-destructive/90"
           >
             {phase === "ending" ? (
@@ -651,6 +752,101 @@ export default function LiveStream() {
           </div>
         </div>
       )}
+
+      {/* End-stream modal — single entry point regardless of whether
+          the betting window has closed. Post-cutoff: pick winning
+          outcome(s) → declare_winner flips status → pending_moderation.
+          Pre-cutoff: only allow a hard end (no declaration possible
+          yet) via finish_event. */}
+      <Dialog open={declareOpen} onOpenChange={setDeclareOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {bettingClosed ? "End stream & declare winner" : "End stream"}
+            </DialogTitle>
+            <DialogDescription>
+              {bettingClosed
+                ? "Pick the outcome(s) that won. Multi-select supports dead heats. Once submitted, the event flips to Pending settlement and a LiveRush moderator releases payouts."
+                : "The betting window is still open. Ending now closes the stream — you'll be able to come back and declare a winner once the cutoff passes."}
+            </DialogDescription>
+          </DialogHeader>
+          {bettingClosed && (
+            <ul className="space-y-2 py-2">
+              {outcomes.map((o) => {
+                const active = selectedWinners.has(o.id);
+                return (
+                  <li key={o.id}>
+                    <label
+                      className={
+                        "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors " +
+                        (active
+                          ? "border-primary bg-primary/10"
+                          : "border-border bg-card hover:bg-secondary/30")
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={active}
+                        onChange={(e) => {
+                          setSelectedWinners((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(o.id);
+                            else next.delete(o.id);
+                            return next;
+                          });
+                        }}
+                        className="h-4 w-4"
+                      />
+                      <span className="text-sm font-medium">{o.label}</span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDeclareOpen(false)}
+              disabled={declareWinnerMutation.isPending || phase === "ending"}
+            >
+              Cancel
+            </Button>
+            {bettingClosed ? (
+              <Button
+                type="button"
+                onClick={handleDeclareSubmit}
+                disabled={
+                  declareWinnerMutation.isPending || selectedWinners.size === 0
+                }
+              >
+                {declareWinnerMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Trophy className="h-4 w-4" />
+                    End & submit results
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={async () => {
+                  setDeclareOpen(false);
+                  await handleEnd();
+                }}
+                disabled={phase === "ending"}
+                className="bg-destructive text-white [background:none] hover:bg-destructive/90"
+              >
+                <PhoneOff className="h-4 w-4" />
+                End stream
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

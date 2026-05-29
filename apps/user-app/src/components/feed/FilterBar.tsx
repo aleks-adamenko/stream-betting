@@ -104,9 +104,23 @@ function Chip({ active, onClick, children }: ChipProps) {
   );
 }
 
+// `finished` filter chip covers any terminal state — finished + the
+// new pending_moderation / settled. The card UI treats them uniformly.
+const ENDED_STATUSES = new Set<EventStatus>([
+  "finished",
+  "pending_moderation",
+  "settled",
+]);
+
 export function applyFilters(events: StreamEvent[], filter: FilterState) {
   return events.filter((e) => {
-    if (filter.status !== "all" && e.status !== filter.status) return false;
+    if (filter.status !== "all") {
+      if (filter.status === "finished") {
+        if (!ENDED_STATUSES.has(e.status)) return false;
+      } else if (e.status !== filter.status) {
+        return false;
+      }
+    }
     if (filter.influencerId && e.influencer.id !== filter.influencerId) return false;
     return true;
   });
