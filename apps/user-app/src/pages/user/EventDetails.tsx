@@ -1077,7 +1077,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
           <span className="flex items-center gap-2">
             <LogIn className="h-4 w-4" /> Sign in to use your balance
           </span>
-          <span className="text-xs text-muted-foreground">$1000 on signup</span>
+          <span className="text-xs text-muted-foreground">$100 on signup</span>
         </Link>
       )}
 
