@@ -1277,7 +1277,27 @@ function ReadinessCard({
 
 function UpcomingPanel({ event }: { event: StreamEvent }) {
   const startsAt = new Date(event.scheduledAt);
-  const diffH = Math.max(0, Math.round((startsAt.getTime() - Date.now()) / 3600_000));
+  // Re-render every minute so the "starts in" chip stays accurate
+  // without a page reload. Cheap — no realtime channel needed since
+  // the value is derived purely from the local clock.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const diffMs = startsAt.getTime() - now;
+  const diffMin = Math.max(0, Math.floor(diffMs / 60_000));
+  const diffH = Math.floor(diffMin / 60);
+  // Format ladder: 0 min → "starting", < 60 min → "in Xm",
+  // < 24 h → "in Xh", else → date.
+  const startsInLabel =
+    diffMin === 0
+      ? "starting"
+      : diffMin < 60
+        ? `in ${diffMin}m`
+        : diffH < 24
+          ? `in ${diffH}h`
+          : startsAt.toLocaleDateString();
 
   return (
     <section className="card-elevated overflow-hidden">
@@ -1289,7 +1309,7 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
           </h2>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
-          {diffH < 24 ? `in ${Math.max(diffH, 1)}h` : startsAt.toLocaleDateString()}
+          {startsInLabel}
         </span>
       </div>
 
