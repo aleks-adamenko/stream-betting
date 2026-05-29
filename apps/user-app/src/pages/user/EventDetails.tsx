@@ -989,38 +989,112 @@ function BetPanel({ event }: { event: StreamEvent }) {
     }
   }
 
-  // Already bet → swap the form for a position summary. One bet per
-  // event is enforced by the server too (place_bet rejects with
-  // `already_bet` if a non-refunded/non-lost bet exists).
-  if (existingBet) {
-    const outcomeLabel =
-      event.outcomes.find((o) => o.id === existingBet.outcome_id)?.label ??
-      "—";
-    const placementOdds = Number(
-      existingBet.odds_snapshot ?? existingBet.odds_decimal ?? 0,
-    );
-    return (
-      <section className="card-elevated overflow-hidden">
-        <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
-          <div className="flex items-center gap-2">
-            <Trophy className="h-5 w-5 fill-[#FED448] text-[#FED448]" />
-            <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
-              Your bet
-            </h2>
-          </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
-            Placed
-          </span>
+  // After placing a bet the panel keeps the same shape — outcomes
+  // list at top, dynamic odds still ticking via the Realtime
+  // subscription — but the bottom half flips from "stake + Place bet"
+  // to a "Your bet" position summary. This way the bettor can watch
+  // the pari-mutuel pool move in real time without losing context
+  // about what they backed.
+  const hasBet = !!existingBet;
+  const placementOdds = existingBet
+    ? Number(existingBet.odds_snapshot ?? existingBet.odds_decimal ?? 0)
+    : 0;
+
+  return (
+    <section className="card-elevated overflow-hidden">
+      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
+        <div className="flex items-center gap-2">
+          <Trophy className="h-5 w-5 fill-[#FED448] text-[#FED448]" />
+          <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
+            {hasBet ? "Your bet" : "Place a bet"}
+          </h2>
         </div>
-        <div className="space-y-3 p-5 sm:p-6">
-          <div className="rounded-xl border border-border/40 bg-background/50 p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Outcome
-            </p>
-            <p className="mt-1 font-heading text-base font-semibold">
-              {outcomeLabel}
-            </p>
-          </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
+          {hasBet ? (
+            "Placed"
+          ) : (
+            <>
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" /> Open
+            </>
+          )}
+        </span>
+      </div>
+
+      <div className="p-5 sm:p-6">
+
+      {/* Sign-in CTA when unauthenticated */}
+      {!user && (
+        <Link
+          to={`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`}
+          className="mb-4 flex items-center justify-between rounded-xl border border-primary/30 bg-primary/[0.04] px-3 py-2 text-sm font-medium text-primary hover:bg-primary/[0.08]"
+        >
+          <span className="flex items-center gap-2">
+            <LogIn className="h-4 w-4" /> Sign in to use your balance
+          </span>
+          <span className="text-xs text-muted-foreground">$100 on signup</span>
+        </Link>
+      )}
+
+      <ul className="space-y-2">
+        {event.outcomes.map((o) => {
+          // Once the user has bet, outcomes become read-only and the
+          // user's chosen outcome stays highlighted while live odds
+          // continue ticking on every row via useLiveOdds.
+          const isUserPick = hasBet && existingBet?.outcome_id === o.id;
+          const active = hasBet ? isUserPick : selected?.id === o.id;
+          const odds = oddsFor(o);
+          return (
+            <li key={o.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (hasBet) return; // read-only post-bet
+                  setSelected(o);
+                }}
+                disabled={hasBet}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-all",
+                  active
+                    ? "border-primary bg-primary/10 ring-2 ring-primary/20"
+                    : "border-border/40 bg-background/60",
+                  !hasBet && !active &&
+                    "hover:border-primary/40 hover:bg-primary/[0.03]",
+                  hasBet && "cursor-default",
+                )}
+              >
+                <span className="flex items-center gap-2 truncate text-sm font-medium text-foreground">
+                  {isUserPick && (
+                    <Trophy className="h-3.5 w-3.5 flex-shrink-0 fill-primary text-primary" />
+                  )}
+                  <span className="truncate">{o.label}</span>
+                </span>
+                <span
+                  className={cn(
+                    "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                    active
+                      ? "bg-primary text-primary-foreground"
+                      : odds == null
+                        ? "bg-muted text-muted-foreground"
+                        : oddsPillClasses(odds, oddsMin, oddsMax),
+                  )}
+                >
+                  {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      {!progress.minimumsMet && (
+        <ReadinessCard progress={progress} className="mt-3" />
+      )}
+
+      {/* Post-bet position card. Live odds in the outcomes list above
+          continue ticking — viewer can see the pool moving against
+          (or in favour of) their pick. */}
+      {hasBet && existingBet && (
+        <div className="mt-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-xl bg-muted/50 p-3">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1047,146 +1121,80 @@ function BetPanel({ event }: { event: StreamEvent }) {
             <Link to="/my-bets">View in My Bets</Link>
           </Button>
         </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="card-elevated overflow-hidden">
-      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
-        <div className="flex items-center gap-2">
-          <Trophy className="h-5 w-5 fill-[#FED448] text-[#FED448]" />
-          <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
-            Place a bet
-          </h2>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" /> Open
-        </span>
-      </div>
-
-      <div className="p-5 sm:p-6">
-
-      {/* Sign-in CTA when unauthenticated */}
-      {!user && (
-        <Link
-          to={`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`}
-          className="mb-4 flex items-center justify-between rounded-xl border border-primary/30 bg-primary/[0.04] px-3 py-2 text-sm font-medium text-primary hover:bg-primary/[0.08]"
-        >
-          <span className="flex items-center gap-2">
-            <LogIn className="h-4 w-4" /> Sign in to use your balance
-          </span>
-          <span className="text-xs text-muted-foreground">$100 on signup</span>
-        </Link>
       )}
 
-      <ul className="space-y-2">
-        {event.outcomes.map((o) => {
-          const active = selected?.id === o.id;
-          const odds = oddsFor(o);
-          return (
-            <li key={o.id}>
-              <button
-                type="button"
-                onClick={() => setSelected(o)}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-all",
-                  active
-                    ? "border-primary bg-primary/10 ring-2 ring-primary/20"
-                    : "border-border/40 bg-background/60 hover:border-primary/40 hover:bg-primary/[0.03]",
-                )}
-              >
-                <span className="truncate text-sm font-medium text-foreground">{o.label}</span>
-                <span
-                  className={cn(
-                    "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : odds == null
-                        ? "bg-muted text-muted-foreground"
-                        : oddsPillClasses(odds, oddsMin, oddsMax),
-                  )}
-                >
-                  {odds == null ? "Open" : `${odds.toFixed(2)}×`}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      {!hasBet && (
+        <>
+          <div className="mt-4 space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              Stake
+            </label>
+            {/* Stake chips only — custom-amount input removed. With
+                MAX_BET=$10 the universe of useful values is tiny, so
+                three preset buttons cover everyone. Font weight + size
+                match the Place bet button below for visual parity. */}
+            <div className="grid grid-cols-3 gap-2">
+              {STAKE_CHIPS.map((amount) => {
+                const active = stakeNum === amount;
+                return (
+                  <button
+                    key={amount}
+                    type="button"
+                    onClick={() => setStake(String(amount))}
+                    className={cn(
+                      "rounded-lg border px-3 py-2.5 text-base font-bold tabular-nums transition-all",
+                      active
+                        ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
+                        : "border-border/40 bg-background/60 text-foreground hover:border-primary/40 hover:bg-primary/[0.03]",
+                    )}
+                  >
+                    ${amount}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-      {!progress.minimumsMet && (
-        <ReadinessCard progress={progress} className="mt-3" />
+          <div className="mt-4 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Potential payout</span>
+            <span className="font-heading text-base font-bold text-foreground">
+              {progress.minimumsMet ? `$${potentialPayout}` : "—"}
+            </span>
+          </div>
+          <p className="mt-1 text-center text-[11px] text-muted-foreground">
+            {progress.minimumsMet
+              ? "Indicative — final calculated at settlement."
+              : "Payout shown once the event clears the minimums above."}
+          </p>
+
+          {stakeExceedsBalance && (
+            <p className="mt-2 text-center text-xs font-medium text-destructive">
+              Stake exceeds available balance.
+            </p>
+          )}
+
+          <Button
+            onClick={handlePlaceBet}
+            variant="accent"
+            size="lg"
+            className="mt-4 w-full"
+            disabled={!canPlace && !!user}
+          >
+            {!user
+              ? "Sign in to place bet"
+              : submitting
+              ? "Placing…"
+              : !selected
+              ? "Pick an outcome"
+              : stakeExceedsBalance
+                ? "Insufficient balance"
+                : "Place bet"}
+          </Button>
+          <p className="mt-2 text-center text-[11px] text-muted-foreground">
+            Virtual balance only. Bets settle once the round ends.
+          </p>
+        </>
       )}
-
-      <div className="mt-4 space-y-2">
-        <label className="text-xs font-medium text-muted-foreground">
-          Stake
-        </label>
-        {/* Stake chips only — custom-amount input removed. With
-            MAX_BET=$10 the universe of useful values is tiny, so
-            three preset buttons cover everyone. Font weight + size
-            match the Place bet button below for visual parity. */}
-        <div className="grid grid-cols-3 gap-2">
-          {STAKE_CHIPS.map((amount) => {
-            const active = stakeNum === amount;
-            return (
-              <button
-                key={amount}
-                type="button"
-                onClick={() => setStake(String(amount))}
-                className={cn(
-                  "rounded-lg border px-3 py-2.5 text-base font-bold tabular-nums transition-all",
-                  active
-                    ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
-                    : "border-border/40 bg-background/60 text-foreground hover:border-primary/40 hover:bg-primary/[0.03]",
-                )}
-              >
-                ${amount}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
-        <span className="text-muted-foreground">Potential payout</span>
-        <span className="font-heading text-base font-bold text-foreground">
-          {progress.minimumsMet ? `$${potentialPayout}` : "—"}
-        </span>
-      </div>
-      <p className="mt-1 text-center text-[11px] text-muted-foreground">
-        {progress.minimumsMet
-          ? "Indicative — final calculated at settlement."
-          : "Payout shown once the event clears the minimums above."}
-      </p>
-
-      {stakeExceedsBalance && (
-        <p className="mt-2 text-center text-xs font-medium text-destructive">
-          Stake exceeds available balance.
-        </p>
-      )}
-
-      <Button
-        onClick={handlePlaceBet}
-        variant="accent"
-        size="lg"
-        className="mt-4 w-full"
-        disabled={!canPlace && !!user}
-      >
-        {!user
-          ? "Sign in to place bet"
-          : submitting
-          ? "Placing…"
-          : !selected
-          ? "Pick an outcome"
-          : stakeExceedsBalance
-            ? "Insufficient balance"
-            : "Place bet"}
-      </Button>
-      <p className="mt-2 text-center text-[11px] text-muted-foreground">
-        Virtual balance only. Bets settle once the round ends.
-      </p>
 
       {/* Subscriber count line stays visible while the event is live
           as a social-proof signal. NotifyMeBlock hides its own button
@@ -1446,7 +1454,18 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
 }
 
 function FinishedPanel({ event }: { event: StreamEvent }) {
-  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
+  // Final odds = pari-mutuel ratio frozen at cutoff. compute_live_odds
+  // reads the current pool_cents which is unchanged after the betting
+  // window closes, so it's the right number to display here. Legacy
+  // event_outcomes.odds is ignored.
+  const { data: liveOddsData } = useLiveOdds(event.id);
+  const liveOddsById = new Map(
+    liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
+  );
+  const finalOddsList = event.outcomes.map(
+    (o) => liveOddsById.get(o.id) ?? 1,
+  );
+  const { min: oddsMin, max: oddsMax } = oddsRange(finalOddsList);
   // `pending_moderation` and `settled` ride the same "Ended" panel as
   // `finished`, but the header chip and the hero block change to make
   // the in-between states obvious.
@@ -1503,7 +1522,9 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
       <div>
         <h3 className="mb-2 font-heading text-sm font-semibold">Final odds</h3>
         <ul className="space-y-2">
-          {event.outcomes.map((o, i) => (
+          {event.outcomes.map((o, i) => {
+            const odds = liveOddsById.get(o.id) ?? null;
+            return (
             <li
               key={o.id}
               className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-2"
@@ -1515,13 +1536,16 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
               <span
                 className={cn(
                   "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                  oddsPillClasses(o.odds, oddsMin, oddsMax),
+                  odds == null
+                    ? "bg-muted text-muted-foreground"
+                    : oddsPillClasses(odds, oddsMin, oddsMax),
                 )}
               >
-                {o.odds.toFixed(2)}×
+                {odds == null ? "—" : `${odds.toFixed(2)}×`}
               </span>
             </li>
-          ))}
+            );
+          })}
         </ul>
       </div>
 
