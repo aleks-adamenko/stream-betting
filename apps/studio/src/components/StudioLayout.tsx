@@ -7,6 +7,8 @@ import {
   Menu,
   Settings,
   Tv,
+  UserRound,
+  Wallet,
   X,
   Zap,
 } from "lucide-react";
@@ -36,6 +38,12 @@ const nav: NavItem[] = [
   // events list than the old ListChecks (which read like a generic
   // todo). Stays solid line-icon style to match the other nav items.
   { to: "/events", label: "Events", icon: Tv },
+  // Profile + Balance — the new "personal" pages with a shared
+  // top-tab bar (see StudioPageTabs). Linked from the sidebar so
+  // creators can reach either directly; the tab bar handles
+  // sibling navigation once they're inside.
+  { to: "/profile", label: "Profile", icon: UserRound },
+  { to: "/balance", label: "Balance", icon: Wallet },
   { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ];
 
@@ -172,7 +180,16 @@ export function StudioLayout() {
               "0 12px 24px -16px rgba(0, 0, 0, 0.35), 0 4px 12px -12px rgba(0, 0, 0, 0.25)",
           }}
         >
-          <div className="flex items-center gap-3">
+          {/* Avatar + name row links to the Profile page so a
+              creator can jump to their own card with one tap.
+              Pending-review pill + sign-out button below sit
+              OUTSIDE this link so they keep their own click
+              targets. */}
+          <Link
+            to="/profile"
+            className="-mx-1 -mt-1 flex items-center gap-3 rounded-lg px-1 py-1 transition-colors hover:bg-white/10"
+            onClick={() => setMobileOpen(false)}
+          >
             <div className="relative flex-shrink-0">
               {creator?.avatar_url ? (
                 <img
@@ -202,7 +219,7 @@ export function StudioLayout() {
                 {compactFormatter.format(followerCount ?? 0)} followers
               </p>
             </div>
-          </div>
+          </Link>
 
           {creator?.status === "pending" && (
             <p className="mt-3 rounded-md bg-[#FEE53A]/20 px-2 py-1 text-[11px] font-semibold text-[#FEE53A]">

@@ -17,6 +17,8 @@ import Dashboard from "@/pages/Dashboard";
 import EventList from "@/pages/events/EventList";
 import EventEditor from "@/pages/events/EventEditor";
 import LiveStream from "@/pages/events/LiveStream";
+import Profile from "@/pages/Profile";
+import Balance from "@/pages/Balance";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -72,6 +74,8 @@ export default function App() {
               <Route path="/events" element={<EventList />} />
               <Route path="/events/new" element={<EventEditor />} />
               <Route path="/events/:id" element={<EventEditor />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/balance" element={<Balance />} />
             </Route>
           </Routes>
         </AuthProvider>
