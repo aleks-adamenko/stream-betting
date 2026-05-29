@@ -1278,7 +1278,6 @@ function ReadinessCard({
 function UpcomingPanel({ event }: { event: StreamEvent }) {
   const startsAt = new Date(event.scheduledAt);
   const diffH = Math.max(0, Math.round((startsAt.getTime() - Date.now()) / 3600_000));
-  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
 
   return (
     <section className="card-elevated overflow-hidden">
@@ -1323,13 +1322,12 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
               className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-2"
             >
               <span className="truncate text-sm font-medium">{o.label}</span>
-              <span
-                className={cn(
-                  "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                  oddsPillClasses(o.odds, oddsMin, oddsMax),
-                )}
-              >
-                {o.odds.toFixed(2)}×
+              {/* Scheduled events have no pool yet — odds don't exist
+                  until the stream goes live and viewers start betting.
+                  Show "Open" placeholder per spec §8.2 so we don't
+                  mislead viewers with the legacy 2.00× default. */}
+              <span className="ml-3 inline-flex flex-shrink-0 items-center rounded-full bg-muted px-2.5 py-1 text-sm font-extrabold tabular-nums text-muted-foreground">
+                Open
               </span>
             </li>
           ))}
