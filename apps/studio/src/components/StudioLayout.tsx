@@ -7,8 +7,6 @@ import {
   Menu,
   Settings,
   Tv,
-  UserRound,
-  Wallet,
   X,
   Zap,
 } from "lucide-react";
@@ -18,6 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { NavBrushBg } from "@/components/NavBrushBg";
 import { supabase } from "@/integrations/supabase/client";
 import logoUrl from "@/assets/live-rush-white-logo.png";
+import bgUrl from "@/assets/live-rush-bg.jpg";
 
 const compactFormatter = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -38,12 +37,11 @@ const nav: NavItem[] = [
   // events list than the old ListChecks (which read like a generic
   // todo). Stays solid line-icon style to match the other nav items.
   { to: "/events", label: "Events", icon: Tv },
-  // Profile + Balance — the new "personal" pages with a shared
-  // top-tab bar (see StudioPageTabs). Linked from the sidebar so
-  // creators can reach either directly; the tab bar handles
-  // sibling navigation once they're inside.
-  { to: "/profile", label: "Profile", icon: UserRound },
-  { to: "/balance", label: "Balance", icon: Wallet },
+  // Profile + Balance intentionally don't have sidebar entries —
+  // they're reached by clicking the avatar / name in the identity
+  // strip at the bottom of the sidebar. Sibling navigation between
+  // the two happens via the StudioPageTabs bar at the top of those
+  // pages (mirrors the user-app's Profile / Balance flow).
   { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ];
 
@@ -267,10 +265,21 @@ export function StudioLayout() {
     // (not min-h) is what keeps the gradient sidebar from scrolling
     // off-screen on tall pages like the event editor.
     <div className="relative flex h-[100dvh] overflow-hidden bg-background">
-      {/* Background pattern (subtle) */}
+      {/* Doodle-pattern background image — same asset and styling as
+          the user-app's AppLayout (apps/user-app/.../AppLayout.tsx),
+          so creators see the same brand wallpaper on the studio side.
+          The sidebar's blue→purple gradient sits on top of this layer
+          on the left; the image effectively reads as "right-side
+          pattern" once the sidebar covers half the viewport. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-60"
+        className="pointer-events-none absolute inset-0 opacity-80"
+        style={{
+          backgroundImage: `url(${bgUrl})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+        }}
       />
 
       {/* Sidebar — single full-width variant on every route, so editor

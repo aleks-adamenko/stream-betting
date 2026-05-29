@@ -66,7 +66,12 @@ export default function Profile() {
     });
 
   return (
-    <div className="w-full space-y-6">
+    // Matches the user-app's Profile / Balance page width — content
+    // is centred and capped at max-w-2xl so reading line length stays
+    // comfortable on wide monitors. The outer StudioLayout already
+    // provides the max-w-7xl gutter; this inner wrapper narrows
+    // further to the user-app's reading-column width.
+    <div className="mx-auto w-full max-w-2xl space-y-6">
       <div>
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">Profile</h1>
         <p className="mt-1 text-sm text-muted-foreground sm:text-base">

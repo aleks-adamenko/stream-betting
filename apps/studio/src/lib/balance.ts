@@ -46,6 +46,53 @@ export interface MockCommission {
   withdrawn_at?: string;
 }
 
+// =========================================================================
+// Per-event commission preview
+// =========================================================================
+//
+// The events list surfaces a small commission pill next to each
+// finished event row so creators can see at a glance what they
+// earned and whether it's approved yet. The Balance page is the
+// authoritative ledger; this preview is just a deterministic
+// derivation so the pill on a given event id reads the same on
+// every render until real settlement infrastructure replaces it.
+//
+// Deterministic = a tiny string hash → split between
+// pending_approval / payout, and an amount in the $20–$200 range.
+// Calling it on the same event id always returns the same result
+// (no random()), so the UI doesn't reshuffle on refresh.
+
+export interface MockEventCommissionPreview {
+  amount_cents: number;
+  status: Extract<CommissionStatus, "pending_approval" | "payout">;
+}
+
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  }
+  return h >>> 0;
+}
+
+export function mockEventCommission(
+  eventId: string,
+): MockEventCommissionPreview {
+  const h = hashStr(eventId);
+  // ~40% pending / ~60% approved feels right for a demo — most
+  // finished events have already been approved, a small tail is
+  // still in review.
+  const status = h % 10 < 4 ? "pending_approval" : "payout";
+  // Amount in [$20, $200]. `>>>` (unsigned right shift) keeps the
+  // value as a uint32 — JavaScript's `>>` (signed) would reinterpret
+  // hashStr's uint32 output as int32 and produce negative results
+  // when the high bit is set, which then turned `20 + (negative %
+  // 181)` into a negative commission. Use `>>>` and the math stays
+  // non-negative for any input.
+  const amount_cents = (20 + ((h >>> 8) % 181)) * 100;
+  return { amount_cents, status };
+}
+
 export const MOCK_COMMISSIONS: MockCommission[] = [
   {
     id: "c1",

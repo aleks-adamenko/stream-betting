@@ -20,6 +20,7 @@ import { Button } from "@liverush/ui";
 import { cn } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { dollars, mockEventCommission } from "@/lib/balance";
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
@@ -389,6 +390,39 @@ export default function EventList() {
                             {new Date(event.scheduled_at).toLocaleString()}
                           </span>
                         )}
+                        {/* Commission pill on finished rows so the
+                            creator can see what they earned and
+                            whether it's already cleared without
+                            opening the Balance page. Same color
+                            language as the Balance ledger: amber for
+                            pending, green for approved. Deterministic
+                            per event id (see mockEventCommission) so
+                            the pill stays stable across refreshes. */}
+                        {isFinished &&
+                          (() => {
+                            const c = mockEventCommission(event.id);
+                            const isPending = c.status === "pending_approval";
+                            return (
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+                                  isPending
+                                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                                    : "bg-success/15 text-success",
+                                )}
+                                title={
+                                  isPending
+                                    ? "Commission is awaiting platform approval"
+                                    : "Commission approved — available in your balance"
+                                }
+                              >
+                                {isPending ? "Pending approval" : "Approved"}
+                                <span className="font-bold">
+                                  · {dollars(c.amount_cents)}
+                                </span>
+                              </span>
+                            );
+                          })()}
                       </div>
 
                       {/* Draft completion bar — only shown for drafts. */}

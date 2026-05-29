@@ -124,7 +124,9 @@ export default function Balance() {
   };
 
   return (
-    <div className="w-full space-y-6">
+    // Same reading-column width as the user-app's Balance — matches
+    // Profile so the tab swap doesn't jump column widths.
+    <div className="mx-auto w-full max-w-2xl space-y-6">
       <div>
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">Balance</h1>
         <p className="mt-1 text-sm text-muted-foreground sm:text-base">
