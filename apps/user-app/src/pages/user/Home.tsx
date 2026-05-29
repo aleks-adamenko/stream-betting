@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEvents } from "@/hooks/useEvents";
+import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { cn } from "@/lib/utils";
 import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
 import rewardsBannerDesktop from "@/assets/rewards-banner-2.jpg";
@@ -235,6 +236,15 @@ function EventGrid({ events }: { events: StreamEvent[] }) {
  */
 function FeaturedLiveSection({ event }: { event: StreamEvent }) {
   const { user } = useAuth();
+  // Same Realtime channel that the BetPanel uses on the event page —
+  // every bet placed anywhere in the system pings every connected
+  // viewer's `useLiveOdds`, so the Home hero's odds chips re-flow
+  // without a refresh. Per-outcome live odds are null until the
+  // pool gets its first bet; we render "Open" in that case.
+  const { data: liveOddsData } = useLiveOdds(event.id);
+  const liveOddsById = new Map(
+    liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
+  );
   // Signed-in viewers go straight to the event page where the
   // BetPanel lives. Signed-out viewers hit sign-in first with a
   // `next=` redirect so they land on the event after auth.
@@ -308,19 +318,28 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
             }}
           >
             <ul className="space-y-1.5">
-              {event.outcomes.map((o) => (
-                <li
-                  key={o.id}
-                  className="flex items-center justify-between gap-3 text-xs"
-                >
-                  <span className="truncate font-medium text-foreground">
-                    {o.label}
-                  </span>
-                  <span className="flex-shrink-0 font-heading font-bold tabular-nums text-foreground">
-                    {o.odds.toFixed(2)}×
-                  </span>
-                </li>
-              ))}
+              {event.outcomes.map((o) => {
+                const odds = liveOddsById.get(o.id) ?? null;
+                return (
+                  <li
+                    key={o.id}
+                    className="flex items-center justify-between gap-3 text-xs"
+                  >
+                    <span className="truncate font-medium text-foreground">
+                      {o.label}
+                    </span>
+                    <span
+                      className={
+                        odds == null
+                          ? "flex-shrink-0 font-heading text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                          : "flex-shrink-0 font-heading font-bold tabular-nums text-foreground"
+                      }
+                    >
+                      {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
