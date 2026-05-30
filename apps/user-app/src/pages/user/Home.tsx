@@ -24,7 +24,7 @@ import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { cn } from "@/lib/utils";
 import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
 import rewardsBannerDesktop from "@/assets/rewards-banner-2.jpg";
-import noLiveCoverMobile from "@/assets/live-rush-cover-image.jpg";
+import noLiveCoverMobile from "@/assets/live-rush-cover-image-3.jpg";
 import noLiveCoverDesktop from "@/assets/live-rush-cover-image-2.jpg";
 import type { StreamEvent } from "@/domain/types";
 
