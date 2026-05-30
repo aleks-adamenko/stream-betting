@@ -108,6 +108,11 @@ export interface Database {
           // (and viewer's My Bets history) stays reachable.
           archived_at: string | null;
           archived_by: string | null;
+          // Phase 2 emails idempotency stamp — set by the
+          // notify-event-cancelled Edge Function after it fans out
+          // refund emails to all bettors. The events_cancel_notify_dispatch
+          // trigger guards on this so the fan-out can't double-fire.
+          cancelled_notified_at: string | null;
         };
         Insert: Omit<Database["public"]["Tables"]["events"]["Row"], "created_at"> & {
           created_at?: string;
@@ -255,6 +260,10 @@ export interface Database {
           // Global on/off for transactional emails. Defaults true.
           // In-app notifications are not affected by this flag.
           notifications_enabled: boolean;
+          // Per-category opt-out for payout / refund / settlement
+          // emails. Gated by the global flag — when the global is off,
+          // this flag has no effect (we don't send any emails anyway).
+          notifications_enabled_payouts: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -265,6 +274,7 @@ export interface Database {
           avatar_url?: string | null;
           balance_cents?: number;
           notifications_enabled?: boolean;
+          notifications_enabled_payouts?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -392,6 +402,11 @@ export interface Database {
           moderator_id: string | null;
           retry_count: number;
           idempotency_key: string | null;
+          // Phase 2 emails idempotency stamp — set by the notify-payout
+          // Edge Function once it sends the credited / rake / rejected
+          // email for this payout. The payouts_notify_dispatch trigger
+          // guards on this so a status flip can't re-fire the email.
+          notified_at: string | null;
         };
         Insert: never;
         Update: never;
@@ -457,7 +472,18 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
-          type: "welcome" | "bet_won" | "bet_lost" | "event_starting" | "new_follower" | "top_up";
+          type:
+            | "welcome"
+            | "bet_won"
+            | "bet_lost"
+            | "event_starting"
+            | "new_follower"
+            | "top_up"
+            // Phase 2 betting emails — companion in-app rows dropped
+            // by the notify-payout / notify-event-cancelled functions.
+            | "bet_refunded"
+            | "rake_credited"
+            | "payout_rejected";
           title: string;
           body: string | null;
           event_id: string | null;
@@ -739,6 +765,10 @@ export interface Database {
         Returns: number;
       };
       set_notifications_enabled: {
+        Args: { p_enabled: boolean };
+        Returns: void;
+      };
+      set_payouts_notifications_enabled: {
         Args: { p_enabled: boolean };
         Returns: void;
       };

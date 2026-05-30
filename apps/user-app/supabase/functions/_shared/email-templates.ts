@@ -11,7 +11,37 @@
 // "manage your notifications" link. Style is inline so Gmail / Outlook
 // don't strip a <style> block.
 
-import { APP_URL } from "./resend.ts";
+import { APP_URL, STUDIO_URL } from "./resend.ts";
+
+/** Format an integer cent amount as a human-readable dollar string.
+ *  Virtual currency for now (per the Phase 1 locked decision), but
+ *  rendered as USD to match the in-app display. Strips trailing `.00`
+ *  for whole-dollar amounts ($12 instead of $12.00) to keep subject
+ *  lines tight. */
+function formatCents(cents: number): string {
+  const dollars = cents / 100;
+  if (Number.isInteger(dollars)) return `$${dollars}`;
+  return `$${dollars.toFixed(2)}`;
+}
+
+/** Map machine-readable cancel reasons (cancel_event sets these) to
+ *  short viewer-readable explanations for the refund email body. */
+function cancelReasonLabel(reason: string | null): string {
+  if (!reason) return "the event was cancelled";
+  if (reason.includes("streamer did not declare")) {
+    return "the streamer didn't declare a result in time";
+  }
+  if (reason.includes("MIN_POOL") || reason.includes("min_pool")) {
+    return "the betting pool was too small to settle fairly";
+  }
+  if (reason.includes("not enough unique bettors")) {
+    return "there weren't enough bettors to settle fairly";
+  }
+  if (reason.includes("no bets on winner")) {
+    return "no bets landed on the winning outcome";
+  }
+  return "the event was cancelled";
+}
 
 interface EventCtx {
   /** Human-readable event title — already URL-decoded. */
@@ -196,6 +226,149 @@ Manage notifications: ${unsubscribeUrl()}`;
     </p>
     `,
     { preheader: `${ctx.creatorName} scheduled ${ctx.eventTitle}` },
+  );
+  return { subject, html, text };
+}
+
+// =========================================================================
+// Phase 2 — betting/settlement transactional templates
+// =========================================================================
+//
+// These fire from the payouts_notify_dispatch + events_cancel_notify_dispatch
+// triggers added in 20260530_000001_betting_emails.sql. Same visual frame
+// as the v1 templates above; only the body content + CTA destination differ.
+
+/** 4) Payout credited — a viewer's winning bet was approved and the
+ *  money landed in their balance. Big amount, link back to the event. */
+export function renderPayoutCredited(
+  ctx: EventCtx & { amountCents: number },
+): RenderedEmail {
+  const amount = formatCents(ctx.amountCents);
+  const subject = `💰 You won ${amount} on "${ctx.eventTitle}"`;
+  const text = `Your bet on "${ctx.eventTitle}" by ${ctx.creatorName} won.
+${amount} has been credited to your LiveRush balance.
+
+View the event: ${eventUrl(ctx.eventId)}
+
+Manage notifications: ${unsubscribeUrl()}`;
+  const html = frame(
+    `${coverBlock(ctx.coverUrl)}
+    <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#16a34a;color:#ffffff;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">YOU WON</div>
+    <h1 style="margin:0 0 8px;font-size:28px;font-weight:800;line-height:1.2;">${amount}</h1>
+    <p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#1f2937;">
+      Your bet on <strong>${escape(ctx.eventTitle)}</strong> by ${escape(ctx.creatorName)} won. The payout is in your LiveRush balance.
+    </p>
+    ${ctaButton(eventUrl(ctx.eventId), "View the event")}
+    `,
+    { preheader: `You won ${amount} on ${ctx.eventTitle}` },
+  );
+  return { subject, html, text };
+}
+
+/** 5) Refund issued — the event was cancelled (auto or manually) and a
+ *  viewer's bet has been refunded. Sent one-per-bet via Resend batch. */
+export function renderRefundIssued(
+  ctx: EventCtx & { amountCents: number; reason: string | null },
+): RenderedEmail {
+  const amount = formatCents(ctx.amountCents);
+  const reasonLabel = cancelReasonLabel(ctx.reason);
+  const subject = `↩️ Your ${amount} bet was refunded — "${ctx.eventTitle}" was cancelled`;
+  const text = `Heads up: "${ctx.eventTitle}" by ${ctx.creatorName} was cancelled because ${reasonLabel}.
+Your ${amount} bet has been refunded in full to your LiveRush balance.
+
+View the event: ${eventUrl(ctx.eventId)}
+
+Manage notifications: ${unsubscribeUrl()}`;
+  const html = frame(
+    `${coverBlock(ctx.coverUrl)}
+    <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#6b7280;color:#ffffff;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">REFUNDED</div>
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;line-height:1.25;">Your ${amount} bet was refunded</h1>
+    <p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#1f2937;">
+      <strong>${escape(ctx.eventTitle)}</strong> by ${escape(ctx.creatorName)} was cancelled because ${escape(reasonLabel)}.
+    </p>
+    <p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#1f2937;">
+      Your full stake is back in your LiveRush balance.
+    </p>
+    ${ctaButton(eventUrl(ctx.eventId), "View the event")}
+    `,
+    { preheader: `${amount} refunded — ${ctx.eventTitle} cancelled` },
+  );
+  return { subject, html, text };
+}
+
+/** 6) Creator rake credited — the streamer's share of the pool after
+ *  settlement landed in their creator balance. CTA points at studio. */
+export function renderCreatorRakeCredited(
+  ctx: EventCtx & { amountCents: number },
+): RenderedEmail {
+  const amount = formatCents(ctx.amountCents);
+  const subject = `💵 ${amount} streamer earnings credited from "${ctx.eventTitle}"`;
+  const text = `Your event "${ctx.eventTitle}" is settled.
+${amount} in streamer earnings has been credited to your LiveRush balance.
+
+View your balance: ${STUDIO_URL}/balance
+
+Manage notifications: ${unsubscribeUrl()}`;
+  const html = frame(
+    `${coverBlock(ctx.coverUrl)}
+    <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#FED448;color:#0e0f12;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">EARNINGS CREDITED</div>
+    <h1 style="margin:0 0 8px;font-size:28px;font-weight:800;line-height:1.2;">${amount}</h1>
+    <p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#1f2937;">
+      Your event <strong>${escape(ctx.eventTitle)}</strong> is settled. ${amount} in streamer earnings is now in your LiveRush balance.
+    </p>
+    ${ctaButton(`${STUDIO_URL}/balance`, "View your balance")}
+    `,
+    { preheader: `${amount} streamer earnings credited` },
+  );
+  return { subject, html, text };
+}
+
+/** 7) Payout rejected — a moderator put a payout on hold. Notifies
+ *  whoever the money was destined for: the viewer (winner payout) or
+ *  the creator (rake payout). One template, role-aware wording. */
+export function renderPayoutRejected(
+  ctx: EventCtx & {
+    amountCents: number;
+    reason: string | null;
+    notes: string | null;
+    recipientRole: "viewer" | "streamer";
+  },
+): RenderedEmail {
+  const amount = formatCents(ctx.amountCents);
+  const isViewer = ctx.recipientRole === "viewer";
+  const what = isViewer ? "winning payout" : "streamer earnings payout";
+  const ctaUrl = isViewer ? eventUrl(ctx.eventId) : `${STUDIO_URL}/balance`;
+  const ctaLabel = isViewer ? "View the event" : "View your balance";
+  const reasonLine = ctx.reason
+    ? `Reason: ${ctx.reason}${ctx.notes ? ` — ${ctx.notes}` : ""}`
+    : "A moderator is reviewing this payout.";
+
+  const subject = `⚠️ Your ${what} on "${ctx.eventTitle}" is on hold`;
+  const text = `Your ${what} of ${amount} on "${ctx.eventTitle}" is on hold pending moderator review.
+
+${reasonLine}
+
+We'll update you as soon as the review is complete. No action needed from you right now.
+
+${ctaUrl}
+
+Manage notifications: ${unsubscribeUrl()}`;
+  const html = frame(
+    `${coverBlock(ctx.coverUrl)}
+    <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#f59e0b;color:#ffffff;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">ON HOLD</div>
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;line-height:1.25;">Your ${escape(what)} is on hold</h1>
+    <p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#1f2937;">
+      ${amount} on <strong>${escape(ctx.eventTitle)}</strong> is pending moderator review.
+    </p>
+    <p style="margin:0 0 18px;font-size:14px;color:#6b7280;line-height:1.5;">
+      ${escape(reasonLine)}
+    </p>
+    <p style="margin:0 0 18px;font-size:14px;color:#6b7280;line-height:1.5;">
+      We'll update you as soon as the review is complete. No action needed from you right now.
+    </p>
+    ${ctaButton(ctaUrl, ctaLabel)}
+    `,
+    { preheader: `${amount} ${what} on hold pending review` },
   );
   return { subject, html, text };
 }

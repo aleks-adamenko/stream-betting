@@ -146,6 +146,11 @@ export default function Profile() {
               follow, subscription confirmation). In-app notifications
               on /notifications are unaffected. */}
           <NotificationsToggle />
+          {/* Per-category toggle for payout / refund emails — gated
+              by the global toggle (visually muted when global is off).
+              Covers: winning payout credited, bet refunded after a
+              cancel, payout on hold pending moderator review. */}
+          <PayoutsNotificationsToggle />
         </div>
 
         {/* Photo upload card */}
@@ -333,6 +338,96 @@ function NotificationsToggle() {
           className={cn(
             "absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-all",
             enabled ? "left-6" : "left-1",
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Per-category toggle for payout/refund/settlement emails. Sibling
+ * of NotificationsToggle and visually nested under it — disabled +
+ * muted when the global toggle is off, since the global flag is the
+ * master gate. Writes via the `set_payouts_notifications_enabled` RPC.
+ */
+function PayoutsNotificationsToggle() {
+  const { profile, refreshProfile } = useAuth();
+  const globalEnabled = profile?.notifications_enabled !== false;
+  const [enabled, setEnabled] = useState(
+    profile?.notifications_enabled_payouts ?? true,
+  );
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (profile)
+      setEnabled(profile.notifications_enabled_payouts !== false);
+  }, [profile]);
+
+  const toggle = async () => {
+    if (!globalEnabled) return; // gated by master
+    const next = !enabled;
+    setSaving(true);
+    setEnabled(next); // optimistic
+    try {
+      const { error } = await supabase.rpc(
+        "set_payouts_notifications_enabled",
+        { p_enabled: next },
+      );
+      if (error) throw error;
+      await refreshProfile();
+      toast.success(
+        next
+          ? "Payout & refund emails turned on."
+          : "Payout & refund emails turned off.",
+      );
+    } catch (err) {
+      setEnabled(!next); // revert
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Couldn't update payout notifications";
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const effective = globalEnabled && enabled;
+
+  return (
+    <div
+      className={cn(
+        "mt-2 flex items-center gap-3 rounded-2xl bg-muted/40 p-3 pl-6",
+        !globalEnabled && "opacity-50",
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-foreground">
+          Payout & refund emails
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Get notified when a bet wins, gets refunded, or a payout is held
+          for review.
+          {!globalEnabled && " Turn email notifications on first."}
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={effective}
+        aria-label="Toggle payout and refund emails"
+        onClick={toggle}
+        disabled={saving || !globalEnabled}
+        className={cn(
+          "relative h-7 w-12 flex-shrink-0 rounded-full transition-colors disabled:cursor-not-allowed",
+          effective ? "bg-primary" : "bg-muted-foreground/30",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-all",
+            effective ? "left-6" : "left-1",
           )}
         />
       </button>

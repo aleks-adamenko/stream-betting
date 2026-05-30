@@ -35,6 +35,14 @@ export const FROM = "LiveRush <noreply@liverush.co>";
 export const APP_URL = Deno.env.get("APP_URL") ?? "https://liverush.co";
 
 /**
+ * Base URL for the creator-facing studio app. Used by creator-side
+ * emails (rake credited, payout rejected) so the CTA opens the studio
+ * balance / event detail page instead of the public user-app.
+ */
+export const STUDIO_URL =
+  Deno.env.get("STUDIO_URL") ?? "https://studio.liverush.co";
+
+/**
  * RFC 8058 one-click-unsubscribe headers. Gmail requires these for
  * any sender > 5k emails/day; harmless to ship at any volume. The
  * `unsubscribeUrl` should deep-link to the user-app's notifications
