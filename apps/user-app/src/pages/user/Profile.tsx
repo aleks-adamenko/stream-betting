@@ -140,17 +140,6 @@ export default function Profile() {
               </Link>
             </Button>
           </div>
-
-          {/* Notifications toggle — global opt-out for transactional
-              emails (event going live, new event from a creator I
-              follow, subscription confirmation). In-app notifications
-              on /notifications are unaffected. */}
-          <NotificationsToggle />
-          {/* Per-category toggle for payout / refund emails — gated
-              by the global toggle (visually muted when global is off).
-              Covers: winning payout credited, bet refunded after a
-              cancel, payout on hold pending moderator review. */}
-          <PayoutsNotificationsToggle />
         </div>
 
         {/* Photo upload card */}
@@ -212,6 +201,23 @@ export default function Profile() {
             >
               {nameMutation.isPending ? "Saving…" : "Save"}
             </Button>
+          </div>
+        </div>
+
+        {/* Notifications card — global email opt-out + per-category
+            opt-out for payouts/refunds. Both rows align on the left
+            so the relationship reads as siblings; the payouts row
+            still grays out when the global one is off, signalling the
+            gating without nested indentation. In-app notifications
+            on /notifications are not affected by either toggle. */}
+        <div className="mt-5 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
+          <h2 className="font-heading text-base font-semibold">Notifications</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Choose which emails you receive from LiveRush.
+          </p>
+          <div className="mt-4 space-y-2">
+            <NotificationsToggle />
+            <PayoutsNotificationsToggle />
           </div>
         </div>
 
@@ -311,15 +317,13 @@ function NotificationsToggle() {
   };
 
   return (
-    <div className="mt-3 flex items-center gap-3 rounded-2xl bg-muted/50 p-3">
+    <div className="flex items-center gap-3 rounded-2xl bg-muted/50 p-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-foreground">
-          Email notifications
+          Event updates
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Get notified by email when events you've subscribed to go live,
-          and when creators you follow schedule a new event. In-app
-          notifications are always on.
+          When subscribed events go live or creators you follow schedule new ones.
         </p>
       </div>
       <button
@@ -398,18 +402,17 @@ function PayoutsNotificationsToggle() {
   return (
     <div
       className={cn(
-        "mt-2 flex items-center gap-3 rounded-2xl bg-muted/40 p-3 pl-6",
+        "flex items-center gap-3 rounded-2xl bg-muted/50 p-3",
         !globalEnabled && "opacity-50",
       )}
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-foreground">
-          Payout & refund emails
+          Payouts & refunds
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Get notified when a bet wins, gets refunded, or a payout is held
-          for review.
-          {!globalEnabled && " Turn email notifications on first."}
+          When a bet wins, gets refunded, or a payout is on hold.
+          {!globalEnabled && " Turn event updates on first."}
         </p>
       </div>
       <button

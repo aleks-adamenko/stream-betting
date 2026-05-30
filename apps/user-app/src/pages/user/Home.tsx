@@ -24,6 +24,8 @@ import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { cn } from "@/lib/utils";
 import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
 import rewardsBannerDesktop from "@/assets/rewards-banner-2.jpg";
+import noLiveCoverMobile from "@/assets/live-rush-cover-image.jpg";
+import noLiveCoverDesktop from "@/assets/live-rush-cover-image-2.jpg";
 import type { StreamEvent } from "@/domain/types";
 
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
@@ -105,6 +107,14 @@ function SectionedHome({
         <FeaturedLiveSection event={featured} />
       )}
 
+      {/* No live streams right now — render a branded cover hero in the
+          slot the FeaturedLiveSection would otherwise occupy. Two
+          aspect ratios baked into the source files: 1200×630 social-card
+          for phones, 1920×418 letterbox for desktop. */}
+      {!isLoading && !featured && (
+        <NoLiveCover />
+      )}
+
       {!isLoading && live.length > 0 && (
         <Section title="Live now" showAllHref="/live" className="mt-8 sm:mt-10">
           <EventGrid events={live.slice(0, 4)} />
@@ -129,6 +139,32 @@ function SectionedHome({
 
       {!isLoading && <RewardsBanner className="mt-8 sm:mt-10" />}
     </PageContainer>
+  );
+}
+
+/**
+ * "Nothing live right now" hero — drops in where the live-stream
+ * featured card would normally sit on the Home page. Same rounded
+ * card visual language as the rest of the page (border, shadow).
+ * Decorative only (no link) since there's no clear destination —
+ * the sections below it (Upcoming / Discover more) carry the actual
+ * navigation. Two source files: 1200×630 for phones, 1920×418
+ * letterbox for desktop.
+ */
+function NoLiveCover() {
+  return (
+    <div className="block w-full overflow-hidden rounded-2xl border border-border/30 bg-card shadow-lg">
+      <img
+        src={noLiveCoverMobile}
+        alt=""
+        className="block h-auto w-full lg:hidden"
+      />
+      <img
+        src={noLiveCoverDesktop}
+        alt=""
+        className="hidden h-auto w-full lg:block"
+      />
+    </div>
   );
 }
 
