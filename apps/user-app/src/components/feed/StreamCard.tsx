@@ -7,6 +7,8 @@ import {
   CloudflareStreamPlayer,
   isCloudflareStreamUrl,
 } from "@/components/stream/CloudflareStreamPlayer";
+import { useEventProgress } from "@/hooks/useEventProgress";
+import { useLiveOdds } from "@/hooks/useLiveOdds";
 import type { StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { oddsPillClasses, oddsRange } from "@/lib/odds";
@@ -36,7 +38,23 @@ export function StreamCard({ event }: StreamCardProps) {
   const primaryHref = `/event/${event.id}`;
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
-  const { min: oddsMin, max: oddsMax } = oddsRange(event.outcomes.map((o) => o.odds));
+
+  // Live pari-mutuel odds via the same Realtime channel the event
+  // page uses. event_outcomes.odds is the legacy streamer-set column
+  // (defaults to 2.00×) — never trust it for display.
+  const { data: liveOddsData } = useLiveOdds(event.id);
+  const { data: progress } = useEventProgress(event.id);
+  const liveOddsById = new Map(
+    liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
+  );
+  // Gate on settlement minimums: until the event has enough unique
+  // bettors / distinct outcomes / pool, the odds chips show "Open"
+  // instead of a misleading number on an event that's guaranteed to
+  // refund. Mirrors BetPanel / FullscreenBetOverlay / Home featured.
+  const oddsFor = (id: string) =>
+    progress.minimumsMet ? (liveOddsById.get(id) ?? null) : null;
+  const displayOddsList = event.outcomes.map((o) => oddsFor(o.id) ?? 1);
+  const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
 
   return (
     <article className="relative mx-auto w-full max-w-[520px] snap-start scroll-mt-4">
@@ -133,23 +151,28 @@ export function StreamCard({ event }: StreamCardProps) {
           <p className="line-clamp-2 text-sm text-muted-foreground">{event.description}</p>
 
           <div className="-mx-1 flex gap-2 overflow-x-auto scrollbar-hide px-1">
-            {event.outcomes.slice(0, 4).map((o) => (
-              <Link
-                key={o.id}
-                to={primaryHref}
-                className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-xs font-medium transition-colors hover:border-primary/40 hover:bg-primary/5"
-              >
-                <span className="max-w-[140px] truncate text-foreground">{o.label}</span>
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                    oddsPillClasses(o.odds, oddsMin, oddsMax),
-                  )}
+            {event.outcomes.slice(0, 4).map((o) => {
+              const odds = oddsFor(o.id);
+              return (
+                <Link
+                  key={o.id}
+                  to={primaryHref}
+                  className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-xs font-medium transition-colors hover:border-primary/40 hover:bg-primary/5"
                 >
-                  {o.odds.toFixed(2)}×
-                </span>
-              </Link>
-            ))}
+                  <span className="max-w-[140px] truncate text-foreground">{o.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                      odds == null
+                        ? "bg-muted text-muted-foreground"
+                        : oddsPillClasses(odds, oddsMin, oddsMax),
+                    )}
+                  >
+                    {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                  </span>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </div>

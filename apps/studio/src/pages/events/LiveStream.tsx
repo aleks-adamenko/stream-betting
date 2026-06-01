@@ -580,9 +580,13 @@ export default function LiveStream() {
               {event?.title}
             </p>
           </div>
-          {/* Bottom row: absolute betting countdown — same value all
-              viewers see in the user-app overlay. */}
-          {phase === "live" && event?.betting_closes_at && (
+          {/* Absolute betting countdown — same value all viewers see
+              in the user-app overlay. Gated on event.status === 'live'
+              rather than the local `phase` so a refresh-and-resume
+              cycle (status='live', phase momentarily 'idle' until
+              Resume camera fires) doesn't hide the timer the streamer
+              still needs to see. */}
+          {event?.status === "live" && event?.betting_closes_at && (
             <BettingCountdown
               closesAt={event.betting_closes_at}
               variant="compact"

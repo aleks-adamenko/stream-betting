@@ -105,6 +105,16 @@ export async function placeBet(
 }
 
 export async function listMyBets(): Promise<BetWithContext[]> {
+  // Get the current user id and filter the SELECT by it explicitly.
+  // The RLS policy on `bets` would normally scope to auth.uid() but
+  // the admin RLS policy added in 20260531_000001_admin_app.sql lets
+  // super_admin users read every bet — so an admin opening the
+  // user-app on a second account would otherwise see ALL bets here
+  // and the EventDetails BetPanel would think they'd already placed
+  // someone else's bet. Belt-and-suspenders filter.
+  const { data: session } = await supabase.auth.getUser();
+  const userId = session?.user?.id;
+  if (!userId) return [];
   const { data, error } = await supabase
     .from("bets")
     .select(
@@ -116,6 +126,7 @@ export async function listMyBets(): Promise<BetWithContext[]> {
       payout:payouts!payouts_bet_id_fkey ( id, type, amount_cents, status, completed_at )
     `,
     )
+    .eq("user_id", userId)
     .order("placed_at", { ascending: false });
 
   if (error) throw error;

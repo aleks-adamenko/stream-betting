@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEvents } from "@/hooks/useEvents";
+import { useEventProgress } from "@/hooks/useEventProgress";
 import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { cn } from "@/lib/utils";
 import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
@@ -278,6 +279,12 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
   // without a refresh. Per-outcome live odds are null until the
   // pool gets its first bet; we render "Open" in that case.
   const { data: liveOddsData } = useLiveOdds(event.id);
+  // Same readiness gate as the event-page BetPanel: don't surface
+  // odds in the Home hero until the event has enough unique bettors,
+  // outcomes with bets, and pool to actually settle. Otherwise
+  // viewers see misleading "2.00×" / sub-1× numbers on an event
+  // that's guaranteed to refund.
+  const { data: progress } = useEventProgress(event.id);
   const liveOddsById = new Map(
     liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
   );
@@ -355,7 +362,9 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
           >
             <ul className="space-y-1.5">
               {event.outcomes.map((o) => {
-                const odds = liveOddsById.get(o.id) ?? null;
+                const odds = progress.minimumsMet
+                  ? (liveOddsById.get(o.id) ?? null)
+                  : null;
                 return (
                   <li
                     key={o.id}

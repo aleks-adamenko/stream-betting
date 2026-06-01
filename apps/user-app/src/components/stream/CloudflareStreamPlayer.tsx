@@ -57,6 +57,14 @@ export function CloudflareStreamPlayer({
   const playerRef = useRef<WebRTCPlayer | null>(null);
   const [muted, setMuted] = useState(true);
   const [hasMedia, setHasMedia] = useState(false);
+  // `paused` flips true when the WHEP layer fires `no-media` *after*
+  // having had media — i.e. the streamer dropped their WHIP
+  // connection mid-stream (page reload, network blip, app
+  // background). The Eyevinn library auto-reconnects when frames
+  // start flowing again and emits `media-recovered`; we mirror that
+  // back to false so the overlay disappears without a manual refresh
+  // from the viewer.
+  const [paused, setPaused] = useState(false);
   // `inView` only matters when `lazy` is true. We default to !lazy
   // so eagerly-mounted players (event page, featured hero) start
   // immediately without waiting for an IntersectionObserver tick.
@@ -119,12 +127,18 @@ export function CloudflareStreamPlayer({
       player.on("error", (err: unknown) =>
         console.error("[whep] error:", err),
       );
-      player.on("no-media", () =>
-        console.warn("[whep] no media received yet from Cloudflare"),
-      );
-      player.on("media-recovered", () =>
-        console.info("[whep] media recovered"),
-      );
+      player.on("no-media", () => {
+        console.warn("[whep] no media — stream paused");
+        // Only flip to "paused" once we've actually seen media at
+        // least once. The initial `no-media` before the streamer's
+        // first frame should still show the loading spinner, not
+        // a "stream paused" message.
+        setPaused(true);
+      });
+      player.on("media-recovered", () => {
+        console.info("[whep] media recovered");
+        setPaused(false);
+      });
       player.on("connect-error", (err: unknown) =>
         console.error("[whep] connect-error:", err),
       );
@@ -173,6 +187,7 @@ export function CloudflareStreamPlayer({
         playerRef.current = null;
       }
       setHasMedia(false);
+      setPaused(false);
     };
   }, [src, inView]);
 
@@ -229,6 +244,25 @@ export function CloudflareStreamPlayer({
           hasMedia ? "opacity-100" : "opacity-0",
         )}
       />
+      {/* Stream-paused overlay — drops in when WHEP fires `no-media`
+          AFTER we've already had media flowing (streamer reloaded,
+          backgrounded the app, lost connectivity). The Eyevinn
+          library handles the reconnect itself; once frames start
+          flowing again it fires `media-recovered` and we clear
+          this. Hidden in lazy/feed mode so feed cards don't churn. */}
+      {paused && hasMedia && !lazy && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/65 text-white backdrop-blur-sm">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <div className="text-center">
+            <p className="font-heading text-sm font-semibold">
+              Stream paused
+            </p>
+            <p className="mt-0.5 text-xs text-white/70">
+              Reconnecting — playback resumes when the streamer's back.
+            </p>
+          </div>
+        </div>
+      )}
       {/* Sound toggle — bottom-center, same on desktop + mobile.
           Hidden in lazy/feed mode because a wall of unmuted cards
           is hostile UX; the detail page is where viewers control
