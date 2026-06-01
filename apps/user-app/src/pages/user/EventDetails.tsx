@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import {
   Bell,
   Calendar,
+  ChevronDown,
+  ChevronUp,
   Users,
   Trophy,
   LogIn,
@@ -395,8 +397,15 @@ export default function EventDetails() {
           </Link>
         </div>
 
-        {/* Right-side / bottom panel */}
-        <aside className="flex flex-col gap-4">
+        {/* Right-side / bottom panel.
+            Desktop: position: sticky at top:18px (matches the
+            PageContainer's lg:pt-[18px], so the aside hugs its
+            natural position and stays put as the centre column
+            scrolls). Height = viewport − 18px top − 18px bottom,
+            giving the chat card the same breathing room from the
+            screen edge at the bottom as the betting panel has at
+            the top. Only the centre column scrolls on desktop. */}
+        <aside className="flex flex-col gap-4 lg:sticky lg:top-[18px] lg:h-[calc(100dvh-36px)]">
           <div ref={betPanelRef} className="order-1 scroll-mt-16 lg:order-2">
             {isLive ? (
               <BetPanel event={event} />
@@ -414,8 +423,14 @@ export default function EventDetails() {
           >
             <img src={rewardsBannerImg} alt="" className="block h-auto w-full" />
           </Link>
-          <div className="order-3 lg:order-3">
-            <ChatPanel eventId={event.id} />
+          {/* Chat slot takes the remaining vertical space inside the
+              sticky aside on desktop. min-h-0 is the magic flex
+              utility that lets the slot shrink below its content's
+              natural height so the inner ul can scroll. When the
+              betting panel collapses, its row shrinks and the
+              flex-1 chat grows to absorb the freed pixels. */}
+          <div className="order-3 lg:order-3 lg:flex-1 lg:min-h-0">
+            <ChatPanel eventId={event.id} eventStatus={event.status} />
           </div>
           {/* Event info — mobile placement, below the chat container.
               On desktop this same block already renders inside the
@@ -922,6 +937,11 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const [selected, setSelected] = useState<BetOutcome | null>(null);
   const [stake, setStake] = useState<string>("10");
   const [submitting, setSubmitting] = useState(false);
+  // Collapse toggle — header stays visible, body folds away. The
+  // chevron in the top-right replaces the old "Open / Placed" status
+  // chip; lifecycle context is already implied by which panel
+  // (BetPanel / UpcomingPanel / FinishedPanel) is rendered.
+  const [collapsed, setCollapsed] = useState(false);
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1002,25 +1022,39 @@ function BetPanel({ event }: { event: StreamEvent }) {
 
   return (
     <section className="card-elevated overflow-hidden">
-      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
+      {/* Compact header — half the height of the original. py-1.5 +
+          smaller icons keeps the gradient bar visible as a section
+          divider without the bar eating a chunk of the panel's
+          vertical real estate. Same treatment is applied across
+          BetPanel / UpcomingPanel / FinishedPanel / ChatPanel so
+          all four look consistent in the right rail. */}
+      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-1.5 text-white">
         <div className="flex items-center gap-2">
-          <Trophy className="h-5 w-5 fill-[#FED448] text-[#FED448]" />
+          <Trophy className="h-4 w-4 fill-[#FED448] text-[#FED448]" />
           <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
             {hasBet ? "Your bet" : "Place a bet"}
           </h2>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
-          {hasBet ? (
-            "Placed"
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand bet panel" : "Collapse bet panel"}
+          aria-expanded={!collapsed}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/25"
+        >
+          {collapsed ? (
+            <ChevronDown className="h-3.5 w-3.5" />
           ) : (
-            <>
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" /> Open
-            </>
+            <ChevronUp className="h-3.5 w-3.5" />
           )}
-        </span>
+        </button>
       </div>
 
-      <div className="p-5 sm:p-6">
+      {!collapsed && (
+      // Tight side padding: half the original p-5/p-6 so the
+      // outcome rows + stake input use the full width of the
+      // right-rail card instead of leaving wide gutters.
+      <div className="p-2.5 sm:p-3">
 
       {/* Sign-in CTA when unauthenticated */}
       {!user && (
@@ -1210,6 +1244,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
         <NotifyMeBlock event={event} />
       </div>
       </div>
+      )}
     </section>
   );
 }
@@ -1280,86 +1315,69 @@ function ReadinessCard({
 }
 
 function UpcomingPanel({ event }: { event: StreamEvent }) {
-  const startsAt = new Date(event.scheduledAt);
-  // Re-render every minute so the "starts in" chip stays accurate
-  // without a page reload. Cheap — no realtime channel needed since
-  // the value is derived purely from the local clock.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(id);
-  }, []);
-  const diffMs = startsAt.getTime() - now;
-  const diffMin = Math.max(0, Math.floor(diffMs / 60_000));
-  const diffH = Math.floor(diffMin / 60);
-  // Format ladder: 0 min → "starting", < 60 min → "in Xm",
-  // < 24 h → "in Xh", else → date.
-  const startsInLabel =
-    diffMin === 0
-      ? "starting"
-      : diffMin < 60
-        ? `in ${diffMin}m`
-        : diffH < 24
-          ? `in ${diffH}h`
-          : startsAt.toLocaleDateString();
+  // Collapse toggle — chevron in the top-right replaces the old
+  // "starts in / starting" status chip. Matches the BetPanel /
+  // FinishedPanel header pattern so the three lifecycle variants of
+  // the right-rail panel all behave identically.
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
     <section className="card-elevated overflow-hidden">
-      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
+      {/* Header is "Bet outcomes" with the Trophy icon — same framing
+          a viewer sees once the event goes live, so the panel reads
+          as the same surface across upcoming → live → ended. The old
+          "UPCOMING / starts in 3h" calendar header is gone; the
+          per-event scheduling info is already on the page header. */}
+      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-1.5 text-white">
         <div className="flex items-center gap-2">
-          <Calendar className="h-5 w-5 text-[#FED448]" />
+          <Trophy className="h-4 w-4 fill-[#FED448] text-[#FED448]" />
           <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
-            Upcoming
+            Bet outcomes
           </h2>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
-          {startsInLabel}
-        </span>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand outcomes" : "Collapse outcomes"}
+          aria-expanded={!collapsed}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/25"
+        >
+          {collapsed ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronUp className="h-3.5 w-3.5" />
+          )}
+        </button>
       </div>
 
-      <div className="space-y-4 p-5 sm:p-6">
+      {!collapsed && (
+      <div className="space-y-4 p-2.5 sm:p-3">
 
-      <div className="rounded-xl bg-muted/50 p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Starts at
-        </p>
-        <p className="mt-1 font-heading text-base font-semibold">
-          {startsAt.toLocaleString("en-US", {
-            weekday: "long",
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-          })}
-        </p>
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <Trophy className="h-4 w-4 text-accent" />
-          <h3 className="font-heading text-sm font-semibold">Bet outcomes</h3>
-        </div>
-        <ul className="space-y-2">
-          {event.outcomes.map((o) => (
-            <li
-              key={o.id}
-              className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-2"
-            >
-              <span className="truncate text-sm font-medium">{o.label}</span>
-              {/* Scheduled events have no pool yet — odds don't exist
-                  until the stream goes live and viewers start betting.
-                  Show "Open" placeholder per spec §8.2 so we don't
-                  mislead viewers with the legacy 2.00× default. */}
-              <span className="ml-3 inline-flex flex-shrink-0 items-center rounded-full bg-muted px-2.5 py-1 text-sm font-extrabold tabular-nums text-muted-foreground">
-                Open
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      {/* The inline "Bet outcomes" trophy + subtitle that used to
+          live here was redundant with the panel header (now also
+          "Bet outcomes"), so it's gone. Outcomes go straight under
+          the gradient bar. */}
+      <ul className="space-y-2">
+        {event.outcomes.map((o) => (
+          <li
+            key={o.id}
+            className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-2"
+          >
+            <span className="truncate text-sm font-medium">{o.label}</span>
+            {/* Scheduled events have no pool yet — odds don't exist
+                until the stream goes live and viewers start betting.
+                Show "Open" placeholder per spec §8.2 so we don't
+                mislead viewers with the legacy 2.00× default. */}
+            <span className="ml-3 inline-flex flex-shrink-0 items-center rounded-full bg-muted px-2.5 py-1 text-sm font-extrabold tabular-nums text-muted-foreground">
+              Open
+            </span>
+          </li>
+        ))}
+      </ul>
 
       <NotifyMeBlock event={event} />
       </div>
+      )}
     </section>
   );
 }
@@ -1463,38 +1481,55 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
     (o) => liveOddsById.get(o.id) ?? 1,
   );
   const { min: oddsMin, max: oddsMax } = oddsRange(finalOddsList);
+  // Collapse toggle — chevron in the top-right replaces the old
+  // "Ended / Cancelled / Awaiting result" status chip. Lifecycle
+  // context is now carried by the inline hero block (and by the
+  // panel just being the FinishedPanel) instead of by the header.
+  const [collapsed, setCollapsed] = useState(false);
   // `pending_moderation` and `settled` ride the same "Ended" panel as
-  // `finished`, but the header chip and the hero block change to make
-  // the in-between states obvious.
+  // `finished`, but the inline hero changes to make the in-between
+  // states obvious.
   const isAwaitingResult = event.status === "pending_moderation";
   const isCancelled = event.status === "cancelled";
   const hadBets = progress.totalPoolCents > 0;
-  // Map declared winning outcome ids → labels for the hero.
+  // Map declared winning outcome ids → labels. We no longer render a
+  // separate "Winners: X · Y" hero card — the yellow-tinted rows in
+  // the Final odds list below already tell that story without doubling
+  // the headline up.
   const winningIds = new Set(event.winningOutcomeIds ?? []);
-  const winningLabels = event.outcomes
-    .filter((o) => winningIds.has(o.id))
-    .map((o) => o.label);
-  const headerLabel = isAwaitingResult
-    ? "Awaiting result"
-    : isCancelled
-      ? "Cancelled"
-      : "Ended";
   return (
     <section className="card-elevated overflow-hidden">
-      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-3 text-white">
+      <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-1.5 text-white">
         <div className="flex items-center gap-2">
-          <Trophy className="h-5 w-5 text-[#FED448]" />
+          <Trophy className="h-4 w-4 text-[#FED448]" />
           <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
             {isAwaitingResult ? "Betting closed" : "Final result"}
           </h2>
         </div>
-        <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm">
-          {headerLabel}
-        </span>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand result" : "Collapse result"}
+          aria-expanded={!collapsed}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/25"
+        >
+          {collapsed ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronUp className="h-3.5 w-3.5" />
+          )}
+        </button>
       </div>
 
-      <div className="space-y-4 p-5 sm:p-6">
+      {!collapsed && (
+      <div className="space-y-4 p-2.5 sm:p-3">
 
+      {/* Lifecycle hero — only rendered for the "no winner to point
+          at" cases (awaiting result, cancelled, finished-but-no-bets,
+          or legacy finished events without winning_outcome_ids).
+          When winners ARE declared, we skip this block entirely so
+          the yellow-tinted rows in the Final odds list below carry
+          the message on their own — no duplication. */}
       {isAwaitingResult ? (
         <div className="rounded-xl bg-amber-500/10 p-4 text-center">
           <p className="font-heading text-sm font-semibold text-amber-700 dark:text-amber-300">
@@ -1522,34 +1557,22 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
             No bets were placed on this event.
           </p>
         </div>
-      ) : winningLabels.length > 0 ? (
-        <div className="rounded-xl bg-muted/50 p-4 text-center">
-          <Trophy className="mx-auto mb-2 h-6 w-6 text-accent" />
-          <p className="font-heading text-base font-semibold">
-            {winningLabels.length === 1
-              ? `Winner: ${winningLabels[0]}`
-              : `Winners: ${winningLabels.join(" · ")}`}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {winningLabels.length > 1
-              ? "Dead heat — pool split across winning outcomes."
-              : "Pari-mutuel pool settled to winning outcome."}
-          </p>
-        </div>
-      ) : (
+      ) : winningIds.size === 0 ? (
         // Legacy `finished` events from before the pari-mutuel pipeline
         // — no winning_outcome_ids stamped. Show a generic ended message.
         <div className="rounded-xl bg-muted/50 p-4 text-center">
           <p className="font-heading text-sm font-semibold">Stream finished</p>
         </div>
-      )}
+      ) : null}
 
       {/* Final odds only make sense when the pool actually had bets.
           Otherwise we'd be showing "Open" or "—" on every row, which
-          is just noise on a stream that ended empty. */}
+          is just noise on a stream that ended empty. No section title
+          here — the panel header ("Final result") already frames what
+          the list is, and the yellow-tinted rows carry the "these
+          won" signal on their own. */}
       {hadBets && (
         <div>
-          <h3 className="mb-2 font-heading text-sm font-semibold">Final odds</h3>
           <ul className="space-y-2">
             {event.outcomes.map((o) => {
               const odds = liveOddsById.get(o.id) ?? null;
@@ -1560,7 +1583,7 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
                   className={cn(
                     "flex items-center justify-between rounded-lg border px-3 py-2",
                     isWinner
-                      ? "border-accent/40 bg-accent/[0.06]"
+                      ? "border-accent/60 bg-accent/[0.12]"
                       : "border-border/40 bg-background/60",
                   )}
                 >
@@ -1586,17 +1609,8 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
           </ul>
         </div>
       )}
-
-      <Button asChild variant="secondary" size="lg" className="w-full">
-        <Link to="/discover">Discover upcoming events</Link>
-      </Button>
-
-      {/* Subscriber count stays visible even after the event has
-          finished — social proof showing how many people cared
-          about this one. NotifyMeBlock auto-hides its button when
-          status is finished. */}
-      <NotifyMeBlock event={event} />
       </div>
+      )}
     </section>
   );
 }
