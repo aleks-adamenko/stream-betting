@@ -156,19 +156,23 @@ returns table (
   id              uuid,
   email           text,
   -- Raw profiles.role enum value ('user' | 'influencer' | 'super_admin').
-  -- Kept for backwards compat; new clients should read role_label
-  -- which collapses the legacy enum + creator_profiles membership into
-  -- the three meaningful product roles.
+  -- Kept for backwards compat; new clients should read role_labels.
   role            text,
-  -- Derived role label: 'admin' | 'creator' | 'viewer'.
-  --   super_admin → admin (super_admin wins even if they're also a
-  --     creator on the platform).
-  --   else if creator_profiles row exists → creator.
-  --   else → viewer.
-  role_label      text,
+  -- Array of every role the user holds simultaneously, ordered for
+  -- visual hierarchy (admin first, then creator, then viewer). Every
+  -- registered profile is at minimum a 'viewer'; creators add
+  -- 'creator'; super_admins add 'admin'. A power user with all three
+  -- gets ['admin','creator','viewer'].
+  role_labels     text[],
   display_name    text,
   avatar_url      text,
   balance_cents   integer,
+  -- Creator-specific fields, null when the user is not a creator.
+  -- Lets the admin Users page render pending Approve/Reject actions
+  -- inline (no separate Creators tab needed).
+  creator_status        text,
+  creator_rejected_note text,
+  creator_moderated_at  timestamptz,
   created_at      timestamptz
 )
 language plpgsql
@@ -189,16 +193,24 @@ begin
     p.id,
     u.email::text,
     p.role,
-    case
-      when p.role = 'super_admin' then 'admin'
-      when exists (
-        select 1 from public.creator_profiles c where c.id = p.id
-      ) then 'creator'
-      else 'viewer'
-    end as role_label,
+    array_remove(
+      array[
+        case when p.role = 'super_admin' then 'admin' end,
+        case
+          when exists (
+            select 1 from public.creator_profiles c where c.id = p.id
+          ) then 'creator'
+        end,
+        'viewer'
+      ],
+      null
+    ) as role_labels,
     p.display_name,
     p.avatar_url,
     p.balance_cents,
+    (select c.status from public.creator_profiles c where c.id = p.id),
+    (select c.rejected_note from public.creator_profiles c where c.id = p.id),
+    (select c.moderated_at from public.creator_profiles c where c.id = p.id),
     p.created_at
   from public.profiles p
   join auth.users u on u.id = p.id

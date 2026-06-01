@@ -839,14 +839,20 @@ export interface Database {
           id: string;
           email: string;
           role: "user" | "influencer" | "super_admin";
-          // Derived role bucket used by the admin Users UI. super_admin
-          // wins, then creator_profiles membership, else viewer.
-          role_label: "admin" | "creator" | "viewer";
+          // Multi-role: every applicable role the user holds at once.
+          // 'viewer' is always present; 'creator' if creator_profiles
+          // row exists; 'admin' if profiles.role = 'super_admin'.
+          // Ordered for visual hierarchy: [admin?, creator?, viewer].
+          role_labels: Array<"admin" | "creator" | "viewer">;
           display_name: string | null;
           avatar_url: string | null;
           // integer in Postgres — narrower than bigint but plenty for
           // cent-denominated virtual balance ceilings.
           balance_cents: number;
+          // Creator-specific fields, null when user is not a creator.
+          creator_status: "pending" | "verified" | "rejected" | null;
+          creator_rejected_note: string | null;
+          creator_moderated_at: string | null;
           created_at: string;
         }>;
       };
