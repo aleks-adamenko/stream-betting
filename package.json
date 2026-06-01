@@ -8,9 +8,11 @@
     "dev": "pnpm --filter user-app dev",
     "dev:user": "pnpm --filter user-app dev",
     "dev:studio": "pnpm --filter studio dev",
+    "dev:admin": "pnpm --filter admin-app dev",
     "build": "pnpm --filter user-app build",
     "build:user": "pnpm --filter user-app build",
     "build:studio": "pnpm --filter studio build",
+    "build:admin": "pnpm --filter admin-app build",
     "preview:user": "pnpm --filter user-app preview",
     "lint": "pnpm -r --if-present lint"
   },

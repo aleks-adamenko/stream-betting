@@ -146,6 +146,13 @@ export interface Database {
           commission_pct: number;
           created_at: string;
           updated_at: string;
+          // Admin moderation audit (Phase 1 admin app — set by
+          // approve_creator / reject_creator). rejected_note carries
+          // the operator's explanation back to the creator's studio
+          // session so they know why and what to fix.
+          rejected_note: string | null;
+          moderated_by: string | null;
+          moderated_at: string | null;
         };
         Insert: {
           id: string;
@@ -809,6 +816,121 @@ export interface Database {
       delete_event_outcome: {
         Args: { p_outcome_id: string };
         Returns: void;
+      };
+      // ---- Admin app Phase 1 (20260531_000001_admin_app.sql) ----
+      // All admin RPCs are SECURITY DEFINER and gate on profiles.role =
+      // 'super_admin' inside the function body. Calling them as a
+      // non-admin authenticated user raises errcode 42501.
+      is_admin: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      approve_creator: {
+        Args: { p_creator_id: string };
+        Returns: Database["public"]["Tables"]["creator_profiles"]["Row"];
+      };
+      reject_creator: {
+        Args: { p_creator_id: string; p_note: string };
+        Returns: Database["public"]["Tables"]["creator_profiles"]["Row"];
+      };
+      list_admin_users: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          id: string;
+          email: string;
+          role: "user" | "influencer" | "super_admin";
+          // Derived role bucket used by the admin Users UI. super_admin
+          // wins, then creator_profiles membership, else viewer.
+          role_label: "admin" | "creator" | "viewer";
+          display_name: string | null;
+          avatar_url: string | null;
+          // integer in Postgres — narrower than bigint but plenty for
+          // cent-denominated virtual balance ceilings.
+          balance_cents: number;
+          created_at: string;
+        }>;
+      };
+      list_admin_creators: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          id: string;
+          email: string;
+          handle: string;
+          display_name: string;
+          avatar_url: string | null;
+          bio: string | null;
+          social_links: Json;
+          followers_count: number;
+          status: "pending" | "verified" | "rejected";
+          commission_pct: number;
+          rejected_note: string | null;
+          moderated_by: string | null;
+          moderated_at: string | null;
+          created_at: string;
+          // Per-creator activity stats — added 20260531_000001.
+          events_created: number;
+          events_hosted: number;
+          earned_cents: number;
+        }>;
+      };
+      list_admin_ledger: {
+        Args: {
+          p_limit?: number;
+          p_cursor?: string | null;
+        };
+        Returns: Array<{
+          id: string;
+          account: string;
+          account_role: "platform" | "event_pool" | "creator" | "viewer" | "unknown";
+          account_label: string;
+          account_id: string | null;
+          type:
+            | "deposit"
+            | "bet"
+            | "withdrawal"
+            | "payout_pending"
+            | "payout_credit"
+            | "payout_reverse"
+            | "refund"
+            | "rake"
+            | "residual"
+            | "adjustment";
+          amount_cents: number;
+          reference_id: string | null;
+          event_id: string | null;
+          event_title: string | null;
+          created_at: string;
+        }>;
+      };
+      get_platform_earnings: {
+        Args: Record<string, never>;
+        Returns: {
+          lifetime_cents: number;
+          breakdown_30d: Array<{ day: string; amount_cents: number }>;
+        };
+      };
+      // Existing settle_event / approve_payout / reject_payout RPCs
+      // are now callable by super_admin in addition to service_role
+      // — same args + return shapes as before.
+      settle_event: {
+        Args: { p_event_id: string; p_idempotency_key: string };
+        Returns: {
+          cancelled?: boolean;
+          reason?: string;
+          [key: string]: unknown;
+        };
+      };
+      approve_payout: {
+        Args: { p_payout_id: string; p_idempotency_key: string };
+        Returns: {
+          idempotent_replay: boolean;
+          payout_id: string;
+          new_balance_cents: number | null;
+        };
+      };
+      reject_payout: {
+        Args: { p_payout_id: string; p_reason: string; p_notes?: string };
+        Returns: Database["public"]["Tables"]["payouts"]["Row"];
       };
     };
   };
