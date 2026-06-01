@@ -5,13 +5,16 @@ import { toast } from "sonner";
 import {
   Camera,
   CameraOff,
-  Coins,
+  CheckCircle2,
+  Circle,
   Loader2,
+  ListChecks,
   MessageCircle,
   Mic,
   MicOff,
   PhoneOff,
   Radio,
+  SwitchCamera,
   Trophy,
   Users,
   Video,
@@ -29,6 +32,10 @@ import {
 } from "@liverush/ui";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEventChat, type ChatMessage } from "@/hooks/useEventChat";
+import {
+  useEventProgress,
+  type EventProgress,
+} from "@/hooks/useEventProgress";
 import { useEventViewers } from "@/hooks/useEventViewers";
 import { supabase } from "@/integrations/supabase/client";
 import { WhipPublisher } from "@/lib/whip";
@@ -70,6 +77,23 @@ export default function LiveStream() {
   // see a dark frame / hear silence until the creator re-enables.
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
+  // Front / rear camera selector. Default to "user" (selfie cam) —
+  // matches existing behaviour. The flip button at the bottom of
+  // the live view lets the streamer switch between the two without
+  // tearing down the WHIP session: we getUserMedia with the opposite
+  // facingMode, then hot-swap the video track on the publisher via
+  // replaceVideoTrack. Audio + the on/off toggle state carry across
+  // the swap untouched.
+  const [facingMode, setFacingMode] = useState<"user" | "environment">(
+    "user",
+  );
+  // Only true on devices that expose >= 2 video inputs (typical
+  // mobile, rare on desktop). Hides the flip button entirely when
+  // there's nothing to flip to.
+  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  // Guards against double-tap during the async re-acquire + replace
+  // dance — the flip button disables itself until the swap settles.
+  const [flippingCamera, setFlippingCamera] = useState(false);
 
   // Declare-winner modal — opens after betting_closes_at. Stores the
   // outcome ids the creator has checked; supports multi-select for
@@ -102,6 +126,34 @@ export default function LiveStream() {
       setPhase("unsupported");
     }
   }, []);
+
+  // Probe the device list for available video inputs so we can
+  // decide whether to show the flip-camera button. Some platforms
+  // only surface the second camera AFTER getUserMedia permission has
+  // been granted, so we also re-probe after the first successful
+  // `handleStart` (below) to catch that case.
+  const refreshCameraCount = useCallback(async () => {
+    try {
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices ||
+        typeof navigator.mediaDevices.enumerateDevices !== "function"
+      ) {
+        return;
+      }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter((d) => d.kind === "videoinput");
+      setHasMultipleCameras(videoInputs.length >= 2);
+    } catch {
+      // Locked-down browsers can throw on enumerateDevices — treat
+      // as single-camera and hide the flip button.
+      setHasMultipleCameras(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCameraCount();
+  }, [refreshCameraCount]);
 
   // Pull the event row so we know if we should be here at all.
   const { data: event, isLoading: eventLoading } = useQuery({
@@ -288,7 +340,7 @@ export default function LiveStream() {
       const wantsPortrait = isMobile && portrait;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: "user",
+          facingMode,
           width: { ideal: wantsPortrait ? 720 : 1280 },
           height: { ideal: wantsPortrait ? 1280 : 720 },
         },
@@ -351,6 +403,11 @@ export default function LiveStream() {
         await startMutation.mutateAsync();
       }
       setPhase("live");
+      // Some platforms (notably iOS Safari) only surface the second
+      // video input after the user has granted camera permission.
+      // Re-probe now so the flip-camera button appears the moment
+      // it's actually usable.
+      void refreshCameraCount();
     } catch (err) {
       const name = err instanceof Error ? err.name : "";
       const message =
@@ -386,7 +443,10 @@ export default function LiveStream() {
       try {
         const newStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "user",
+            // Keep whichever camera the streamer is currently using —
+            // a rotation shouldn't snap the rear camera back to the
+            // selfie cam.
+            facingMode,
             width: { ideal: portrait ? 720 : 1280 },
             height: { ideal: portrait ? 1280 : 720 },
           },
@@ -433,11 +493,12 @@ export default function LiveStream() {
 
     orientation.addEventListener("change", handler);
     return () => orientation.removeEventListener("change", handler);
-    // videoEnabled + audioEnabled are intentionally in the dep array:
-    // if the creator toggles a track off and THEN rotates, the
-    // handler captured at registration time should observe the
-    // updated state. Re-registering on each toggle change is cheap.
-  }, [phase, videoEnabled, audioEnabled]);
+    // videoEnabled + audioEnabled + facingMode are intentionally in
+    // the dep array: if the creator toggles a track off, flips the
+    // camera, and THEN rotates, the handler captured at registration
+    // time should observe the updated state. Re-registering on each
+    // change is cheap.
+  }, [phase, videoEnabled, audioEnabled, facingMode]);
 
   // Camera + mic in-broadcast toggles. We flip `track.enabled` rather
   // than stop/start the track so the WebRTC connection to Cloudflare
@@ -463,6 +524,90 @@ export default function LiveStream() {
     }
     setAudioEnabled(next);
   }, [audioEnabled]);
+
+  // Mid-broadcast camera flip — same mechanic as the orientation
+  // handler: re-acquire getUserMedia with the opposite facingMode,
+  // re-apply the streamer's current on/off toggle state to the
+  // fresh tracks BEFORE handing them to the publisher (otherwise
+  // a flip would silently turn the camera back on for a streamer
+  // who'd toggled it off), then hot-swap the senders via
+  // replaceVideoTrack / replaceAudioTrack. The WHIP session never
+  // tears down — viewers see the new camera angle on the next
+  // segment without a disconnect or re-buffering loop.
+  const flipCamera = useCallback(async () => {
+    if (phase !== "live") return;
+    if (flippingCamera) return;
+    const publisher = publisherRef.current;
+    if (!publisher) return;
+
+    setFlippingCamera(true);
+    const nextFacingMode: "user" | "environment" =
+      facingMode === "user" ? "environment" : "user";
+
+    try {
+      const portrait = window.matchMedia("(orientation: portrait)").matches;
+      const isMobile = window.matchMedia(
+        "(max-width: 767px), (pointer: coarse)",
+      ).matches;
+      const wantsPortrait = isMobile && portrait;
+
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: nextFacingMode,
+          width: { ideal: wantsPortrait ? 720 : 1280 },
+          height: { ideal: wantsPortrait ? 1280 : 720 },
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      const newAudioTrack = newStream.getAudioTracks()[0];
+
+      // Preserve the streamer's current toggle state on the fresh
+      // tracks. Without this, flipping the camera would override
+      // a "camera off" or "mic muted" intent.
+      if (newVideoTrack) newVideoTrack.enabled = videoEnabled;
+      if (newAudioTrack) newAudioTrack.enabled = audioEnabled;
+
+      // Replace both senders. Video is the obvious one; audio is
+      // included for parity with the orientation-change handler —
+      // some browsers tie the audio track lifecycle to the video
+      // device handle, so re-acquiring both keeps them in sync.
+      if (newVideoTrack) await publisher.replaceVideoTrack(newVideoTrack);
+      if (newAudioTrack) await publisher.replaceAudioTrack(newAudioTrack);
+
+      // Swap the local preview's MediaStream (video-only, same
+      // rationale as in handleStart — never share the audio track
+      // between the <video> element and the WebRTC sender). Stop
+      // the old underlying stream so the camera light reflects only
+      // the active device.
+      const oldStream = streamRef.current;
+      streamRef.current = newStream;
+      const previewStream = new MediaStream(newStream.getVideoTracks());
+      if (videoRef.current) {
+        videoRef.current.srcObject = previewStream;
+        await videoRef.current.play().catch(() => {
+          // muted + playsinline cover autoplay restrictions; ignore.
+        });
+      }
+      if (oldStream) {
+        for (const t of oldStream.getTracks()) t.stop();
+      }
+      setFacingMode(nextFacingMode);
+    } catch (err) {
+      console.warn("Camera flip failed", err);
+      // On failure the old stream is still active — nothing to
+      // restore. We just surface a toast so the streamer knows the
+      // flip didn't take.
+      toast.error("Couldn't switch camera");
+    } finally {
+      setFlippingCamera(false);
+    }
+  }, [phase, flippingCamera, facingMode, videoEnabled, audioEnabled]);
 
   const handleEnd = async () => {
     if (
@@ -499,28 +644,18 @@ export default function LiveStream() {
   const bettingClosed =
     !!bettingClosesAt && now >= bettingClosesAt;
 
-  // Pull the settle-readiness gauge so the End-stream UI can swap
-  // labels to "Cancel stream" when ending right now would trigger a
-  // refund — i.e. either the betting window is still open OR the
-  // event hasn't met the unique-bettors / outcomes / MIN_POOL
-  // minimums settle_event guards against.
-  const { data: progressRows } = useQuery({
-    queryKey: ["studio", "event", eventId, "progress"],
-    enabled: !!eventId && (phase === "live" || phase === "ending"),
-    refetchInterval: 5_000,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_event_progress", {
-        p_event_id: eventId!,
-      });
-      if (error) throw error;
-      return data;
-    },
-  });
-  const progressRow = Array.isArray(progressRows)
-    ? progressRows[0]
-    : (progressRows as unknown);
-  const minimumsMet = !!(progressRow as { minimums_met?: boolean } | null)
-    ?.minimums_met;
+  // Pull the settle-readiness gauge — drives both the End-stream
+  // button label (Cancel vs End, depending on whether ending now
+  // would trigger a refund) AND the bottom-left ReadinessOverlay
+  // that ticks over in real time as bets land. Single source of
+  // truth so the two reads can't disagree.
+  //
+  // The hook wires up Realtime subscriptions on `event_outcomes`
+  // UPDATE + `bets` INSERT, so the streamer sees the participant /
+  // outcome / pool counters move the instant a viewer places a bet
+  // — no polling, no manual refresh.
+  const { data: progress } = useEventProgress(eventId);
+  const minimumsMet = progress.minimumsMet;
   // Ending the stream right now would auto-cancel + refund if either
   // the window is still open (no winner can be declared yet) or the
   // pool / participant / outcome minimums aren't met (finish_event
@@ -574,11 +709,16 @@ export default function LiveStream() {
       {/* object-contain (not cover) on purpose: the creator sees the
           full broadcast frame including any letterboxing, instead of a
           crop that hides what viewers will actually see. */}
+      {/* The local preview is mirrored only for the front camera —
+          matches the same convention Zoom / Meet / TikTok use, and
+          reading text backwards through the rear camera would be
+          jarring. Mirror is preview-only; the published stream is
+          never mirrored (Cloudflare receives raw frames). */}
       <video
         ref={videoRef}
         className={
           phase === "live"
-            ? "absolute inset-0 h-full w-full -scale-x-100 object-contain"
+            ? `absolute inset-0 h-full w-full object-contain ${facingMode === "user" ? "-scale-x-100" : ""}`
             : "hidden"
         }
         autoPlay
@@ -739,10 +879,13 @@ export default function LiveStream() {
       {/* Side overlays — only while live. Each panel is absolutely
           positioned over the video with a semi-transparent dark bg so
           the camera stays visible behind. Both hidden below `md` so
-          phones get the unobstructed video; tablet+ shows both. */}
+          phones get the unobstructed video; tablet+ shows both.
+          ReadinessOverlay replaced the old mock "Live stakes" feed —
+          the streamer now sees the three settle-guard counters tick
+          over in real time as bets land, instead of fake names. */}
       {phase === "live" && (
         <>
-          <StakesOverlay />
+          <ReadinessOverlay progress={progress} />
           <ChatOverlay eventId={eventId} />
         </>
       )}
@@ -790,6 +933,32 @@ export default function LiveStream() {
                 <MicOff className="h-5 w-5" />
               )}
             </button>
+            {/* Flip camera — only shown when the device exposes ≥ 2
+                video inputs (typical mobile). Triggers a hot-swap on
+                the live publisher; the stream stays connected and
+                the current video/audio on-off state is preserved. A
+                tiny spinner overlay while the swap settles guards
+                against double-tap. */}
+            {hasMultipleCameras && (
+              <button
+                type="button"
+                onClick={() => void flipCamera()}
+                disabled={flippingCamera}
+                aria-label="Switch camera"
+                title={
+                  facingMode === "user"
+                    ? "Switch to rear camera"
+                    : "Switch to front camera"
+                }
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 disabled:opacity-60"
+              >
+                {flippingCamera ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <SwitchCamera className="h-5 w-5" />
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -904,62 +1073,18 @@ export default function LiveStream() {
 }
 
 // =========================================================================
-// Overlays — placeholder UI only.
+// Overlays — bottom-left readiness, bottom-right chat.
 //
-// These render mock stakes and chat data so the layout can be reviewed
-// while the camera is up. Real-time wiring will replace MOCK_* with
-// Supabase Realtime subscriptions (presence channel for viewer count,
-// `bets` table inserts for the stakes feed, a new `event_chat` table
-// for the chat) in a follow-up pass.
+// ReadinessOverlay replaces the old mock stakes feed: it surfaces the
+// three settle_event guards (unique bettors, distinct outcomes with
+// bets, minimum pool) with live counters that tick over via Realtime
+// every time a viewer places a bet. The streamer sees in real time
+// whether the event will be settleable when the betting window
+// closes — if any guard is still red when the window expires, the
+// stream ends in cancel/refund mode instead of declare-winner.
 // =========================================================================
 
-type StakeRow = {
-  id: string;
-  name: string;
-  amountCents: number;
-  outcomeLabel: string;
-  placedAt: Date;
-};
-
-const MOCK_STAKES: StakeRow[] = [
-  {
-    id: "s1",
-    name: "RushFanatic",
-    amountCents: 2500,
-    outcomeLabel: "Pops all 10",
-    placedAt: new Date(Date.now() - 1000 * 12),
-  },
-  {
-    id: "s2",
-    name: "QueenBee",
-    amountCents: 10000,
-    outcomeLabel: "Fails the run",
-    placedAt: new Date(Date.now() - 1000 * 35),
-  },
-  {
-    id: "s3",
-    name: "SpeedyG",
-    amountCents: 500,
-    outcomeLabel: "Pops all 10",
-    placedAt: new Date(Date.now() - 1000 * 60 * 2),
-  },
-  {
-    id: "s4",
-    name: "kookaburra666",
-    amountCents: 3500,
-    outcomeLabel: "Fails the run",
-    placedAt: new Date(Date.now() - 1000 * 60 * 4),
-  },
-  {
-    id: "s5",
-    name: "GoodVibesOnly",
-    amountCents: 1500,
-    outcomeLabel: "Pops all 10",
-    placedAt: new Date(Date.now() - 1000 * 60 * 6),
-  },
-];
-
-/** Compact relative-time helper for chat / stake timestamps. */
+/** Compact relative-time helper for chat timestamps. */
 function relativeTimeShort(d: Date): string {
   const diff = Math.max(0, Date.now() - d.getTime());
   const secs = Math.floor(diff / 1000);
@@ -970,50 +1095,101 @@ function relativeTimeShort(d: Date): string {
   return `${hours}h`;
 }
 
-function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
-}
+function ReadinessOverlay({ progress }: { progress: EventProgress }) {
+  // Same three-row layout the user-app's ReadinessCard used pre-
+  // simplification: label + current/required counter, with cleared
+  // rows striking through and turning green. The streamer wants the
+  // full picture (including the rows that are already met) so they
+  // can see progress as it happens, not just the outstanding items.
+  const poolDollars = (n: number) => `$${Math.round(n / 100)}`;
+  const items = [
+    {
+      label: "Unique participants",
+      haveLabel: `${progress.uniqueBettors}/${progress.minUniqueBettors}`,
+      cleared: progress.uniqueBettors >= progress.minUniqueBettors,
+    },
+    {
+      label: "Different outcomes",
+      haveLabel: `${progress.outcomesWithBets}/${progress.minOutcomesWithBets}`,
+      cleared:
+        progress.outcomesWithBets >= progress.minOutcomesWithBets,
+    },
+    {
+      label: "Total pool",
+      haveLabel: `${poolDollars(progress.totalPoolCents)}/${poolDollars(
+        progress.minPoolCents,
+      )}`,
+      cleared: progress.totalPoolCents >= progress.minPoolCents,
+    },
+  ];
+  const allMet = progress.minimumsMet;
 
-function StakesOverlay() {
   return (
     <aside
-      aria-label="Live stakes feed"
-      className="pointer-events-auto absolute bottom-3 left-3 z-10 hidden h-[280px] w-[300px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/55 text-white shadow-xl backdrop-blur-md md:flex"
+      aria-label="Betting readiness"
+      className="pointer-events-auto absolute bottom-3 left-3 z-10 hidden w-[300px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/55 text-white shadow-xl backdrop-blur-md md:flex"
     >
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <Coins className="h-4 w-4 text-[#FED448]" />
+          <ListChecks
+            className={`h-4 w-4 ${allMet ? "text-emerald-300" : "text-amber-300"}`}
+          />
           <h2 className="font-heading text-xs font-bold uppercase tracking-wider">
-            Live stakes
+            {allMet ? "Ready to settle" : "Betting minimums"}
           </h2>
         </div>
-        <span className="text-[10px] font-medium uppercase tracking-wider text-white/50">
-          {MOCK_STAKES.length}
-        </span>
+        {/* Pulse dot mirrors the LIVE pill but in amber/green so the
+            streamer's eye catches "still waiting" vs "all met" at a
+            glance. */}
+        <span
+          className={`h-2 w-2 animate-pulse rounded-full ${allMet ? "bg-emerald-400" : "bg-amber-300"}`}
+          aria-hidden
+        />
       </div>
-      <ul className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
-        {MOCK_STAKES.map((s) => (
+      <ul className="space-y-2 px-3 py-3 text-xs">
+        {items.map((item) => (
           <li
-            key={s.id}
-            className="rounded-lg border border-white/5 bg-white/[0.04] px-2.5 py-2 text-xs"
+            key={item.label}
+            className="flex items-center justify-between gap-2"
           >
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate font-semibold text-white">
-                {s.name}
+            <span className="flex items-center gap-2">
+              {item.cleared ? (
+                <CheckCircle2
+                  className="h-3.5 w-3.5 flex-shrink-0 text-emerald-300"
+                  aria-hidden
+                />
+              ) : (
+                <Circle
+                  className="h-3.5 w-3.5 flex-shrink-0 text-white/40"
+                  aria-hidden
+                />
+              )}
+              <span
+                className={
+                  item.cleared
+                    ? "text-white/80 line-through decoration-emerald-300/60"
+                    : "text-white"
+                }
+              >
+                {item.label}
               </span>
-              <span className="flex-shrink-0 text-[10px] text-white/50">
-                {relativeTimeShort(s.placedAt)} ago
-              </span>
-            </div>
-            <p className="mt-1 truncate text-white/80">
-              <span className="text-white/60">on</span> {s.outcomeLabel}
-            </p>
-            <p className="mt-0.5 font-heading text-sm font-bold text-[#FED448] tabular-nums">
-              {formatCents(s.amountCents)}
-            </p>
+            </span>
+            <span
+              className={`font-heading text-sm font-bold tabular-nums ${
+                item.cleared ? "text-emerald-300" : "text-amber-200"
+              }`}
+            >
+              {item.haveLabel}
+            </span>
           </li>
         ))}
       </ul>
+      {!allMet && (
+        <p className="border-t border-white/10 px-3 py-2 text-[10px] leading-tight text-white/60">
+          If any threshold is still missed when the betting window closes,
+          ending the stream refunds every bet.
+        </p>
+      )}
     </aside>
   );
 }

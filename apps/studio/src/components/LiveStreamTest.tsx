@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Camera,
   CameraOff,
-  Coins,
+  CheckCircle2,
+  Circle,
+  ListChecks,
   Loader2,
   MessageCircle,
   SwitchCamera,
@@ -235,29 +237,38 @@ export function LiveStreamTest({ title }: LiveStreamTestProps = {}) {
           </span>
         </div>
 
-        {/* Bottom-left stakes mock — same corner as the real
-            StakesOverlay. Compact because the test container is a
-            fraction of the full-screen LiveStream view. Visible on
-            every viewport so the preview shows the full broadcast
-            layout (real LiveStream hides them below md, but that's a
-            creator-facing concern; the preview is about what viewers
-            will see). On mobile portrait we trim the width so the
-            two side panels don't overlap in the middle. */}
+        {/* Bottom-left readiness mock — same corner as the real
+            ReadinessOverlay. Static placeholder data shows partial
+            progress so the streamer sees what the live checklist
+            will look like with bets coming in. Visible on every
+            viewport so the preview shows the full broadcast layout
+            (the real overlay hides below md, but the editor preview
+            is about what the *streamer* will see at the real size).
+            On mobile portrait we trim the width so the two side
+            panels don't overlap in the middle. */}
         <aside
           aria-hidden
           className="pointer-events-none absolute bottom-3 left-3 z-10 flex w-[100px] flex-col gap-1.5 overflow-hidden rounded-xl border border-white/10 bg-black/55 p-2 text-white shadow-md backdrop-blur-sm sm:w-[180px]"
         >
           <div className="flex items-center justify-between">
             <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider sm:text-[10px]">
-              <Coins className="h-3 w-3 text-[#FED448]" />
-              Stakes
+              <ListChecks className="h-3 w-3 text-amber-300" />
+              <span className="hidden sm:inline">Betting minimums</span>
+              <span className="sm:hidden">Minimums</span>
             </span>
-            <span className="text-[9px] uppercase text-white/50">5</span>
+            <span
+              className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300"
+              aria-hidden
+            />
           </div>
           <ul className="space-y-1">
-            <MockStakeRow name="RushFanatic" amount="$25" />
-            <MockStakeRow name="QueenBee" amount="$100" />
-            <MockStakeRow name="SpeedyG" amount="$5" />
+            <MockReadinessRow label="Participants" have="3/5" cleared={false} />
+            <MockReadinessRow
+              label="Outcomes"
+              have="2/2"
+              cleared
+            />
+            <MockReadinessRow label="Pool" have="$18/$30" cleared={false} />
           </ul>
         </aside>
 
@@ -378,12 +389,39 @@ export function LiveStreamTest({ title }: LiveStreamTestProps = {}) {
 // metadata (timestamps, odds, etc.).
 // =========================================================================
 
-function MockStakeRow({ name, amount }: { name: string; amount: string }) {
+function MockReadinessRow({
+  label,
+  have,
+  cleared,
+}: {
+  label: string;
+  have: string;
+  cleared: boolean;
+}) {
   return (
-    <li className="flex items-baseline justify-between gap-1 text-[10px] leading-tight">
-      <span className="truncate font-semibold">{name}</span>
-      <span className="flex-shrink-0 font-heading font-bold text-[#FED448] tabular-nums">
-        {amount}
+    <li className="flex items-center justify-between gap-1 text-[10px] leading-tight">
+      <span className="flex items-center gap-1 truncate">
+        {cleared ? (
+          <CheckCircle2 className="h-2.5 w-2.5 flex-shrink-0 text-emerald-300" />
+        ) : (
+          <Circle className="h-2.5 w-2.5 flex-shrink-0 text-white/40" />
+        )}
+        <span
+          className={
+            cleared
+              ? "truncate text-white/70 line-through decoration-emerald-300/60"
+              : "truncate"
+          }
+        >
+          {label}
+        </span>
+      </span>
+      <span
+        className={`flex-shrink-0 font-heading font-bold tabular-nums ${
+          cleared ? "text-emerald-300" : "text-amber-200"
+        }`}
+      >
+        {have}
       </span>
     </li>
   );
