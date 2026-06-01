@@ -1075,23 +1075,31 @@ function BetPanel({ event }: { event: StreamEvent }) {
                   )}
                   <span className="truncate">{o.label}</span>
                 </span>
-                <span
-                  className={cn(
-                    "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                    isUserPick
-                      ? "bg-primary text-primary-foreground"
-                      : active
+                {/* Right-side stack: stake chip (only on the user's
+                    picked row) + the canonical odds chip. The odds
+                    chip lives in the same spot on every row so the
+                    eye scans straight down a column; the stake chip
+                    is a smaller, less attention-grabbing badge to
+                    its left so the viewer still gets the "your bet"
+                    context without losing the live odds tick. */}
+                <span className="ml-3 flex flex-shrink-0 items-center gap-2">
+                  {isUserPick && userStakeDollars && (
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-primary">
+                      Your bet ${userStakeDollars}
+                    </span>
+                  )}
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                      active
                         ? "bg-primary text-primary-foreground"
                         : odds == null
                           ? "bg-muted text-muted-foreground"
                           : oddsPillClasses(odds, oddsMin, oddsMax),
-                  )}
-                >
-                  {isUserPick
-                    ? `Your bet $${userStakeDollars}`
-                    : odds == null
-                      ? "Open"
-                      : `${odds.toFixed(2)}×`}
+                    )}
+                  >
+                    {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                  </span>
                 </span>
               </button>
             </li>
@@ -1220,32 +1228,35 @@ function ReadinessCard({
   progress: EventProgress;
   className?: string;
 }) {
-  // Three guards mirroring `settle_event` server-side. The previous
-  // card only listed the participants + outcomes guards, so a viewer
-  // could see "3/3" + "2/2" strikethrough and still wonder why the
-  // card wasn't disappearing — the silent third guard (MIN_POOL,
-  // typically $30 for a 3-outcome event) wasn't surfaced. Now it is.
+  // Three guards mirroring `settle_event` server-side. The card
+  // shows only the requirements that are STILL outstanding — each
+  // cleared guard disappears, and when all three are met the
+  // parent's `!progress.minimumsMet` predicate hides the whole
+  // card. No progress numbers (3/5, $10/$30) — the viewer just
+  // needs the prompt, not the leaderboard.
   const poolDollars = (n: number) => `$${Math.round(n / 100)}`;
   const items = [
     {
       label: `Min ${progress.minUniqueBettors} participants`,
-      haveLabel: `${progress.uniqueBettors}/${progress.minUniqueBettors}`,
       cleared: progress.uniqueBettors >= progress.minUniqueBettors,
     },
     {
       label: `Min ${progress.minOutcomesWithBets} different outcomes`,
-      haveLabel: `${progress.outcomesWithBets}/${progress.minOutcomesWithBets}`,
       cleared:
         progress.outcomesWithBets >= progress.minOutcomesWithBets,
     },
     {
       label: `Min ${poolDollars(progress.minPoolCents)} total pool`,
-      haveLabel: `${poolDollars(progress.totalPoolCents)}/${poolDollars(
-        progress.minPoolCents,
-      )}`,
       cleared: progress.totalPoolCents >= progress.minPoolCents,
     },
   ];
+  const outstanding = items.filter((item) => !item.cleared);
+
+  // Defensive: if every item cleared but minimumsMet hasn't flipped
+  // yet (small lag between client compute + server compute), render
+  // nothing rather than a bare title with no list underneath.
+  if (outstanding.length === 0) return null;
+
   return (
     <div
       className={cn(
@@ -1256,32 +1267,9 @@ function ReadinessCard({
       <p className="font-heading text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
         Event needs minimum bets to start
       </p>
-      <ul className="mt-2 space-y-1 text-xs">
-        {items.map((item) => (
-          <li
-            key={item.label}
-            className="flex items-center justify-between gap-2"
-          >
-            <span
-              className={cn(
-                item.cleared
-                  ? "text-foreground/80 line-through decoration-success/60"
-                  : "text-foreground",
-              )}
-            >
-              {item.label}
-            </span>
-            <span
-              className={cn(
-                "font-semibold tabular-nums",
-                item.cleared
-                  ? "text-success"
-                  : "text-amber-700 dark:text-amber-300",
-              )}
-            >
-              {item.haveLabel}
-            </span>
-          </li>
+      <ul className="mt-2 space-y-1 text-xs text-foreground">
+        {outstanding.map((item) => (
+          <li key={item.label}>{item.label}</li>
         ))}
       </ul>
       <p className="mt-2 text-[10px] leading-tight text-muted-foreground">

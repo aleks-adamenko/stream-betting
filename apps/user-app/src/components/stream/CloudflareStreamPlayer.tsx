@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Loader2, Volume2, VolumeX } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Play, Volume2, VolumeX } from "lucide-react";
 import { WebRTCPlayer } from "@eyevinn/webrtc-player";
 
 import { cn } from "@/lib/utils";
@@ -65,6 +65,19 @@ export function CloudflareStreamPlayer({
   // back to false so the overlay disappears without a manual refresh
   // from the viewer.
   const [paused, setPaused] = useState(false);
+  // `needsTap` flips true when:
+  //   • video.play() is rejected by the browser autoplay policy
+  //     (typical iOS Safari behaviour right after a hard reload —
+  //     the document hasn't been "activated" by a user gesture yet
+  //     so muted autoplay still silently fails)
+  //   • OR we've been waiting > MEDIA_WAIT_TIMEOUT_MS without ever
+  //     seeing the `playing` event fire, which usually means the
+  //     same root cause (mobile Safari) or a stuck WHEP handshake.
+  // In either case the only escape is a user-gesture call to
+  // play(), so we surface a tap-to-play overlay on top of the
+  // spinner. Without this the viewer was forced to navigate back
+  // home → back to the event page to retrigger the autoplay path.
+  const [needsTap, setNeedsTap] = useState(false);
   // `inView` only matters when `lazy` is true. We default to !lazy
   // so eagerly-mounted players (event page, featured hero) start
   // immediately without waiting for an IntersectionObserver tick.
@@ -103,6 +116,14 @@ export function CloudflareStreamPlayer({
   // by a small timeout so the cleanup from the first run cancels
   // it before a single WHEP request is made; the second run is then
   // the only one that actually fires.
+  // Hard ceiling on how long we'll spin without media before assuming
+  // autoplay was silently blocked (mobile Safari after a hard reload
+  // is the typical case) and surfacing the tap-to-play affordance.
+  // 7s is long enough to cover the WHEP handshake on slow mobile
+  // networks but short enough that a viewer staring at a frozen
+  // cover image gets an escape hatch quickly.
+  const MEDIA_WAIT_TIMEOUT_MS = 7000;
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src || !inView) return;
@@ -111,6 +132,7 @@ export function CloudflareStreamPlayer({
     let player: WebRTCPlayer | null = null;
     let onPlaying: (() => void) | null = null;
     let onLoadedMetadata: (() => void) | null = null;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
 
     const setupTimer = setTimeout(() => {
       if (cancelled) return;
@@ -146,6 +168,13 @@ export function CloudflareStreamPlayer({
       onPlaying = () => {
         console.info("[whep] <video> playing event — media is flowing");
         setHasMedia(true);
+        // We made it — autoplay clearly worked, hide any tap overlay
+        // we may have shown and cancel the watchdog.
+        setNeedsTap(false);
+        if (watchdog) {
+          clearTimeout(watchdog);
+          watchdog = null;
+        }
       };
       onLoadedMetadata = () =>
         console.info("[whep] <video> loadedmetadata");
@@ -169,9 +198,34 @@ export function CloudflareStreamPlayer({
           // source is a MediaStream srcObject (vs. an `src` URL).
           // Call play() ourselves once the library has wired up
           // the inbound stream. Muted so autoplay policy lets us.
+          //
+          // On iOS Safari right after a hard reload the document
+          // doesn't yet have a sticky-activation flag, so even a
+          // muted+playsInline play() can return a rejected Promise.
+          // When that happens we surface the tap-to-play overlay so
+          // the next user gesture can resume — without this the
+          // viewer is stuck on the spinner until they navigate
+          // away-and-back.
           video.play().catch((err) => {
             console.warn("[whep] play() failed:", err);
+            if (!cancelled) setNeedsTap(true);
           });
+
+          // Watchdog: if the `playing` event never fires within a
+          // reasonable window, the most likely cause is the same
+          // autoplay-blocked scenario (the play() promise may even
+          // have resolved, but no frames are being decoded into the
+          // <video>). Surface the tap-to-play overlay as a fallback.
+          watchdog = setTimeout(() => {
+            if (cancelled) return;
+            if (!video.paused && video.readyState >= 2) return;
+            console.warn(
+              "[whep] watchdog: no media event after",
+              MEDIA_WAIT_TIMEOUT_MS,
+              "ms — showing tap-to-play",
+            );
+            setNeedsTap(true);
+          }, MEDIA_WAIT_TIMEOUT_MS);
         })
         .catch((err) => console.error("[whep] load failed:", err));
     }, 50);
@@ -179,6 +233,7 @@ export function CloudflareStreamPlayer({
     return () => {
       cancelled = true;
       clearTimeout(setupTimer);
+      if (watchdog) clearTimeout(watchdog);
       if (onPlaying) video.removeEventListener("playing", onPlaying);
       if (onLoadedMetadata)
         video.removeEventListener("loadedmetadata", onLoadedMetadata);
@@ -188,8 +243,31 @@ export function CloudflareStreamPlayer({
       }
       setHasMedia(false);
       setPaused(false);
+      setNeedsTap(false);
     };
   }, [src, inView]);
+
+  // Tap handler for the autoplay-blocked overlay. Calls play()
+  // inside the user-gesture stack so the browser actually starts
+  // decoding frames; the `playing` event then fires and clears the
+  // overlay via `onPlaying`. If play() *still* fails (very rare —
+  // would mean the WHEP track itself isn't ready) we leave the
+  // overlay up so the viewer can try again.
+  const handleTapToPlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video
+      .play()
+      .then(() => {
+        console.info("[whep] tap-to-play succeeded");
+        // setNeedsTap(false) is handled by the onPlaying listener
+        // once frames start flowing — keeping the spinner up until
+        // then is honest.
+      })
+      .catch((err) => {
+        console.warn("[whep] tap-to-play failed:", err);
+      });
+  }, []);
 
   // Apply mute state through the library's own API AND mirror onto
   // `video.muted` via the `muted={muted}` prop binding below. The
@@ -228,11 +306,36 @@ export function CloudflareStreamPlayer({
           The semi-opaque scrim improves contrast over busy cover
           art without fully hiding the brand image. We only show it
           while we actually expect media — for lazy players that
-          haven't scrolled into view yet, no spinner. */}
-      {!hasMedia && inView && (
+          haven't scrolled into view yet, no spinner. Suppressed
+          when the tap-to-play overlay is up so we don't double-up
+          two overlays on top of each other. */}
+      {!hasMedia && inView && !needsTap && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30">
           <Loader2 className="h-10 w-10 animate-spin text-white drop-shadow-lg" />
         </div>
+      )}
+      {/* Tap-to-play fallback. Shown when:
+            • play() returned a rejected Promise (typical iOS Safari
+              right after a hard reload — no sticky activation yet)
+            • or the watchdog timed out waiting for the `playing`
+              event.
+          Hidden in lazy/feed mode because feed cards are silent
+          autoplay-or-nothing — a tap there should navigate, not
+          unblock a single card. */}
+      {needsTap && inView && !lazy && (
+        <button
+          type="button"
+          onClick={handleTapToPlay}
+          aria-label="Tap to play stream"
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
+        >
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/15 shadow-lg ring-1 ring-white/25 backdrop-blur-sm">
+            <Play className="h-8 w-8 translate-x-0.5 fill-white text-white" />
+          </span>
+          <span className="font-heading text-sm font-semibold">
+            Tap to play
+          </span>
+        </button>
       )}
       <video
         ref={videoRef}
