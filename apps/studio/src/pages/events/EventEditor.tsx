@@ -808,22 +808,32 @@ export default function EventEditor() {
       if (error) throw error;
       return id;
     },
-    onSuccess: (id) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["studio", "events", creator?.id],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["studio", "event", eventId],
-      });
+    onSuccess: async (id) => {
       // Two terminal screens:
       //  • Schedule for later → events list (the creator will come
       //    back at the scheduled time and click Start stream).
       //  • Go live now → directly into the LiveStream page so the
       //    creator can grant camera + start broadcasting in one flow.
+      //
+      // For the Go-live-now branch we must REFETCH (not just
+      // invalidate) before navigating, otherwise the LiveStream page
+      // reads the still-cached `status='draft'` row and flashes
+      // "This event isn't ready to stream" while the post-publish
+      // refresh is in flight. The events-list branch can just
+      // invalidate — the list refetches on its own focus.
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "events", creator?.id],
+      });
       if (scheduleForLater) {
+        void queryClient.invalidateQueries({
+          queryKey: ["studio", "event", eventId],
+        });
         toast.success("Event scheduled");
         navigate("/events");
       } else {
+        await queryClient.refetchQueries({
+          queryKey: ["studio", "event", id],
+        });
         toast.success("Event published — let's go live");
         navigate(`/events/${id}/live`);
       }
@@ -1714,12 +1724,21 @@ export default function EventEditor() {
               rows={[
                 {
                   label: "Scheduled",
-                  value: scheduledAt
-                    ? new Date(scheduledAt).toLocaleString()
-                    : "",
-                  missing:
-                    !scheduledAt ||
-                    new Date(scheduledAt).getTime() <= Date.now(),
+                  // Scheduling is OPTIONAL: when the creator picked
+                  // "Go live now" (scheduleForLater off) there's
+                  // nothing to validate — Publish synthesises a now()
+                  // timestamp server-side. The row shows the chosen
+                  // intent ("Going live now") instead of flagging
+                  // Missing in that case.
+                  value: scheduleForLater
+                    ? scheduledAt
+                      ? new Date(scheduledAt).toLocaleString()
+                      : ""
+                    : "Going live now on Publish",
+                  missing: scheduleForLater
+                    ? !scheduledAt ||
+                      new Date(scheduledAt).getTime() <= Date.now()
+                    : false,
                 },
                 {
                   label: "Source",

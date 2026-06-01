@@ -28,28 +28,17 @@ const dateFormatterShort = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
 });
 
-const ROLE_BADGE_CLASSES: Record<string, string> = {
-  admin: "bg-primary/15 text-primary",
-  creator: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  viewer: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
-};
-
-const ROLE_LABEL_TEXT: Record<string, string> = {
-  admin: "Admin",
-  creator: "Creator",
-  viewer: "Viewer",
-};
-
-type RoleFilter = "all" | "viewer" | "creator" | "admin";
+type RoleFilter = "all" | "creator" | "admin" | "pending_creator";
 
 type UserRow = {
   id: string;
   email: string;
   role: "user" | "influencer" | "super_admin";
-  role_labels: Array<"admin" | "creator" | "viewer">;
+  is_admin: boolean;
   display_name: string | null;
   avatar_url: string | null;
   balance_cents: number;
+  email_confirmed_at: string | null;
   creator_status: "pending" | "verified" | "rejected" | null;
   creator_rejected_note: string | null;
   creator_moderated_at: string | null;
@@ -57,14 +46,16 @@ type UserRow = {
 };
 
 /**
- * /users — single unified users table. Every registered profile shows
- * up exactly once; the Role column lists every applicable role the
- * user holds at the same time (a creator-admin gets two badges, a
- * regular viewer just one).
+ * /users — single unified table. Two verification-status columns:
+ *   • Viewer: every user is a viewer; column tracks email confirmation
+ *     (Verified / Email pending).
+ *   • Creator: only populated when the user has a creator_profiles row.
+ *     Status pipeline = Email pending → Pending review → Verified|Rejected.
+ *     Approve / Reject buttons live inline in this column on Pending rows.
  *
- * No top-level tab strip: moderation actions for pending creators
- * live inline on the row (Approve / Reject buttons replace the
- * trailing creator-meta block when status is pending).
+ * Admin is rendered as a small inline pill next to the email — no
+ * dedicated column because being a super_admin is a one-time
+ * provisioned state, not a workflow with a status.
  */
 export default function Users() {
   const queryClient = useQueryClient();
@@ -83,9 +74,10 @@ export default function Users() {
   const filtered = useMemo(() => {
     if (!data) return [];
     return data.filter((u) => {
-      if (roleFilter !== "all" && !u.role_labels.includes(roleFilter)) {
+      if (roleFilter === "creator" && u.creator_status == null) return false;
+      if (roleFilter === "admin" && !u.is_admin) return false;
+      if (roleFilter === "pending_creator" && u.creator_status !== "pending")
         return false;
-      }
       if (query) {
         const q = query.trim().toLowerCase();
         const haystack = [u.email, u.display_name ?? "", u.id]
@@ -112,8 +104,7 @@ export default function Users() {
       </header>
 
       {/* Filter strip — search + role dropdown, same shape and
-          max-width as the Ledger + Events pages so the admin tables
-          share a control surface. */}
+          max-width as the Ledger + Events pages. */}
       <div className="mb-4 flex flex-wrap gap-3">
         <Input
           value={query}
@@ -126,9 +117,9 @@ export default function Users() {
           onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
           className="h-10 rounded-lg border border-border bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
         >
-          <option value="all">All roles</option>
-          <option value="viewer">Viewers</option>
-          <option value="creator">Creators</option>
+          <option value="all">All users</option>
+          <option value="pending_creator">Pending creators</option>
+          <option value="creator">All creators</option>
           <option value="admin">Admins</option>
         </select>
         {(query || roleFilter !== "all") && (
@@ -172,8 +163,8 @@ export default function Users() {
                   <th className="px-4 py-2 font-semibold">ID</th>
                   <th className="px-4 py-2 font-semibold">Email</th>
                   <th className="px-4 py-2 text-right font-semibold">Balance</th>
-                  <th className="px-4 py-2 font-semibold">Roles</th>
-                  <th className="px-4 py-2 font-semibold">Moderation</th>
+                  <th className="px-4 py-2 font-semibold">Viewer</th>
+                  <th className="px-4 py-2 font-semibold">Creator</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40">
@@ -193,13 +184,6 @@ export default function Users() {
   );
 }
 
-/**
- * Row — one per profile. The trailing "Moderation" cell is the only
- * slot that varies by user type: pending creators see Approve/Reject
- * buttons, rejected creators see the moderator note, everyone else
- * sees `—`. Keeps the column order stable so the table is easy to
- * scan.
- */
 function UserRowItem({
   user,
   onChange,
@@ -242,6 +226,8 @@ function UserRowItem({
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const emailVerified = user.email_confirmed_at != null;
+  const isCreator = user.creator_status != null;
   const isPendingCreator = user.creator_status === "pending";
   const isRejectedCreator = user.creator_status === "rejected";
 
@@ -268,10 +254,17 @@ function UserRowItem({
           <CopyIdCell id={user.id} />
         </td>
         <td className="px-4 py-2 text-xs">
-          <div className="min-w-0 max-w-[260px]">
-            <p className="truncate font-semibold text-foreground">
-              {user.email}
-            </p>
+          <div className="min-w-0 max-w-[280px]">
+            <div className="flex items-center gap-1.5">
+              <p className="truncate font-semibold text-foreground">
+                {user.email}
+              </p>
+              {user.is_admin && (
+                <span className="flex-shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">
+                  Admin
+                </span>
+              )}
+            </div>
             {user.display_name && (
               <p className="truncate text-[10px] text-muted-foreground">
                 {user.display_name}
@@ -282,26 +275,29 @@ function UserRowItem({
         <td className="px-4 py-2 text-right font-heading text-sm font-bold tabular-nums whitespace-nowrap">
           {formatCents(user.balance_cents ?? 0)}
         </td>
+
+        {/* Viewer column — every user is a viewer; status tracks
+            email confirmation. Verified green vs amber pending. */}
         <td className="px-4 py-2">
-          <div className="flex flex-wrap items-center gap-1">
-            {user.role_labels.map((role) => (
-              <RoleBadge key={role} role={role} />
-            ))}
-            {isPendingCreator && (
-              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                Pending
-              </span>
-            )}
-            {isRejectedCreator && (
-              <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
-                Rejected
-              </span>
-            )}
-          </div>
+          <StatusBadge
+            tone={emailVerified ? "success" : "warning"}
+            label={emailVerified ? "Verified" : "Email pending"}
+          />
         </td>
+
+        {/* Creator column — `—` when not a creator. Otherwise:
+            email-not-confirmed → Email pending. Status pending →
+            Pending review + Approve/Reject inline. Status verified
+            → Verified + moderated date. Status rejected → Rejected
+            (note shows in colspan strip below). */}
         <td className="px-4 py-2">
-          {isPendingCreator ? (
-            <div className="flex flex-shrink-0 gap-2">
+          {!isCreator ? (
+            <span className="text-muted-foreground">—</span>
+          ) : !emailVerified ? (
+            <StatusBadge tone="warning" label="Email pending" />
+          ) : isPendingCreator ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge tone="warning" label="Pending review" />
               <Button
                 size="sm"
                 onClick={() => approveMutation.mutate()}
@@ -323,20 +319,33 @@ function UserRowItem({
                 Reject
               </Button>
             </div>
-          ) : user.creator_status ? (
-            <span className="text-[11px] text-muted-foreground">
-              {user.creator_moderated_at
-                ? `${user.creator_status} · ${dateFormatterShort.format(new Date(user.creator_moderated_at))}`
-                : user.creator_status}
-            </span>
+          ) : user.creator_status === "verified" ? (
+            <div className="flex flex-col gap-0.5">
+              <StatusBadge tone="success" label="Verified" />
+              {user.creator_moderated_at && (
+                <span className="text-[10px] text-muted-foreground">
+                  {dateFormatterShort.format(
+                    new Date(user.creator_moderated_at),
+                  )}
+                </span>
+              )}
+            </div>
           ) : (
-            <span className="text-muted-foreground">—</span>
+            <div className="flex flex-col gap-0.5">
+              <StatusBadge tone="danger" label="Rejected" />
+              {user.creator_moderated_at && (
+                <span className="text-[10px] text-muted-foreground">
+                  {dateFormatterShort.format(
+                    new Date(user.creator_moderated_at),
+                  )}
+                </span>
+              )}
+            </div>
           )}
         </td>
       </tr>
 
-      {/* Rejection note for rejected creators — sits below the row as
-          a colspan strip so it doesn't widen any column. */}
+      {/* Rejection note under the row when rejected */}
       {isRejectedCreator && user.creator_rejected_note && (
         <tr>
           <td colSpan={7} className="px-4 pb-3">
@@ -348,7 +357,7 @@ function UserRowItem({
         </tr>
       )}
 
-      {/* Inline Reject form — same colspan strip pattern. */}
+      {/* Inline Reject form */}
       {rejectOpen && isPendingCreator && (
         <tr>
           <td colSpan={7} className="px-4 pb-3">
@@ -396,6 +405,32 @@ function UserRowItem({
   );
 }
 
+/** Tone-keyed status pill — shared between Viewer + Creator columns. */
+function StatusBadge({
+  tone,
+  label,
+}: {
+  tone: "success" | "warning" | "danger" | "neutral";
+  label: string;
+}) {
+  const toneClasses = {
+    success: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    warning: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    danger: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    neutral: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
+  } as const;
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap",
+        toneClasses[tone],
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
 function CopyIdCell({ id }: { id: string }) {
   return (
     <button
@@ -411,23 +446,6 @@ function CopyIdCell({ id }: { id: string }) {
       {id.slice(0, 8)}
       <Copy className="h-3 w-3" />
     </button>
-  );
-}
-
-function RoleBadge({
-  role,
-}: {
-  role: "viewer" | "creator" | "admin";
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap",
-        ROLE_BADGE_CLASSES[role],
-      )}
-    >
-      {ROLE_LABEL_TEXT[role]}
-    </span>
   );
 }
 

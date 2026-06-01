@@ -999,9 +999,6 @@ function BetPanel({ event }: { event: StreamEvent }) {
   // the pari-mutuel pool move in real time without losing context
   // about what they backed.
   const hasBet = !!existingBet;
-  const placementOdds = existingBet
-    ? Number(existingBet.odds_snapshot ?? existingBet.odds_decimal ?? 0)
-    : 0;
 
   return (
     <section className="card-elevated overflow-hidden">
@@ -1046,6 +1043,13 @@ function BetPanel({ event }: { event: StreamEvent }) {
           const isUserPick = hasBet && existingBet?.outcome_id === o.id;
           const active = hasBet ? isUserPick : selected?.id === o.id;
           const odds = oddsFor(o);
+          // The picked outcome's pill shows the viewer's stake in
+          // place of the odds — that's the most informative thing for
+          // the row they bet on, and we drop the separate "Your bet"
+          // card below so the stake doesn't appear twice.
+          const userStakeDollars = isUserPick && existingBet
+            ? (existingBet.amount_cents / 100).toFixed(2)
+            : null;
           return (
             <li key={o.id}>
               <button
@@ -1074,14 +1078,20 @@ function BetPanel({ event }: { event: StreamEvent }) {
                 <span
                   className={cn(
                     "ml-3 inline-flex flex-shrink-0 items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                    active
+                    isUserPick
                       ? "bg-primary text-primary-foreground"
-                      : odds == null
-                        ? "bg-muted text-muted-foreground"
-                        : oddsPillClasses(odds, oddsMin, oddsMax),
+                      : active
+                        ? "bg-primary text-primary-foreground"
+                        : odds == null
+                          ? "bg-muted text-muted-foreground"
+                          : oddsPillClasses(odds, oddsMin, oddsMax),
                   )}
                 >
-                  {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                  {isUserPick
+                    ? `Your bet $${userStakeDollars}`
+                    : odds == null
+                      ? "Open"
+                      : `${odds.toFixed(2)}×`}
                 </span>
               </button>
             </li>
@@ -1093,29 +1103,13 @@ function BetPanel({ event }: { event: StreamEvent }) {
         <ReadinessCard progress={progress} className="mt-3" />
       )}
 
-      {/* Post-bet position card. Live odds in the outcomes list above
-          continue ticking — viewer can see the pool moving against
-          (or in favour of) their pick. */}
+      {/* Post-bet footer — the picked outcome row above already shows
+          the stake; this block just gives the viewer a way out and an
+          honest reminder that the pool will keep moving. The separate
+          Stake / Odds-at-placement card has been removed since the
+          stake now lives inline in the outcome row. */}
       {hasBet && existingBet && (
         <div className="mt-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-muted/50 p-3">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Stake
-              </p>
-              <p className="mt-1 font-heading text-lg font-bold tabular-nums">
-                ${(existingBet.amount_cents / 100).toFixed(2)}
-              </p>
-            </div>
-            <div className="rounded-xl bg-muted/50 p-3">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Odds at placement
-              </p>
-              <p className="mt-1 font-heading text-lg font-bold tabular-nums">
-                {placementOdds > 0 ? `${placementOdds.toFixed(2)}×` : "—"}
-              </p>
-            </div>
-          </div>
           <p className="text-center text-[11px] text-muted-foreground">
             One bet per event. Live odds keep moving — final payout is set
             at settlement.

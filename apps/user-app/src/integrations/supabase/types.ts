@@ -779,6 +779,16 @@ export interface Database {
         Args: { p_enabled: boolean };
         Returns: void;
       };
+      // Returns one row per event the calling creator owns with the
+      // real bet count — bypasses the bets RLS policy that scopes
+      // SELECT to the bettor's own rows.
+      list_creator_event_bet_counts: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          event_id: string;
+          bet_count: number;
+        }>;
+      };
       follow_creator: {
         Args: { p_creator_id: string };
         Returns: Database["public"]["Tables"]["creator_followers"]["Row"];
@@ -839,16 +849,18 @@ export interface Database {
           id: string;
           email: string;
           role: "user" | "influencer" | "super_admin";
-          // Multi-role: every applicable role the user holds at once.
-          // 'viewer' is always present; 'creator' if creator_profiles
-          // row exists; 'admin' if profiles.role = 'super_admin'.
-          // Ordered for visual hierarchy: [admin?, creator?, viewer].
-          role_labels: Array<"admin" | "creator" | "viewer">;
+          // Convenience flag — true when profiles.role = 'super_admin'.
+          // Drives the inline "Admin" pill next to the email.
+          is_admin: boolean;
           display_name: string | null;
           avatar_url: string | null;
           // integer in Postgres — narrower than bigint but plenty for
           // cent-denominated virtual balance ceilings.
           balance_cents: number;
+          // auth.users.email_confirmed_at — null until user clicks
+          // the confirmation link. Drives the viewer "Email pending"
+          // / "Verified" badge.
+          email_confirmed_at: string | null;
           // Creator-specific fields, null when user is not a creator.
           creator_status: "pending" | "verified" | "rejected" | null;
           creator_rejected_note: string | null;

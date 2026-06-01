@@ -156,20 +156,21 @@ returns table (
   id              uuid,
   email           text,
   -- Raw profiles.role enum value ('user' | 'influencer' | 'super_admin').
-  -- Kept for backwards compat; new clients should read role_labels.
+  -- Surfaced so the UI can render an inline "Admin" pill next to the
+  -- email for super_admins without a dedicated role column.
   role            text,
-  -- Array of every role the user holds simultaneously, ordered for
-  -- visual hierarchy (admin first, then creator, then viewer). Every
-  -- registered profile is at minimum a 'viewer'; creators add
-  -- 'creator'; super_admins add 'admin'. A power user with all three
-  -- gets ['admin','creator','viewer'].
-  role_labels     text[],
+  is_admin        boolean,
   display_name    text,
   avatar_url      text,
   balance_cents   integer,
-  -- Creator-specific fields, null when the user is not a creator.
-  -- Lets the admin Users page render pending Approve/Reject actions
-  -- inline (no separate Creators tab needed).
+  -- auth.users.email_confirmed_at — null until the user clicks the
+  -- email confirmation link. Drives the viewer-side "Email pending"
+  -- vs "Verified" status badge.
+  email_confirmed_at timestamptz,
+  -- Creator-specific fields, null when the user is not a creator
+  -- (no creator_profiles row). status ∈ pending|verified|rejected.
+  -- Lets the Users page render pending Approve/Reject actions
+  -- inline and surface rejection notes underneath.
   creator_status        text,
   creator_rejected_note text,
   creator_moderated_at  timestamptz,
@@ -193,21 +194,11 @@ begin
     p.id,
     u.email::text,
     p.role,
-    array_remove(
-      array[
-        case when p.role = 'super_admin' then 'admin' end,
-        case
-          when exists (
-            select 1 from public.creator_profiles c where c.id = p.id
-          ) then 'creator'
-        end,
-        'viewer'
-      ],
-      null
-    ) as role_labels,
+    (p.role = 'super_admin') as is_admin,
     p.display_name,
     p.avatar_url,
     p.balance_cents,
+    u.email_confirmed_at,
     (select c.status from public.creator_profiles c where c.id = p.id),
     (select c.rejected_note from public.creator_profiles c where c.id = p.id),
     (select c.moderated_at from public.creator_profiles c where c.id = p.id),

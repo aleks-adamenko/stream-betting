@@ -70,10 +70,6 @@ type EventRow = {
   video_url: string | null;
   archived_at: string | null;
   outcomes: Array<{ label: string }>;
-  // PostgREST aggregate — `bets:bets!bets_event_id_fkey(count)` returns
-  // [{ count: <int> }]. We use this to decide Delete vs Archive on
-  // terminal-state events. Drafts always get Delete regardless.
-  bets: Array<{ count: number }>;
 };
 
 type TabId = "all" | "live" | "finished" | "drafts" | "archived";
@@ -159,14 +155,34 @@ export default function EventList() {
           min_bet_cents, max_bet_cents,
           source_type, video_url,
           archived_at,
-          outcomes:event_outcomes!event_outcomes_event_id_fkey ( label ),
-          bets:bets!bets_event_id_fkey ( count )
+          outcomes:event_outcomes!event_outcomes_event_id_fkey ( label )
         `,
         )
         .eq("creator_id", creator!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as unknown as EventRow[];
+    },
+  });
+
+  // Per-event bet counts — the bets RLS policy hides viewer bets from
+  // the creator, so a naive `bets(count)` aggregate returns 0 even
+  // when viewers have bet. This SECURITY DEFINER RPC bypasses RLS but
+  // scopes to creator_id = auth.uid() so a creator can only see counts
+  // for events they own. The map drives Delete vs Archive UI below.
+  const { data: betCounts } = useQuery({
+    queryKey: ["studio", "events", "bet-counts", creator?.id],
+    enabled: !!creator,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc(
+        "list_creator_event_bet_counts",
+      );
+      if (error) throw error;
+      const map = new Map<string, number>();
+      for (const row of data ?? []) {
+        map.set(row.event_id, row.bet_count ?? 0);
+      }
+      return map;
     },
   });
 
@@ -490,7 +506,11 @@ export default function EventList() {
             //   • Terminal states with bets (settled, pending_moderation,
             //     finished/cancelled w/ bets): archive only — ledger
             //     audit trail must stay intact.
-            const betsCount = event.bets?.[0]?.count ?? 0;
+            // Reads from the RPC-fed map, not the bets aggregate join
+            // — the latter is RLS-blocked from seeing viewer bets and
+            // would always come back 0 for a creator who didn't bet on
+            // their own event.
+            const betsCount = betCounts?.get(event.id) ?? 0;
             const hasBets = betsCount > 0;
             const canEdit = isDraft || isScheduled;
             const isArchived = !!event.archived_at;

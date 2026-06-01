@@ -63,5 +63,14 @@ export function useEvent(id: string | undefined) {
     queryKey: id ? eventsKeys.detail(id) : eventsKeys.detail("__none__"),
     queryFn: () => (id ? getEvent(id) : Promise.resolve(null)),
     enabled: !!id,
+    // Override the global staleTime: a viewer who lands on /event/:id
+    // while the streamer is in the middle of going live must see the
+    // freshest row — most importantly `betting_closes_at`, which
+    // appears only after start_event stamps it on the row. The
+    // Realtime channel covers the in-page case; this covers the
+    // "tab was open in the background, came back, status flipped"
+    // case the channel might miss.
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
   });
 }
