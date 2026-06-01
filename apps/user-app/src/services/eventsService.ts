@@ -2,17 +2,22 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import type { EventStatus, Influencer, StreamEvent } from "@/domain/types";
 
-// Statuses user-app surfaces. `draft` is creator-only (hidden by RLS too)
-// and `cancelled` is filtered out client-side too. `pending_moderation`
-// and `settled` both surface as "Finished" cards in the feed — the UX
-// difference (winner declared vs. payouts released) lives in the bet
-// panel on the detail page, not the listing.
+// Statuses user-app surfaces. `draft` stays creator-only (RLS blocks
+// it). Every terminal state is shown so the public feed mirrors the
+// creator's stream history — cancelled events (auto-refunded because
+// minimums weren't met, or the streamer ended early) sit alongside
+// settled / finished cards. Only `delete_event` or `archive_event`
+// removes an event from the feed; cancellation isn't a hide signal.
+// `pending_moderation` and `settled` both render as "Finished" cards
+// in the listing — the UX difference (winner declared vs. payouts
+// released vs. fully cancelled w/ refunds) lives on the detail page.
 const PUBLIC_STATUSES = [
   "scheduled",
   "live",
   "pending_moderation",
   "settled",
   "finished",
+  "cancelled",
 ] as const;
 
 type EventRow = Database["public"]["Tables"]["events"]["Row"] & {

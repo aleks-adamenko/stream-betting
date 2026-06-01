@@ -1220,16 +1220,30 @@ function ReadinessCard({
   progress: EventProgress;
   className?: string;
 }) {
+  // Three guards mirroring `settle_event` server-side. The previous
+  // card only listed the participants + outcomes guards, so a viewer
+  // could see "3/3" + "2/2" strikethrough and still wonder why the
+  // card wasn't disappearing — the silent third guard (MIN_POOL,
+  // typically $30 for a 3-outcome event) wasn't surfaced. Now it is.
+  const poolDollars = (n: number) => `$${Math.round(n / 100)}`;
   const items = [
     {
       label: `Min ${progress.minUniqueBettors} participants`,
-      have: progress.uniqueBettors,
-      need: progress.minUniqueBettors,
+      haveLabel: `${progress.uniqueBettors}/${progress.minUniqueBettors}`,
+      cleared: progress.uniqueBettors >= progress.minUniqueBettors,
     },
     {
       label: `Min ${progress.minOutcomesWithBets} different outcomes`,
-      have: progress.outcomesWithBets,
-      need: progress.minOutcomesWithBets,
+      haveLabel: `${progress.outcomesWithBets}/${progress.minOutcomesWithBets}`,
+      cleared:
+        progress.outcomesWithBets >= progress.minOutcomesWithBets,
+    },
+    {
+      label: `Min ${poolDollars(progress.minPoolCents)} total pool`,
+      haveLabel: `${poolDollars(progress.totalPoolCents)}/${poolDollars(
+        progress.minPoolCents,
+      )}`,
+      cleared: progress.totalPoolCents >= progress.minPoolCents,
     },
   ];
   return (
@@ -1243,35 +1257,32 @@ function ReadinessCard({
         Event needs minimum bets to start
       </p>
       <ul className="mt-2 space-y-1 text-xs">
-        {items.map((item) => {
-          const cleared = item.have >= item.need;
-          return (
-            <li
-              key={item.label}
-              className="flex items-center justify-between gap-2"
+        {items.map((item) => (
+          <li
+            key={item.label}
+            className="flex items-center justify-between gap-2"
+          >
+            <span
+              className={cn(
+                item.cleared
+                  ? "text-foreground/80 line-through decoration-success/60"
+                  : "text-foreground",
+              )}
             >
-              <span
-                className={cn(
-                  cleared
-                    ? "text-foreground/80 line-through decoration-success/60"
-                    : "text-foreground",
-                )}
-              >
-                {item.label}
-              </span>
-              <span
-                className={cn(
-                  "font-semibold tabular-nums",
-                  cleared
-                    ? "text-success"
-                    : "text-amber-700 dark:text-amber-300",
-                )}
-              >
-                {item.have}/{item.need}
-              </span>
-            </li>
-          );
-        })}
+              {item.label}
+            </span>
+            <span
+              className={cn(
+                "font-semibold tabular-nums",
+                item.cleared
+                  ? "text-success"
+                  : "text-amber-700 dark:text-amber-300",
+              )}
+            >
+              {item.haveLabel}
+            </span>
+          </li>
+        ))}
       </ul>
       <p className="mt-2 text-[10px] leading-tight text-muted-foreground">
         If the event doesn't reach these minimums, all bets refund in full.

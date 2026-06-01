@@ -77,14 +77,19 @@ function SectionedHome({
     }
     const live = events.filter((e) => e.status === "live");
     const scheduled = events.filter((e) => e.status === "scheduled");
-    // Finished now spans the three terminal states (finished +
-    // pending_moderation + settled). The card UI treats them all
-    // the same; the difference only matters on the detail page.
+    // Finished spans every terminal state — finished + settled +
+    // pending_moderation + cancelled. The card UI treats them all
+    // the same; the difference (winner declared, payouts released,
+    // fully cancelled with refunds) only matters on the detail page.
+    // Cancelled stays visible so the public feed mirrors the
+    // creator's complete stream history; archive_event / delete_event
+    // are the only hide signals.
     const finished = events.filter(
       (e) =>
         e.status === "finished" ||
         e.status === "pending_moderation" ||
-        e.status === "settled",
+        e.status === "settled" ||
+        e.status === "cancelled",
     );
     const featured = live[0] ?? null;
     // "Discover more" highlights everything else the user hasn't seen above.

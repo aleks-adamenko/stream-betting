@@ -498,6 +498,36 @@ export default function LiveStream() {
     : null;
   const bettingClosed =
     !!bettingClosesAt && now >= bettingClosesAt;
+
+  // Pull the settle-readiness gauge so the End-stream UI can swap
+  // labels to "Cancel stream" when ending right now would trigger a
+  // refund — i.e. either the betting window is still open OR the
+  // event hasn't met the unique-bettors / outcomes / MIN_POOL
+  // minimums settle_event guards against.
+  const { data: progressRows } = useQuery({
+    queryKey: ["studio", "event", eventId, "progress"],
+    enabled: !!eventId && (phase === "live" || phase === "ending"),
+    refetchInterval: 5_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_event_progress", {
+        p_event_id: eventId!,
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+  const progressRow = Array.isArray(progressRows)
+    ? progressRows[0]
+    : (progressRows as unknown);
+  const minimumsMet = !!(progressRow as { minimums_met?: boolean } | null)
+    ?.minimums_met;
+  // Ending the stream right now would auto-cancel + refund if either
+  // the window is still open (no winner can be declared yet) or the
+  // pool / participant / outcome minimums aren't met (finish_event
+  // routes through cancel_event in that case). Either way the UI
+  // should say "Cancel stream" rather than "End stream" so the
+  // streamer knows what they're agreeing to.
+  const willCancel = !bettingClosed || !minimumsMet;
   const outcomes = (event?.outcomes ?? [])
     .slice()
     .sort(
@@ -594,25 +624,32 @@ export default function LiveStream() {
           )}
         </div>
         {phase === "live" || phase === "ending" ? (
-          // Single "End stream" button always. Click → open the
-          // declare-winner modal. Inside, we either show the outcome
-          // selector (if betting window has closed) or a "still
-          // accepting bets, cancel will refund everyone" notice
-          // (if the streamer is bailing early).
+          // Single CTA whose label tracks the *consequence* of clicking.
+          // "Cancel stream" when ending right now would refund everyone
+          // (minimums not met OR betting window still open) — the modal
+          // copy + confirm button then describe the cancel path.
+          // Otherwise "End stream" → declare-winner flow.
+          //
+          // `style={{ backgroundImage: "none" }}` is the right way to
+          // strip the variant="accent" gradient without also wiping the
+          // bg-destructive solid color underneath (the old
+          // `[background:none]` arbitrary value killed both, which is
+          // why the button rendered white instead of red).
           <Button
             type="button"
             variant="accent"
             size="sm"
             onClick={() => setDeclareOpen(true)}
             disabled={phase === "ending" || declareWinnerMutation.isPending}
-            className="bg-destructive text-white [background:none] hover:bg-destructive/90"
+            className="bg-destructive text-white hover:bg-destructive/90"
+            style={{ backgroundImage: "none" }}
           >
             {phase === "ending" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <>
                 <PhoneOff className="h-4 w-4" />
-                End stream
+                {willCancel ? "Cancel stream" : "End stream"}
               </>
             )}
           </Button>
@@ -758,23 +795,30 @@ export default function LiveStream() {
       )}
 
       {/* End-stream modal — single entry point regardless of whether
-          the betting window has closed. Post-cutoff: pick winning
-          outcome(s) → declare_winner flips status → pending_moderation.
-          Pre-cutoff: only allow a hard end (no declaration possible
-          yet) via finish_event. */}
+          the betting window has closed. Three flavours of copy
+          depending on what ending right now actually does:
+            • willCancel=true → cancel + refund (window still open
+              OR minimums not met). Copy emphasises the refund.
+            • bettingClosed && minimums met → declare-winner picker.
+            • else (shouldn't really happen — willCancel covers it)
+              → vanilla end-stream copy. */}
       <Dialog open={declareOpen} onOpenChange={setDeclareOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {bettingClosed ? "End stream & declare winner" : "End stream"}
+              {willCancel
+                ? "Cancel stream"
+                : "End stream & declare winner"}
             </DialogTitle>
             <DialogDescription>
-              {bettingClosed
-                ? "Pick the outcome(s) that won. Multi-select supports dead heats. Once submitted, the event flips to Pending settlement and a LiveRush moderator releases payouts."
-                : "The betting window is still open. Ending now closes the stream — you'll be able to come back and declare a winner once the cutoff passes."}
+              {willCancel
+                ? bettingClosed
+                  ? "This event didn't reach the minimum bets needed to settle (participants, outcomes, or pool). Cancelling now refunds every bet in full and closes the stream."
+                  : "The betting window is still open. Cancelling now closes the stream and refunds every bet in full — no winner is declared."
+                : "Pick the outcome(s) that won. Multi-select supports dead heats. Once submitted, the event flips to Pending settlement and a LiveRush moderator releases payouts."}
             </DialogDescription>
           </DialogHeader>
-          {bettingClosed && (
+          {!willCancel && (
             <ul className="space-y-2 py-2">
               {outcomes.map((o) => {
                 const active = selectedWinners.has(o.id);
@@ -817,7 +861,7 @@ export default function LiveStream() {
             >
               Cancel
             </Button>
-            {bettingClosed ? (
+            {!willCancel ? (
               <Button
                 type="button"
                 onClick={handleDeclareSubmit}
@@ -842,10 +886,14 @@ export default function LiveStream() {
                   await handleEnd();
                 }}
                 disabled={phase === "ending"}
-                className="bg-destructive text-white [background:none] hover:bg-destructive/90"
+                // Same gradient-strip-but-keep-solid trick as the top
+                // bar CTA — inline style nukes only the bg gradient
+                // so bg-destructive shows through.
+                className="bg-destructive text-white hover:bg-destructive/90"
+                style={{ backgroundImage: "none" }}
               >
                 <PhoneOff className="h-4 w-4" />
-                End stream
+                Cancel stream & refund
               </Button>
             )}
           </div>

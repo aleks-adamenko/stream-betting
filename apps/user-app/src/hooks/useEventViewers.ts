@@ -1,6 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+
+// sessionStorage key for the anon presence id. Per-tab, survives
+// reload (we want a reload to count as the same viewer, not a fresh
+// one) but doesn't carry across tabs (each open tab is genuinely
+// a separate viewer of the stream).
+const ANON_KEY_STORAGE = "liverush:viewer-presence-id";
+
+function getOrCreateAnonKey(): string {
+  if (typeof window === "undefined") return crypto.randomUUID();
+  try {
+    const existing = window.sessionStorage.getItem(ANON_KEY_STORAGE);
+    if (existing) return existing;
+    const fresh =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2);
+    window.sessionStorage.setItem(ANON_KEY_STORAGE, fresh);
+    return fresh;
+  } catch {
+    // sessionStorage unavailable (private mode, embedded webview) —
+    // fall back to in-memory uuid; reload will still bump the count
+    // but at least multi-tab is correct.
+    return crypto.randomUUID();
+  }
+}
 
 /**
  * Real-time viewer count for a single event, backed by a Supabase
@@ -33,16 +59,20 @@ export function useEventViewers(
   eventId: string | undefined,
   options: { track: boolean },
 ): number {
+  const { user } = useAuth();
   const [count, setCount] = useState(0);
-  // One unique presence key per hook instance — two tabs of the same
-  // event therefore count as two viewers.
+  // Presence key resolution:
+  //   • Logged-in user → user.id. Each user counts as one regardless
+  //     of how many tabs / reloads they have. A reload no longer
+  //     bumps the viewer count.
+  //   • Anonymous viewer → sessionStorage-backed uuid that survives
+  //     within the tab across reloads but doesn't cross tabs.
+  // The previous implementation generated a fresh crypto.randomUUID
+  // per mount, so every page reload registered a new "viewer" and
+  // the count drifted upward on its own.
   const clientIdRef = useRef<string | null>(null);
-  if (!clientIdRef.current) {
-    clientIdRef.current =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2);
-  }
+  const clientId = user?.id ?? (clientIdRef.current ??= getOrCreateAnonKey());
+  clientIdRef.current = clientId;
 
   useEffect(() => {
     if (!eventId) return;
@@ -115,7 +145,9 @@ export function useEventViewers(
         void supabase.removeChannel(channel);
       }
     };
-  }, [eventId, options.track]);
+    // clientId is included so a sign-in mid-page (anon → authed)
+    // rebinds the channel with the user's stable key.
+  }, [eventId, options.track, clientId]);
 
   return count;
 }
