@@ -11,6 +11,8 @@ import {
   Trophy,
   LogIn,
   BadgeCheck,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 
@@ -74,6 +76,12 @@ export default function EventDetails() {
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const [overlaysHidden, setOverlaysHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Mute state lifted from CloudflareStreamPlayer so the fullscreen
+  // bet overlay can render its own sound toggle at bottom-centre
+  // (the player's own button would otherwise sit behind the overlay
+  // gradient). Defaults to true — muted is what browser autoplay
+  // policies expect, and the user-app player loads on page mount.
+  const [videoMuted, setVideoMuted] = useState(true);
   const betPanelRef = useRef<HTMLDivElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
 
@@ -221,8 +229,13 @@ export default function EventDetails() {
                 <CloudflareStreamPlayer
                   src={event.playbackUrl!}
                   poster={event.coverUrl}
-                  autoPlay
-                  muted
+                  muted={videoMuted}
+                  onMutedChange={setVideoMuted}
+                  // Suppress the player's own mute button while the
+                  // fullscreen bet overlay is up — it would otherwise
+                  // hide behind the overlay gradient. The overlay
+                  // renders its own mute toggle at bottom-centre.
+                  hideMuteButton={isFullscreen}
                 />
               ) : (
                 <HlsPlayer
@@ -331,6 +344,8 @@ export default function EventDetails() {
                 event={event}
                 containerRef={videoContainerRef}
                 onClose={() => setIsFullscreen(false)}
+                muted={videoMuted}
+                onMutedChange={setVideoMuted}
               />
             )}
           </div>
@@ -558,10 +573,17 @@ function FullscreenBetOverlay({
   event,
   containerRef,
   onClose,
+  muted,
+  onMutedChange,
 }: {
   event: StreamEvent;
   containerRef: React.RefObject<HTMLDivElement>;
   onClose: () => void;
+  /** Mute state forwarded down from EventDetails so the overlay's
+   *  own bottom-centre toggle stays in sync with whatever the
+   *  underlying CloudflareStreamPlayer is doing. */
+  muted: boolean;
+  onMutedChange: (next: boolean) => void;
 }) {
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -741,8 +763,29 @@ function FullscreenBetOverlay({
         </div>
       )}
 
+      {/* Bottom-center mute toggle — mirrors the one rendered by
+          CloudflareStreamPlayer in non-fullscreen mode. Hosting it
+          here (instead of leaving it inside the player) means the
+          overlay gradient + bet controls can sit on top of the
+          video without burying the audio control. Sits at a fixed
+          bottom inset so it doesn't shift when the bet form below
+          gains / loses rows. */}
+      <button
+        type="button"
+        onClick={() => onMutedChange(!muted)}
+        aria-label={muted ? "Unmute" : "Mute"}
+        className="pointer-events-auto absolute bottom-3 left-1/2 z-10 inline-flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full bg-black/60 text-white shadow-md backdrop-blur-sm transition-colors hover:bg-black/80"
+      >
+        {muted ? (
+          <VolumeX className="h-5 w-5" />
+        ) : (
+          <Volume2 className="h-5 w-5" />
+        )}
+      </button>
+
       {/* Bottom controls — only when authenticated. Anonymous users see a single
-          centered Sign in to bet CTA so the video can be enjoyed unobstructed. */}
+          Sign in to bet CTA pinned to the bottom-right corner so the video can
+          be enjoyed unobstructed and the centred mute button stays reachable. */}
       {user ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
           <div className="flex items-end justify-between gap-3">
@@ -832,7 +875,11 @@ function FullscreenBetOverlay({
           </div>
         </div>
       ) : (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-black/70 via-black/30 to-transparent p-4 pt-12">
+        // Anonymous viewers: a single Sign-in CTA pinned to the
+        // bottom-right corner. No bottom gradient bar — leaves the
+        // bottom-centre clear for the mute button and the rest of
+        // the frame unobstructed for the stream.
+        <div className="pointer-events-none absolute bottom-4 right-4">
           <Button
             type="button"
             variant="accent"

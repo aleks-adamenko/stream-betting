@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,6 +8,14 @@ import { useAuth } from "@/contexts/AuthContext";
 // one) but doesn't carry across tabs (each open tab is genuinely
 // a separate viewer of the stream).
 const ANON_KEY_STORAGE = "liverush:viewer-presence-id";
+
+// How long to hold a stale-higher count after the server tells us
+// it's dropped. Covers the typical 200–1500 ms gap between an old
+// WebSocket dying (page reload / route change) and the new socket
+// rejoining the presence channel under the same key. If the rejoin
+// arrives inside this window we never show the bounce; if it doesn't
+// we commit the actual lower count.
+const COUNT_DROP_HOLD_MS = 4000;
 
 function getOrCreateAnonKey(): string {
   if (typeof window === "undefined") return crypto.randomUUID();
@@ -37,17 +45,21 @@ function getOrCreateAnonKey(): string {
  * see the same set of presence keys.
  *
  * Resilience:
- *   - The first track() is awaited inside the subscribe callback.
- *   - A heartbeat re-tracks every 30s so a paused tab / backgrounded
- *     PWA / mobile-sleep doesn't silently drop the entry from the
- *     server-side state.
+ *   - Stable presence key per viewer: `user.id` when signed in (so
+ *     a reload / route change keeps the same identity), else a
+ *     sessionStorage uuid (per-tab, survives reload).
+ *   - 30 s heartbeat re-asserts the entry so a paused tab /
+ *     backgrounded PWA / mobile-sleep doesn't silently drop it.
  *   - `visibilitychange` and `focus` listeners force an immediate
- *     re-track when the tab comes back, so a viewer who tab-switches
- *     and returns within seconds doesn't blink off the counter on
- *     the streamer's screen.
- *   - On every presence `sync` we check that our own clientId is in
- *     the state — if not (e.g. server kicked the entry due to inactivity),
- *     we re-track to recover.
+ *     re-track when the tab comes back.
+ *   - Self-heal on sync mismatch: if our own key isn't in the
+ *     presence state map after a sync, we re-track without waiting
+ *     for the next heartbeat.
+ *   - Drop-debounce: when sync reports a count lower than what we
+ *     last showed, we hold the previous number for up to
+ *     COUNT_DROP_HOLD_MS and re-read state at the deadline. Smooths
+ *     out the typical reload / route-change bounce where a viewer
+ *     leaves and rejoins under the same key inside a second.
  *
  * @param eventId   The event to track. When undefined the hook is a
  *                  no-op so it's safe to call before data has loaded.
@@ -67,26 +79,54 @@ export function useEventViewers(
   //     bumps the viewer count.
   //   • Anonymous viewer → sessionStorage-backed uuid that survives
   //     within the tab across reloads but doesn't cross tabs.
-  // The previous implementation generated a fresh crypto.randomUUID
-  // per mount, so every page reload registered a new "viewer" and
-  // the count drifted upward on its own.
   const clientIdRef = useRef<string | null>(null);
   const clientId = user?.id ?? (clientIdRef.current ??= getOrCreateAnonKey());
   clientIdRef.current = clientId;
+
+  // Channel + drop-timer refs need to survive across renders so the
+  // debounce timer can re-read the latest presence state at apply
+  // time.
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const dropTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Centralised count setter — applies increases immediately, but
+  // holds decreases for COUNT_DROP_HOLD_MS in case the leave is
+  // really a transient reload / route-change race. At the deadline
+  // we re-read presenceState() rather than committing the captured
+  // value so any join that arrived in the meantime is reflected.
+  const applyCount = useCallback((fresh: number) => {
+    setCount((prev) => {
+      if (fresh >= prev) {
+        // Up or flat — show immediately, cancel any pending drop.
+        if (dropTimerRef.current) {
+          clearTimeout(dropTimerRef.current);
+          dropTimerRef.current = null;
+        }
+        return fresh;
+      }
+      // Drop — schedule a deferred re-read.
+      if (dropTimerRef.current) clearTimeout(dropTimerRef.current);
+      dropTimerRef.current = setTimeout(() => {
+        const latest = channelRef.current?.presenceState();
+        if (latest) setCount(Object.keys(latest).length);
+        dropTimerRef.current = null;
+      }, COUNT_DROP_HOLD_MS);
+      return prev;
+    });
+  }, []);
 
   useEffect(() => {
     if (!eventId) return;
 
     let cancelled = false;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
     let heartbeatId: ReturnType<typeof setInterval> | null = null;
 
     // Shared helper — call this any time we need to re-assert our
     // presence (initial subscribe, heartbeat, tab refocus, recovery
     // after sync mismatch).
     const sendTrack = () => {
-      if (!channel || !options.track) return;
-      void channel.track({ at: new Date().toISOString() });
+      if (!channelRef.current || !options.track) return;
+      void channelRef.current.track({ at: new Date().toISOString() });
     };
 
     const onVisibilityChange = () => {
@@ -104,14 +144,15 @@ export function useEventViewers(
     const setupId = setTimeout(() => {
       if (cancelled) return;
 
-      channel = supabase.channel(`event:${eventId}:viewers`, {
+      const channel = supabase.channel(`event:${eventId}:viewers`, {
         config: { presence: { key: clientIdRef.current! } },
       });
+      channelRef.current = channel;
 
       channel
         .on("presence", { event: "sync" }, () => {
-          const state = channel!.presenceState();
-          setCount(Object.keys(state).length);
+          const state = channel.presenceState();
+          applyCount(Object.keys(state).length);
           // Self-heal: if the server dropped our entry (idle timeout,
           // sketchy reconnect), we won't be in the state map. Re-track
           // to put ourselves back without waiting for the next heartbeat.
@@ -121,7 +162,7 @@ export function useEventViewers(
         })
         .subscribe(async (status) => {
           if (status === "SUBSCRIBED" && options.track) {
-            await channel!.track({ at: new Date().toISOString() });
+            await channel.track({ at: new Date().toISOString() });
           }
         });
 
@@ -139,15 +180,20 @@ export function useEventViewers(
       cancelled = true;
       clearTimeout(setupId);
       if (heartbeatId) clearInterval(heartbeatId);
+      if (dropTimerRef.current) {
+        clearTimeout(dropTimerRef.current);
+        dropTimerRef.current = null;
+      }
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", onVisibilityChange);
-      if (channel) {
-        void supabase.removeChannel(channel);
+      if (channelRef.current) {
+        void supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
     };
     // clientId is included so a sign-in mid-page (anon → authed)
     // rebinds the channel with the user's stable key.
-  }, [eventId, options.track, clientId]);
+  }, [eventId, options.track, clientId, applyCount]);
 
   return count;
 }

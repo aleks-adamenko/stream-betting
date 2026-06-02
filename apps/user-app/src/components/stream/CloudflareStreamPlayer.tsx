@@ -44,6 +44,19 @@ interface CloudflareStreamPlayerProps {
    *  sessions open. Default false — for the event page / featured
    *  hero we want the stream playing the moment the page loads. */
   lazy?: boolean;
+  /** Optional controlled muted state. When the parent passes both
+   *  `muted` + `onMutedChange`, the player becomes fully controlled
+   *  and mirrors the parent's value. Useful when a sibling overlay
+   *  (e.g. the EventDetails fullscreen bet bar) needs to share the
+   *  same mute state. Omit both for the original internal-state
+   *  behaviour. */
+  muted?: boolean;
+  onMutedChange?: (next: boolean) => void;
+  /** Suppress the player's own bottom-centre mute button. Used
+   *  when a parent renders its own mute affordance in a different
+   *  location (e.g. inside the fullscreen overlay where the player
+   *  button would otherwise be covered by the bet UI). */
+  hideMuteButton?: boolean;
 }
 
 export function CloudflareStreamPlayer({
@@ -51,11 +64,22 @@ export function CloudflareStreamPlayer({
   poster,
   className,
   lazy = false,
+  muted: controlledMuted,
+  onMutedChange,
+  hideMuteButton = false,
 }: CloudflareStreamPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<WebRTCPlayer | null>(null);
-  const [muted, setMuted] = useState(true);
+  // Internal mute state used when the parent doesn't provide a
+  // controlled value. The `muted` const below resolves to whichever
+  // source is active so the rest of the component can read one var.
+  const [internalMuted, setInternalMuted] = useState(true);
+  const muted = controlledMuted ?? internalMuted;
+  const setMuted = (next: boolean) => {
+    if (onMutedChange) onMutedChange(next);
+    else setInternalMuted(next);
+  };
   const [hasMedia, setHasMedia] = useState(false);
   // `paused` flips true when the WHEP layer fires `no-media` *after*
   // having had media — i.e. the streamer dropped their WHIP
@@ -369,10 +393,12 @@ export function CloudflareStreamPlayer({
       {/* Sound toggle — bottom-center, same on desktop + mobile.
           Hidden in lazy/feed mode because a wall of unmuted cards
           is hostile UX; the detail page is where viewers control
-          audio. stopPropagation so a click on the toggle inside a
-          link-wrapped feed card (like StreamCard) doesn't also
-          navigate. */}
-      {hasMedia && !lazy && (
+          audio. Also hidden when the parent has opted to render
+          its own mute button elsewhere (e.g. inside the fullscreen
+          bet overlay) via `hideMuteButton`. stopPropagation so a
+          click on the toggle inside a link-wrapped feed card (like
+          StreamCard) doesn't also navigate. */}
+      {hasMedia && !lazy && !hideMuteButton && (
         <button
           type="button"
           onClick={(e) => {
