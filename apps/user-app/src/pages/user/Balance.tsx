@@ -8,12 +8,11 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { TopUpModal } from "@/components/balance/TopUpModal";
 import { WithdrawModal } from "@/components/balance/WithdrawModal";
+import { CoinAmount } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePayouts } from "@/hooks/usePayouts";
 import { MOCK_USDT_CENTS } from "@/lib/balance";
 import { cn } from "@/lib/utils";
-
-const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 /* ---------- transaction history (mock) ---------- */
 
@@ -173,23 +172,18 @@ export default function Balance() {
           Add virtual funds to bet on live challenges.
         </p>
 
-        {/* Current balance card */}
+        {/* Current balance card. USD / USDT side-chips removed —
+            the app surfaces a single virtual-coin balance now, so
+            the per-currency breakdown was just noise next to the
+            big number on the left. */}
         <div className="mt-6 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Wallet className="h-4 w-4" />
-                <span className="text-sm font-medium">Your balance</span>
-              </div>
-              <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
-                {dollars(totalCents)}
-              </p>
-            </div>
-            <div className="flex w-full flex-row gap-2 sm:w-auto sm:flex-col">
-              <CurrencyChip label="USD" amount_cents={usdCents} />
-              <CurrencyChip label="USDT" amount_cents={usdtCents} />
-            </div>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Wallet className="h-4 w-4" />
+            <span className="text-sm font-medium">Your balance</span>
           </div>
+          <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
+            <CoinAmount cents={totalCents} />
+          </p>
         </div>
 
         {/* Primary actions */}
@@ -244,8 +238,8 @@ export default function Balance() {
                       </p>
                     </div>
                     <div className="flex flex-shrink-0 flex-col items-end gap-1">
-                      <p className="font-heading text-sm font-bold tabular-nums text-amber-700 dark:text-amber-300">
-                        +{dollars(p.amount_cents)}
+                      <p className="inline-flex items-center gap-1 font-heading text-sm font-bold leading-none tabular-nums text-amber-700 dark:text-amber-300">
+                        +<CoinAmount cents={p.amount_cents} />
                       </p>
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
                         <Clock className="h-3 w-3" />
@@ -337,12 +331,12 @@ export default function Balance() {
                     </div>
                     <p
                       className={cn(
-                        "flex-shrink-0 font-heading text-sm font-bold tabular-nums sm:text-base",
+                        "inline-flex flex-shrink-0 items-center gap-1 font-heading text-sm font-bold leading-none tabular-nums sm:text-base",
                         isIn ? "text-success" : "text-destructive",
                       )}
                     >
                       {isIn ? "+" : "−"}
-                      {dollars(tx.amount_cents)}
+                      <CoinAmount cents={tx.amount_cents} />
                     </p>
                   </li>
                 );
@@ -363,21 +357,3 @@ export default function Balance() {
   );
 }
 
-function CurrencyChip({
-  label,
-  amount_cents,
-}: {
-  label: string;
-  amount_cents: number;
-}) {
-  return (
-    <div className="flex flex-1 items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2 sm:flex-none">
-      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="font-heading text-sm font-bold tabular-nums text-foreground">
-        {dollars(amount_cents)}
-      </span>
-    </div>
-  );
-}

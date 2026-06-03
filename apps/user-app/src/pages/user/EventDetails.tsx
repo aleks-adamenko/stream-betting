@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CoinAmount, CoinIcon } from "@/components/ui/CoinAmount";
 import { LiveBadge } from "@/components/feed/LiveBadge";
 import { HlsPlayer } from "@/components/stream/HlsPlayer";
 import {
@@ -833,11 +834,12 @@ function FullscreenBetOverlay({
                       type="button"
                       onClick={() => setStake(String(amount))}
                       className={cn(
-                        "rounded-md bg-black/45 px-3 py-1.5 text-xs font-bold text-white backdrop-blur transition-colors",
+                        "inline-flex items-center gap-1 rounded-md bg-black/45 px-3 py-1.5 text-xs font-bold leading-none text-white backdrop-blur transition-colors",
                         active && "bg-primary text-primary-foreground ring-2 ring-primary",
                       )}
                     >
-                      ${amount}
+                      <CoinIcon />
+                      {amount}
                     </button>
                   );
                 })}
@@ -851,7 +853,11 @@ function FullscreenBetOverlay({
                   Potential payout
                 </p>
                 <p className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white drop-shadow">
-                  {progress.minimumsMet ? `$${potentialPayout}` : "—"}
+                  {progress.minimumsMet ? (
+                    <CoinAmount value={Number(potentialPayout)} />
+                  ) : (
+                    "—"
+                  )}
                 </p>
                 <p className="mt-0.5 text-[9px] leading-tight text-white/60">
                   {progress.minimumsMet
@@ -1112,7 +1118,9 @@ function BetPanel({ event }: { event: StreamEvent }) {
           <span className="flex items-center gap-2">
             <LogIn className="h-4 w-4" /> Sign in to use your balance
           </span>
-          <span className="text-xs text-muted-foreground">$100 on signup</span>
+          <span className="inline-flex items-center gap-1 text-xs leading-none text-muted-foreground">
+            <CoinIcon /> 100 on signup
+          </span>
         </Link>
       )}
 
@@ -1165,8 +1173,8 @@ function BetPanel({ event }: { event: StreamEvent }) {
                     context without losing the live odds tick. */}
                 <span className="ml-3 flex flex-shrink-0 items-center gap-2">
                   {isUserPick && userStakeDollars && (
-                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-primary">
-                      Your bet ${userStakeDollars}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold leading-none tabular-nums text-primary">
+                      Your bet <CoinIcon /> {userStakeDollars}
                     </span>
                   )}
                   <span
@@ -1228,13 +1236,14 @@ function BetPanel({ event }: { event: StreamEvent }) {
                     type="button"
                     onClick={() => setStake(String(amount))}
                     className={cn(
-                      "rounded-lg border px-3 py-2.5 text-base font-bold tabular-nums transition-all",
+                      "inline-flex items-center justify-center gap-1 rounded-lg border px-3 py-2.5 text-base font-bold leading-none tabular-nums transition-all",
                       active
                         ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
                         : "border-border/40 bg-background/60 text-foreground hover:border-primary/40 hover:bg-primary/[0.03]",
                     )}
                   >
-                    ${amount}
+                    <CoinIcon />
+                    {amount}
                   </button>
                 );
               })}
@@ -1244,7 +1253,11 @@ function BetPanel({ event }: { event: StreamEvent }) {
           <div className="mt-4 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
             <span className="text-muted-foreground">Potential payout</span>
             <span className="font-heading text-base font-bold text-foreground">
-              {progress.minimumsMet ? `$${potentialPayout}` : "—"}
+              {progress.minimumsMet ? (
+                <CoinAmount value={Number(potentialPayout)} />
+              ) : (
+                "—"
+              )}
             </span>
           </div>
           <p className="mt-1 text-center text-[11px] text-muted-foreground">

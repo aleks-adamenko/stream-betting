@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Bell, Gift, ListChecks, UserRound, Wallet } from "lucide-react";
+import { Bell, Coins, Gift, ListChecks, UserRound, Wallet } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -8,6 +8,11 @@ const tabs = [
   { to: "/my-bets", label: "My bets", icon: ListChecks },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/rewards", label: "Rewards", icon: Gift },
+  // Get Coins sits between Rewards and Balance — top-up flow lives
+  // there (in-app purchase packs). Balance stays last because it
+  // covers the full ledger / withdrawal view, of which Top up is
+  // just one entry point.
+  { to: "/coins", label: "Get coins", icon: Coins },
   { to: "/balance", label: "Balance", icon: Wallet },
 ];
 

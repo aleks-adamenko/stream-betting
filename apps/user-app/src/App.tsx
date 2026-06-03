@@ -13,6 +13,7 @@ import MyBets from "@/pages/user/MyBets";
 import Profile from "@/pages/user/Profile";
 import Notifications from "@/pages/user/Notifications";
 import Balance from "@/pages/user/Balance";
+import Coins from "@/pages/user/Coins";
 import Rewards from "@/pages/user/Rewards";
 import Company from "@/pages/user/Company";
 import SignUp from "@/pages/auth/SignUp";
@@ -71,6 +72,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Notifications />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/coins"
+              element={
+                <ProtectedRoute>
+                  <Coins />
                 </ProtectedRoute>
               }
             />

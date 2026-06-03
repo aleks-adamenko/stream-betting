@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
+import { CoinAmount } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -18,8 +19,6 @@ import {
   AVATAR_MAX_BYTES,
   AVATAR_ALLOWED_MIME,
 } from "@/services/profileService";
-
-const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 export default function Profile() {
   const { user, profile, refreshProfile, signOut } = useAuth();
@@ -127,15 +126,29 @@ export default function Profile() {
             </div>
           </div>
 
-          {/* Balance pill */}
-          <div className="mt-5 flex items-center gap-2 rounded-2xl bg-muted/50 p-2.5">
-            <Wallet className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Balance</span>
-            <span className="font-heading text-base font-bold tabular-nums text-foreground">
-              {dollars(balance)}
-            </span>
-            <Button asChild size="lg" variant="accent" className="ml-auto">
-              <Link to="/balance">
+          {/* Balance block — same visual as the Balance page header:
+              wallet icon + "Your balance" caption on top, big coin
+              + amount on the line below. Top up button is pulled
+              over to the right and vertically centred against the
+              whole block, the same way the SideNav's + button sits
+              next to its amount row. */}
+          <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl bg-muted/50 p-4">
+            <div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Wallet className="h-4 w-4" />
+                <span className="text-sm font-medium">Your balance</span>
+              </div>
+              <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-foreground">
+                <CoinAmount cents={balance} />
+              </p>
+            </div>
+            <Button asChild size="lg" variant="accent">
+              {/* Top up navigates to the dedicated Get-coins
+                  storefront (IAP packs). Balance page is for ledger
+                  history + withdrawals; the in-app purchase entry
+                  point is separate so users land directly on the
+                  pack picker. */}
+              <Link to="/coins">
                 <Plus className="h-4 w-4" strokeWidth={3} /> Top up
               </Link>
             </Button>

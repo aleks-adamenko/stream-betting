@@ -13,15 +13,47 @@
 
 import { APP_URL, STUDIO_URL } from "./resend.ts";
 
-/** Format an integer cent amount as a human-readable dollar string.
- *  Virtual currency for now (per the Phase 1 locked decision), but
- *  rendered as USD to match the in-app display. Strips trailing `.00`
- *  for whole-dollar amounts ($12 instead of $12.00) to keep subject
- *  lines tight. */
-function formatCents(cents: number): string {
-  const dollars = cents / 100;
-  if (Number.isInteger(dollars)) return `$${dollars}`;
-  return `$${dollars.toFixed(2)}`;
+/** Format an integer cent amount as the visible coin number — no
+ *  currency symbol. Strips trailing `.00` for round amounts so we
+ *  read "12" instead of "12.00" in tight contexts (subject lines,
+ *  preheaders). The "$" sign is gone everywhere; we mark the unit
+ *  with either the rush-coin glyph (HTML) or the 🪙 emoji
+ *  (subject / plain-text fallback) via the helpers below.
+ *
+ *  Note: `balance_cents` divided by 100 IS the coin count — the
+ *  IAP flow credits N×100 balance_cents per N coins, so the same
+ *  "/100" maths reads correctly for both top-up and bet-settle
+ *  amounts. */
+function formatCoinValue(cents: number): string {
+  const v = cents / 100;
+  if (Number.isInteger(v)) return String(v);
+  return v.toFixed(2);
+}
+
+/** Base64-encoded rush-coin SVG. Inlined as a data URI in every
+ *  HTML email so we don't need to host the icon on a CDN. Major
+ *  webmail clients (Gmail, Apple Mail, Outlook.com, mobile) render
+ *  SVG data URIs reliably; legacy Outlook desktop is the usual
+ *  weak link — if we hit issues there we can swap to a hosted PNG
+ *  by changing only this constant. */
+const COIN_SVG_DATA_URI =
+  "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI0MCIgY3k9IjQwIiByPSIzOS41IiBmaWxsPSIjRkZEQzJBIiBzdHJva2U9IiNFMUEwMDQiLz48ZyBmaWx0ZXI9InVybCgjZmlsdGVyMF9pXzIwNF8yMikiPjxjaXJjbGUgY3g9IjQwIiBjeT0iNDAiIHI9IjMxIiBmaWxsPSIjRkZCNjA5Ii8+PC9nPjxnIGZpbHRlcj0idXJsKCNmaWx0ZXIxX2RfMjA0XzIyKSI+PHBhdGggZD0iTTM2LjM2MzggNDMuMTk2MkgyNi42Nzc0QzI1LjkyIDQzLjE5NjIgMjUuNDM3NSA0Mi4zODY5IDI1Ljc5NzcgNDEuNzIwN0wzNi43MTY1IDIxLjUyNDRDMzYuODkxMiAyMS4yMDEzIDM3LjIyODkgMjEgMzcuNTk2MiAyMUg0Ny44Mjg1QzQ4LjU5NDkgMjEgNDkuMDc2NSAyMS44MjY4IDQ4LjY5ODMgMjIuNDkzNEw0Mi4wNjcxIDM0LjE4MzRDNDEuNjg4OSAzNC44NTAxIDQyLjE3MDUgMzUuNjc2OCA0Mi45MzY5IDM1LjY3NjhINTIuNjg5NkM1My41NjU0IDM1LjY3NjggNTQuMDE4MSAzNi43MjI4IDUzLjQxODcgMzcuMzYxM0wzMi41ODQzIDU5LjU1MzlDMzEuODA5MiA2MC4zNzk2IDMwLjQ3NDkgNTkuNDgzNyAzMC45NDU4IDU4LjQ1MzdMMzcuMjczMyA0NC42MTJDMzcuNTc2MSA0My45NDk3IDM3LjA5MjEgNDMuMTk2MiAzNi4zNjM4IDQzLjE5NjJaIiBmaWxsPSJ3aGl0ZSIvPjxwYXRoIGQ9Ik0zNi4zNjM4IDQzLjE5NjJIMjYuNjc3NEMyNS45MiA0My4xOTYyIDI1LjQzNzUgNDIuMzg2OSAyNS43OTc3IDQxLjcyMDdMMzYuNzE2NSAyMS41MjQ0QzM2Ljg5MTIgMjEuMjAxMyAzNy4yMjg5IDIxIDM3LjU5NjIgMjFINDcuODI4NUM0OC41OTQ5IDIxIDQ5LjA3NjUgMjEuODI2OCA0OC42OTgzIDIyLjQ5MzRMNDIuMDY3MSAzNC4xODM0QzQxLjY4ODkgMzQuODUwMSA0Mi4xNzA1IDM1LjY3NjggNDIuOTM2OSAzNS42NzY4SDUyLjY4OTZDNTMuNTY1NCAzNS42NzY4IDU0LjAxODEgMzYuNzIyOCA1My40MTg3IDM3LjM2MTNMMzIuNTg0MyA1OS41NTM5QzMxLjgwOTIgNjAuMzc5NiAzMC40NzQ5IDU5LjQ4MzcgMzAuOTQ1OCA1OC40NTM3TDM3LjI3MzMgNDQuNjEyQzM3LjU3NjEgNDMuOTQ5NyAzNy4wOTIxIDQzLjE5NjIgMzYuMzYzOCA0My4xOTYyWiIgc3Ryb2tlPSIjRUJBMjA0IiBzdHJva2Utd2lkdGg9IjIiLz48L2c+PGRlZnM+PGZpbHRlciBpZD0iZmlsdGVyMF9pXzIwNF8yMiIgeD0iOSIgeT0iOSIgd2lkdGg9IjYyIiBoZWlnaHQ9IjYyIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVCbGVuZCBtb2RlPSJub3JtYWwiIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSIvPjxmZUNvbG9yTWF0cml4IGluPSJTb3VyY2VBbHBoYSIgdHlwZT0ibWF0cml4IiB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEyNyAwIiByZXN1bHQ9ImhhcmRBbHBoYSIvPjxmZU9mZnNldCBkeT0iNCIvPjxmZUNvbXBvc2l0ZSBpbjI9ImhhcmRBbHBoYSIgb3BlcmF0b3I9ImFyaXRobWV0aWMiIGsyPSItMSIgazM9IjEiLz48ZmVDb2xvck1hdHJpeCB0eXBlPSJtYXRyaXgiIHZhbHVlcz0iMCAwIDAgMCAwLjg4MzMwMSAwIDAgMCAwIDAuNjI2MjI5IDAgMCAwIDAgMC4wMTcwMDMxIDAgMCAwIDEgMCIvPjxmZUJsZW5kIG1vZGU9Im5vcm1hbCIgaW4yPSJzaGFwZSIgcmVzdWx0PSJlZmZlY3QxX2lubmVyU2hhZG93XzIwNF8yMiIvPjwvZmlsdGVyPjxmaWx0ZXIgaWQ9ImZpbHRlcjFfZF8yMDRfMjIiIHg9IjI0LjY3NDYiIHk9IjIwIiB3aWR0aD0iMzAuMDE4OSIgaGVpZ2h0PSI0Mi44ODU2IiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiLz48ZmVDb2xvck1hdHJpeCBpbj0iU291cmNlQWxwaGEiIHR5cGU9Im1hdHJpeCIgdmFsdWVzPSIwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAxMjcgMCIgcmVzdWx0PSJoYXJkQWxwaGEiLz48ZmVPZmZzZXQgZHk9IjIiLz48ZmVDb21wb3NpdGUgaW4yPSJoYXJkQWxwaGEiIG9wZXJhdG9yPSJvdXQiLz48ZmVDb2xvck1hdHJpeCB0eXBlPSJtYXRyaXgiIHZhbHVlcz0iMCAwIDAgMCAwLjkyMTU2OSAwIDAgMCAwIDAuNjM1Mjk0IDAgMCAwIDAgMC4wMTU2ODYzIDAgMCAwIDEgMCIvPjxmZUJsZW5kIG1vZGU9Im5vcm1hbCIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0iZWZmZWN0MV9kcm9wU2hhZG93XzIwNF8yMiIvPjxmZUJsZW5kIG1vZGU9Im5vcm1hbCIgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iZWZmZWN0MV9kcm9wU2hhZG93XzIwNF8yMiIgcmVzdWx0PSJzaGFwZSIvPjwvZmlsdGVyPjwvZGVmcz48L3N2Zz4=";
+
+/** Inline HTML for a coin amount: image + bare number. `size` is
+ *  the icon dimensions in pixels and should roughly match the
+ *  surrounding font-size — 16 for body copy, 20–22 for h1
+ *  hero amounts. `vertical-align: middle` keeps the icon centre
+ *  on the digit x-height middle across email clients. */
+function coinHtml(cents: number, size: number): string {
+  const value = formatCoinValue(cents);
+  return `<img src="${COIN_SVG_DATA_URI}" alt="" width="${size}" height="${size}" style="display:inline-block;width:${size}px;height:${size}px;vertical-align:middle;margin-right:4px;" />${value}`;
+}
+
+/** Plain-text variant for subject lines, preheaders, and the
+ *  text body — those contexts don't support HTML so we use the
+ *  Unicode coin emoji 🪙 as a textual analog. */
+function coinText(cents: number): string {
+  return `🪙 ${formatCoinValue(cents)}`;
 }
 
 /** Map machine-readable cancel reasons (cancel_event sets these) to
@@ -243,10 +275,10 @@ Manage notifications: ${unsubscribeUrl()}`;
 export function renderPayoutCredited(
   ctx: EventCtx & { amountCents: number },
 ): RenderedEmail {
-  const amount = formatCents(ctx.amountCents);
-  const subject = `💰 You won ${amount} on "${ctx.eventTitle}"`;
+  const txt = coinText(ctx.amountCents);
+  const subject = `💰 You won ${txt} on "${ctx.eventTitle}"`;
   const text = `Your bet on "${ctx.eventTitle}" by ${ctx.creatorName} won.
-${amount} has been credited to your LiveRush balance.
+${txt} has been credited to your LiveRush balance.
 
 View the event: ${eventUrl(ctx.eventId)}
 
@@ -254,13 +286,13 @@ Manage notifications: ${unsubscribeUrl()}`;
   const html = frame(
     `${coverBlock(ctx.coverUrl)}
     <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#16a34a;color:#ffffff;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">YOU WON</div>
-    <h1 style="margin:0 0 8px;font-size:28px;font-weight:800;line-height:1.2;">${amount}</h1>
+    <h1 style="margin:0 0 8px;font-size:28px;font-weight:800;line-height:1.2;">${coinHtml(ctx.amountCents, 28)}</h1>
     <p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#1f2937;">
       Your bet on <strong>${escape(ctx.eventTitle)}</strong> by ${escape(ctx.creatorName)} won. The payout is in your LiveRush balance.
     </p>
     ${ctaButton(eventUrl(ctx.eventId), "View the event")}
     `,
-    { preheader: `You won ${amount} on ${ctx.eventTitle}` },
+    { preheader: `You won ${txt} on ${ctx.eventTitle}` },
   );
   return { subject, html, text };
 }
@@ -270,11 +302,11 @@ Manage notifications: ${unsubscribeUrl()}`;
 export function renderRefundIssued(
   ctx: EventCtx & { amountCents: number; reason: string | null },
 ): RenderedEmail {
-  const amount = formatCents(ctx.amountCents);
+  const txt = coinText(ctx.amountCents);
   const reasonLabel = cancelReasonLabel(ctx.reason);
-  const subject = `↩️ Your ${amount} bet was refunded — "${ctx.eventTitle}" was cancelled`;
+  const subject = `↩️ Your ${txt} bet was refunded — "${ctx.eventTitle}" was cancelled`;
   const text = `Heads up: "${ctx.eventTitle}" by ${ctx.creatorName} was cancelled because ${reasonLabel}.
-Your ${amount} bet has been refunded in full to your LiveRush balance.
+Your ${txt} bet has been refunded in full to your LiveRush balance.
 
 View the event: ${eventUrl(ctx.eventId)}
 
@@ -282,7 +314,7 @@ Manage notifications: ${unsubscribeUrl()}`;
   const html = frame(
     `${coverBlock(ctx.coverUrl)}
     <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#6b7280;color:#ffffff;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">REFUNDED</div>
-    <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;line-height:1.25;">Your ${amount} bet was refunded</h1>
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;line-height:1.25;">Your ${coinHtml(ctx.amountCents, 22)} bet was refunded</h1>
     <p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#1f2937;">
       <strong>${escape(ctx.eventTitle)}</strong> by ${escape(ctx.creatorName)} was cancelled because ${escape(reasonLabel)}.
     </p>
@@ -291,7 +323,7 @@ Manage notifications: ${unsubscribeUrl()}`;
     </p>
     ${ctaButton(eventUrl(ctx.eventId), "View the event")}
     `,
-    { preheader: `${amount} refunded — ${ctx.eventTitle} cancelled` },
+    { preheader: `${txt} refunded — ${ctx.eventTitle} cancelled` },
   );
   return { subject, html, text };
 }
@@ -301,10 +333,10 @@ Manage notifications: ${unsubscribeUrl()}`;
 export function renderCreatorRakeCredited(
   ctx: EventCtx & { amountCents: number },
 ): RenderedEmail {
-  const amount = formatCents(ctx.amountCents);
-  const subject = `💵 ${amount} streamer earnings credited from "${ctx.eventTitle}"`;
+  const txt = coinText(ctx.amountCents);
+  const subject = `💵 ${txt} streamer earnings credited from "${ctx.eventTitle}"`;
   const text = `Your event "${ctx.eventTitle}" is settled.
-${amount} in streamer earnings has been credited to your LiveRush balance.
+${txt} in streamer earnings has been credited to your LiveRush balance.
 
 View your balance: ${STUDIO_URL}/balance
 
@@ -312,13 +344,13 @@ Manage notifications: ${unsubscribeUrl()}`;
   const html = frame(
     `${coverBlock(ctx.coverUrl)}
     <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#FED448;color:#0e0f12;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">EARNINGS CREDITED</div>
-    <h1 style="margin:0 0 8px;font-size:28px;font-weight:800;line-height:1.2;">${amount}</h1>
+    <h1 style="margin:0 0 8px;font-size:28px;font-weight:800;line-height:1.2;">${coinHtml(ctx.amountCents, 28)}</h1>
     <p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#1f2937;">
-      Your event <strong>${escape(ctx.eventTitle)}</strong> is settled. ${amount} in streamer earnings is now in your LiveRush balance.
+      Your event <strong>${escape(ctx.eventTitle)}</strong> is settled. ${coinHtml(ctx.amountCents, 16)} in streamer earnings is now in your LiveRush balance.
     </p>
     ${ctaButton(`${STUDIO_URL}/balance`, "View your balance")}
     `,
-    { preheader: `${amount} streamer earnings credited` },
+    { preheader: `${txt} streamer earnings credited` },
   );
   return { subject, html, text };
 }
@@ -334,7 +366,7 @@ export function renderPayoutRejected(
     recipientRole: "viewer" | "streamer";
   },
 ): RenderedEmail {
-  const amount = formatCents(ctx.amountCents);
+  const txt = coinText(ctx.amountCents);
   const isViewer = ctx.recipientRole === "viewer";
   const what = isViewer ? "winning payout" : "streamer earnings payout";
   const ctaUrl = isViewer ? eventUrl(ctx.eventId) : `${STUDIO_URL}/balance`;
@@ -344,7 +376,7 @@ export function renderPayoutRejected(
     : "A moderator is reviewing this payout.";
 
   const subject = `⚠️ Your ${what} on "${ctx.eventTitle}" is on hold`;
-  const text = `Your ${what} of ${amount} on "${ctx.eventTitle}" is on hold pending moderator review.
+  const text = `Your ${what} of ${txt} on "${ctx.eventTitle}" is on hold pending moderator review.
 
 ${reasonLine}
 
@@ -358,7 +390,7 @@ Manage notifications: ${unsubscribeUrl()}`;
     <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#f59e0b;color:#ffffff;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">ON HOLD</div>
     <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;line-height:1.25;">Your ${escape(what)} is on hold</h1>
     <p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#1f2937;">
-      ${amount} on <strong>${escape(ctx.eventTitle)}</strong> is pending moderator review.
+      ${coinHtml(ctx.amountCents, 16)} on <strong>${escape(ctx.eventTitle)}</strong> is pending moderator review.
     </p>
     <p style="margin:0 0 18px;font-size:14px;color:#6b7280;line-height:1.5;">
       ${escape(reasonLine)}
@@ -368,7 +400,7 @@ Manage notifications: ${unsubscribeUrl()}`;
     </p>
     ${ctaButton(ctaUrl, ctaLabel)}
     `,
-    { preheader: `${amount} ${what} on hold pending review` },
+    { preheader: `${txt} ${what} on hold pending review` },
   );
   return { subject, html, text };
 }

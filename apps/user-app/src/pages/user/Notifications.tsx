@@ -1,18 +1,24 @@
+import type { ReactNode } from "react";
+import { Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  Ban,
   Bell,
+  Coins,
+  Heart,
+  RotateCcw,
+  Radio,
   Sparkles,
   Trophy,
-  XCircle,
-  Radio,
-  Heart,
   Wallet,
+  XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
+import { CoinIcon } from "@/components/ui/CoinAmount";
 import {
   useNotifications,
   notificationsKeys,
@@ -25,6 +31,68 @@ import {
 } from "@/services/notificationsService";
 import { cn } from "@/lib/utils";
 
+// Notification bodies + titles carry money values produced by SQL
+// triggers (welcome / top_up_balance), the notify-payout Edge
+// Function ("27.00 credited from..."), and notify-event-cancelled
+// ("10.00 refunded from..."). The Edge Functions don't prefix the
+// number with "$", so we match BOTH patterns:
+//   `$<amount>`  → strips the dollar sign + adds coin icon
+//   `<amount>`   → bare decimal, must have decimals + word
+//                  boundary so we don't accidentally pick up
+//                  things like "Round 2" or year numbers.
+// Examples:
+//   "$100"                        → [coin] 100
+//   "+$5.00 added to your balance" → +[coin] 5.00 added ...
+//   "10.00 refunded from \"...\""  → [coin] 10.00 refunded from ...
+//   "27.00 credited from \"...\""  → [coin] 27.00 credited from ...
+const AMOUNT_REGEX =
+  /\$\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})*\.\d{1,2}\b/g;
+
+function renderWithCoins(text: string): ReactNode {
+  if (!text) return text;
+  // Quick reject: no "$" and no decimal point means nothing to do.
+  if (!text.includes("$") && !text.includes(".")) return text;
+
+  // matchAll lets us interleave plain-text segments with matched
+  // money values. Each match becomes an inline-flex span that
+  // pairs the coin glyph with the bare digits (no "$" — the icon
+  // replaces it).
+  const out: ReactNode[] = [];
+  let cursor = 0;
+  let i = 0;
+  for (const match of text.matchAll(AMOUNT_REGEX)) {
+    const idx = match.index ?? 0;
+    if (idx > cursor) {
+      out.push(<Fragment key={`t-${i}`}>{text.slice(cursor, idx)}</Fragment>);
+    }
+    const raw = match[0];
+    const amount = raw.startsWith("$") ? raw.slice(1) : raw;
+    out.push(
+      <span
+        key={`m-${i}`}
+        className="inline-flex items-baseline gap-0.5 tabular-nums"
+      >
+        <CoinIcon className="self-center" />
+        {amount}
+      </span>,
+    );
+    cursor = idx + raw.length;
+    i++;
+  }
+  if (cursor < text.length) {
+    out.push(<Fragment key={`t-end`}>{text.slice(cursor)}</Fragment>);
+  }
+  return out.length === 1 && typeof out[0] === "string" ? out[0] : out;
+}
+
+// Streamer-only notification types — never relevant on the
+// user-app feed. A creator who also bets on other people's events
+// still shouldn't see their own rake-credited earnings here; that
+// belongs on the studio side.
+const STREAMER_ONLY_TYPES: ReadonlySet<NotificationType> = new Set([
+  "rake_credited",
+]);
+
 const TYPE_META: Record<
   NotificationType,
   { icon: typeof Bell; iconClassName: string }
@@ -35,6 +103,26 @@ const TYPE_META: Record<
   event_starting: { icon: Radio, iconClassName: "bg-primary/10 text-primary" },
   new_follower: { icon: Heart, iconClassName: "bg-pink-500/15 text-pink-600" },
   top_up: { icon: Wallet, iconClassName: "bg-success/15 text-success" },
+  // Phase 2 betting-email companions. Without entries for these the
+  // page used to crash on render (`TYPE_META[n.type].icon` would
+  // dereference undefined and take the whole route down).
+  bet_refunded: {
+    icon: RotateCcw,
+    iconClassName: "bg-muted text-muted-foreground",
+  },
+  rake_credited: { icon: Coins, iconClassName: "bg-success/15 text-success" },
+  payout_rejected: {
+    icon: Ban,
+    iconClassName: "bg-destructive/15 text-destructive",
+  },
+};
+
+// Defensive fallback so a future notification type the client
+// doesn't know about yet renders as a neutral bell instead of
+// crashing the page.
+const DEFAULT_META: { icon: typeof Bell; iconClassName: string } = {
+  icon: Bell,
+  iconClassName: "bg-muted text-muted-foreground",
 };
 
 function timeAgo(iso: string): string {
@@ -58,7 +146,13 @@ export default function Notifications() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useNotifications();
 
-  const unreadCount = data?.filter((n) => !n.read).length ?? 0;
+  // Filter out streamer-only types client-side so a creator who
+  // also bets here doesn't see their own "Earnings credited"
+  // (rake_credited) rows mixed in with their bet wins / refunds /
+  // top-ups. Those notifications stay in the DB but are surfaced
+  // separately on the studio side.
+  const visible = data?.filter((n) => !STREAMER_ONLY_TYPES.has(n.type));
+  const unreadCount = visible?.filter((n) => !n.read).length ?? 0;
 
   const markOne = useMutation({
     mutationFn: (id: string) => markNotificationRead(id),
@@ -122,7 +216,7 @@ export default function Notifications() {
               />
             ))}
 
-          {!isLoading && (!data || data.length === 0) && (
+          {!isLoading && (!visible || visible.length === 0) && (
             <div className="rounded-2xl border border-dashed border-border/60 p-10 text-center">
               <Bell className="mx-auto h-8 w-8 text-muted-foreground" />
               <p className="mt-3 font-heading text-base font-semibold">
@@ -135,8 +229,8 @@ export default function Notifications() {
             </div>
           )}
 
-          {data?.map((n) => {
-            const meta = TYPE_META[n.type];
+          {visible?.map((n) => {
+            const meta = TYPE_META[n.type] ?? DEFAULT_META;
             const Icon = meta.icon;
             const clickable = !n.read || !!n.event_id;
             return (
@@ -164,7 +258,7 @@ export default function Notifications() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-heading text-sm font-semibold text-foreground">
-                      {n.title}
+                      {renderWithCoins(n.title)}
                     </p>
                     <span className="flex-shrink-0 text-[11px] text-muted-foreground">
                       {timeAgo(n.created_at)}
@@ -172,7 +266,7 @@ export default function Notifications() {
                   </div>
                   {n.body && (
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      {n.body}
+                      {renderWithCoins(n.body)}
                     </p>
                   )}
                 </div>

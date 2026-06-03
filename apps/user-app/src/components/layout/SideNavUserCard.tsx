@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { Wallet, ListChecks, Plus, Bell } from "lucide-react";
+import { ListChecks, Plus, Bell } from "lucide-react";
 
+import { CoinIcon } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMyBets } from "@/hooks/useMyBets";
 import { totalBalanceCents } from "@/lib/balance";
@@ -56,22 +57,18 @@ export function SideNavUserCard() {
         </div>
       </Link>
 
-      {/* Balance card with + button */}
-      <div className="relative mt-4 rounded-2xl bg-white/[0.08] p-3 pr-14 ring-1 ring-white/15">
-        {/* Top row: icon + label */}
-        <div className="relative flex items-center gap-1.5">
-          <Wallet className="h-3.5 w-3.5 text-white/80" />
-          <span className="text-[11px] font-bold uppercase tracking-wider text-white/85">
-            Balance
-          </span>
-        </div>
-
-        {/* Amount */}
-        <div className="relative mt-2">
-          <span className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white">
-            ${balanceDollars.toFixed(2)}
-          </span>
-        </div>
+      {/* Balance card with + button. The "Balance" label + wallet
+          icon are gone — the coin glyph already carries enough
+          meaning on its own, so the row is just the amount and the
+          add-funds + button.
+          `flex items-center` + `min-h-14` keeps the card tall
+          enough to host the 32 px + button comfortably and centres
+          the balance line so it sits mid-card next to the +. */}
+      <div className="relative mt-4 flex min-h-14 items-center rounded-2xl bg-white/[0.08] p-3 pr-14 ring-1 ring-white/15">
+        <span className="inline-flex items-center gap-1 font-heading text-2xl font-extrabold leading-none tabular-nums text-white">
+          <CoinIcon />
+          {balanceDollars.toFixed(2)}
+        </span>
 
         {/* Plus button — accent variant, vertically centered to the whole container */}
         <Link

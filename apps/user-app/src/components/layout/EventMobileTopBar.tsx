@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, UserCircle } from "lucide-react";
 
 import logoUrl from "@/assets/live-rush-logo-2.png";
+import { CoinIcon } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { totalBalanceCents } from "@/lib/balance";
 
@@ -52,8 +53,9 @@ export function EventMobileTopBar({ style }: EventMobileTopBarProps) {
               >
                 <Plus className="h-3.5 w-3.5" strokeWidth={3} />
               </Link>
-              <span className="font-heading text-sm font-bold tabular-nums text-foreground">
-                ${balanceDollars.toFixed(2)}
+              <span className="inline-flex items-center gap-1 font-heading text-sm font-bold leading-none tabular-nums text-foreground">
+                <CoinIcon />
+                {balanceDollars.toFixed(2)}
               </span>
             </div>
           )}

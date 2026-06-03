@@ -32,11 +32,25 @@ const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 interface TopUpModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Optional preset USD amount in cents. When provided, picking
+   *  "USD" skips the amount-chooser screen entirely and credits the
+   *  preset amount to the balance instantly. Used by the Get coins
+   *  page, where the user has already chosen a coin pack (and thus
+   *  the USD price) before opening this modal — re-asking them to
+   *  pick an amount would be redundant. Omit for the Balance page,
+   *  where USD top-up still goes through the amount picker. */
+  presetAmountCents?: number;
 }
 
-export function TopUpModal({ open, onOpenChange }: TopUpModalProps) {
+export function TopUpModal({
+  open,
+  onOpenChange,
+  presetAmountCents,
+}: TopUpModalProps) {
   const [step, setStep] = useState<Step>("choose-currency");
   const [currency, setCurrency] = useState<Currency | null>(null);
+  const { refreshProfile } = useAuth();
+  const queryClient = useQueryClient();
 
   // Reset internal state whenever the modal closes so it always re-opens on
   // step 1.
@@ -52,7 +66,42 @@ export function TopUpModal({ open, onOpenChange }: TopUpModalProps) {
     }
   }, [open]);
 
+  // USD instant-credit mutation — only fired when `presetAmountCents`
+  // is set + the user picks USD on step 1. Lives at the modal level
+  // (not inside UsdTopUpStep) because we never render UsdTopUpStep
+  // in that flow; we close the modal on success and show a toast.
+  //
+  // Toast formatting is coin-flavoured, not dollar-flavoured: the
+  // value the user just bought is X coins, not X dollars. The real
+  // USD they paid is a separate concept and lives on the purchase
+  // record / receipt, not in the in-app notification. balance_cents
+  // is divided by 100 to get the user-visible coin count.
+  const instantUsdMutation = useMutation({
+    mutationFn: (cents: number) => topUpBalance(cents),
+    onSuccess: async (data) => {
+      await refreshProfile();
+      void queryClient.invalidateQueries({ queryKey: notificationsKeys.mine() });
+      const coinsAdded = (data.amount_cents / 100).toFixed(0);
+      const newBalance = (data.new_balance_cents / 100).toFixed(2);
+      toast.success(
+        `+${coinsAdded} coins added — new balance ${newBalance}`,
+      );
+      onOpenChange(false);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Top-up failed");
+    },
+  });
+
   const handlePickCurrency = (c: Currency) => {
+    // Get-coins flow: skip the USD picker entirely and credit the
+    // preset amount immediately. The user already picked a pack +
+    // saw the price on the previous screen, so a second amount
+    // chooser would just be friction.
+    if (c === "usd" && presetAmountCents != null) {
+      instantUsdMutation.mutate(presetAmountCents);
+      return;
+    }
     setCurrency(c);
     setStep("currency-flow");
   };
@@ -305,7 +354,7 @@ function UsdtReceiveStep({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      <StepHeader title="Receive USDT" onBack={onBack} />
+      <StepHeader title="Send USDT" onBack={onBack} />
 
       <p className="text-sm leading-relaxed text-muted-foreground">
         This is your non-custodial wallet address. Send any EVM token directly

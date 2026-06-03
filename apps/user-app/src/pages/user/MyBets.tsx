@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Trophy, Wallet, Clock, X, CheckCircle2 } from "lucide-react";
 
 import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
+import { CoinAmount, CoinIcon } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMyBets } from "@/hooks/useMyBets";
 import type { BetStatus } from "@/services/betsService";
@@ -27,7 +29,6 @@ const STATUS_META: Record<
   refunded: { label: "Refunded", className: "bg-muted text-muted-foreground", icon: Wallet },
 };
 
-const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 export default function MyBets() {
   const { profile } = useAuth();
@@ -55,8 +56,8 @@ export default function MyBets() {
         </p>
 
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
-          <Stat label="Balance" value={dollars(balance)} highlight />
-          <Stat label="Total staked" value={dollars(totalStaked)} />
+          <Stat label="Balance" value={<CoinAmount cents={balance} />} highlight />
+          <Stat label="Total staked" value={<CoinAmount cents={totalStaked} />} />
           <Stat label="Open bets" value={String(openCount)} />
           <Stat label="Won" value={String(wonCount)} />
         </div>
@@ -97,21 +98,37 @@ export default function MyBets() {
               //   • refunded: "Refunded"
               const odds = Number(bet.odds_snapshot ?? bet.odds_decimal);
               const oddsText = Number.isFinite(odds) ? `${odds.toFixed(2)}×` : "—";
-              let resultLabel = "";
+              let resultLabel: ReactNode = "";
               let resultClass = "text-muted-foreground";
               if (status === "won" && bet.payout_cents != null) {
-                resultLabel = `Won ${dollars(bet.payout_cents)}`;
+                resultLabel = (
+                  <>
+                    Won <CoinAmount cents={bet.payout_cents} />
+                  </>
+                );
                 resultClass = "text-success";
               } else if (status === "won_pending_payout") {
-                resultLabel = bet.payout_cents
-                  ? `Won ${dollars(bet.payout_cents)} (pending payout)`
-                  : "Won — pending payout";
+                resultLabel = bet.payout_cents ? (
+                  <>
+                    Won <CoinAmount cents={bet.payout_cents} /> (pending payout)
+                  </>
+                ) : (
+                  "Won — pending payout"
+                );
                 resultClass = "text-amber-600 dark:text-amber-400";
               } else if (status === "lost") {
-                resultLabel = `Lost ${dollars(bet.amount_cents)}`;
+                resultLabel = (
+                  <>
+                    Lost <CoinAmount cents={bet.amount_cents} />
+                  </>
+                );
                 resultClass = "text-destructive";
               } else if (status === "refunded") {
-                resultLabel = `Refunded ${dollars(bet.amount_cents)}`;
+                resultLabel = (
+                  <>
+                    Refunded <CoinAmount cents={bet.amount_cents} />
+                  </>
+                );
                 resultClass = "text-foreground";
               } else {
                 // placed / open
@@ -149,11 +166,20 @@ export default function MyBets() {
                         Staked
                       </p>
                       <p className="font-heading text-base font-bold tabular-nums text-foreground">
-                        {dollars(bet.amount_cents)}
+                        <CoinAmount cents={bet.amount_cents} />
                       </p>
                       <p
                         className={cn(
-                          "mt-0.5 text-[11px] font-medium tabular-nums",
+                          // inline-flex + items-center + leading-none
+                          // so the "Won / Lost / Refunded" word and
+                          // the CoinAmount inline-flex line up dead-
+                          // centred. The default <p> block layout
+                          // would put the CoinAmount on the inline
+                          // baseline next to the word, which doesn't
+                          // match because CoinAmount's own baseline
+                          // is derived from its children — that
+                          // mismatch shows up as a vertical offset.
+                          "mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium leading-none tabular-nums",
                           resultClass,
                         )}
                       >
@@ -186,7 +212,7 @@ function Stat({
   highlight,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   highlight?: boolean;
 }) {
   return (
