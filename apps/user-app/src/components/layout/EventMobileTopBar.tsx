@@ -46,7 +46,7 @@ export function EventMobileTopBar({ style }: EventMobileTopBarProps) {
           {user && (
             <div className="flex items-center gap-2 rounded-full bg-white py-1 pl-1 pr-3 shadow-md ring-1 ring-primary/10">
               <Link
-                to="/balance"
+                to="/coins"
                 aria-label="Add funds"
                 className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[hsl(227_47%_21%)] shadow-md ring-4 ring-[#FED448]/40 transition-transform hover:scale-105"
                 style={{ backgroundImage: "linear-gradient(90deg,#FFDD49,#FFBE3B)" }}

@@ -1,16 +1,21 @@
 /**
- * Mock USDT holdings — paired 1:1 with USD for display since USDT is dollar-
- * pegged. Real on-chain wallets / payments arrive in a later phase. Until
- * then, this constant powers every total-balance display in the app so the
- * sidebar, top bar, profile, my-bets, and balance page all stay in sync.
+ * Single source of truth for the displayed balance.
  *
- * Note: bet placement validation (`stake <= balance_cents`) still uses the
- * USD portion only, since the `place_bet` RPC deducts from `balance_cents`.
+ * The user-app surfaces one virtual rush-coin balance — there is no
+ * separate USD / USDT split any more (the old Balance page that
+ * fanned the total out into per-currency chips is gone). This
+ * helper exists so every callsite (sidebar, top bar, profile,
+ * my-bets) reads the value through the same null-safe getter,
+ * which keeps the door open for adding a wallet/balance composition
+ * here later without touching the consumers.
+ *
+ * Bet placement validation (`stake <= balance_cents`) keeps using
+ * the same value — the `place_bet` RPC deducts from
+ * `balance_cents`, so the number this helper returns is the same
+ * number the RPC sees.
  */
-export const MOCK_USDT_CENTS = 12500;
-
 export function totalBalanceCents(
-  usdCents: number | null | undefined,
+  cents: number | null | undefined,
 ): number {
-  return (usdCents ?? 0) + MOCK_USDT_CENTS;
+  return cents ?? 0;
 }

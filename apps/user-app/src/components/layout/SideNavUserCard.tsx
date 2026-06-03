@@ -72,7 +72,7 @@ export function SideNavUserCard() {
 
         {/* Plus button — accent variant, vertically centered to the whole container */}
         <Link
-          to="/balance"
+          to="/coins"
           aria-label="Add funds"
           className="absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[hsl(227_47%_21%)] shadow-lg ring-4 ring-[#FED448]/40 transition-all duration-200 hover:-translate-y-1/2 hover:scale-105 hover:shadow-xl"
           style={{ backgroundImage: "linear-gradient(90deg,#FFDD49,#FFBE3B)" }}
