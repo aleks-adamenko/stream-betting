@@ -261,7 +261,12 @@ export default function Settings() {
                   <div
                     key={d.draftId}
                     className={cn(
-                      "grid gap-3 px-4 py-4 sm:grid-cols-[auto_1fr_1fr_1fr_auto_auto] sm:items-end sm:gap-4 sm:px-6",
+                      // items-start so every column lines up by its top edge
+                      // even when one (Price) has the live "$0.X / coin" rate
+                      // caption hanging below — with items-end that caption
+                      // made the price column taller and pushed its label /
+                      // input up out of line with Coins + Stripe ID.
+                      "grid gap-3 px-4 py-4 sm:grid-cols-[auto_1fr_1fr_1fr_auto_auto] sm:items-start sm:gap-4 sm:px-6",
                       !d.isActive && "opacity-60",
                     )}
                   >
@@ -362,28 +367,50 @@ export default function Settings() {
                       )}
                     </label>
 
-                    {/* Active toggle */}
-                    <label className="flex items-center justify-center gap-2 pb-2 text-xs font-medium text-muted-foreground sm:pb-0">
-                      <input
-                        type="checkbox"
-                        checked={d.isActive}
-                        onChange={(e) =>
-                          patch(d.draftId, { isActive: e.target.checked })
-                        }
-                        className="h-4 w-4 rounded border-input"
-                      />
-                      Active
+                    {/* Active toggle — wrapped in the same label-spacer
+                        column as the inputs so it lines up with the input
+                        row under items-start (otherwise it'd hug the row
+                        top, above the inputs). The spacer span carries
+                        a non-breaking placeholder so its height matches
+                        the real label spans next door. */}
+                    <label className="flex flex-col gap-1 items-center justify-self-center text-muted-foreground sm:pb-0">
+                      <span
+                        aria-hidden="true"
+                        className="hidden text-[11px] font-medium uppercase tracking-wide sm:inline"
+                      >
+                        &nbsp;
+                      </span>
+                      <span className="inline-flex h-10 items-center gap-2 text-xs font-medium">
+                        <input
+                          type="checkbox"
+                          checked={d.isActive}
+                          onChange={(e) =>
+                            patch(d.draftId, { isActive: e.target.checked })
+                          }
+                          className="h-4 w-4 rounded border-input"
+                        />
+                        Active
+                      </span>
                     </label>
 
-                    {/* Delete */}
-                    <button
-                      type="button"
-                      onClick={() => removeRow(d.draftId)}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                      aria-label="Delete pack"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {/* Delete — same spacer pattern so the trash icon sits
+                        on the input row, not above it. */}
+                    <div className="flex flex-col gap-1 justify-self-end">
+                      <span
+                        aria-hidden="true"
+                        className="hidden text-[11px] font-medium uppercase tracking-wide sm:inline"
+                      >
+                        &nbsp;
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeRow(d.draftId)}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                        aria-label="Delete pack"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 );
               })

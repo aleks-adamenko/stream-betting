@@ -33,9 +33,15 @@ const TYPE_OPTIONS = [
   { value: "payout_paid", label: "payout_paid" },
 ];
 
+// Both `platform` (rake/residual coin earnings) and `platform_cash`
+// (the AUD treasury — top-up inflows + payout outflows) are conceptually
+// the same actor — the platform. Render them with one shared blue badge
+// in the Role column so the operator's eye groups them as "the platform";
+// the Account + Type columns already disambiguate which side moved
+// (Platform / Platform cash and rake vs top_up_received vs payout_paid).
 const ROLE_BADGE_CLASSES: Record<string, string> = {
   platform: "bg-primary/15 text-primary",
-  platform_cash: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  platform_cash: "bg-primary/15 text-primary",
   event_pool: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   creator: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   viewer: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
@@ -44,7 +50,7 @@ const ROLE_BADGE_CLASSES: Record<string, string> = {
 
 const ROLE_LABELS: Record<string, string> = {
   platform: "Platform",
-  platform_cash: "Platform cash",
+  platform_cash: "Platform",
   event_pool: "Event pool",
   creator: "Creator",
   viewer: "Viewer",
@@ -295,17 +301,30 @@ export default function Ledger() {
                           </span>
                         )}
                       </td>
+                      {/* Cash only renders on the `platform_cash` side — that's
+                          the only account where actual money moves (Stripe
+                          inflow on top_up_received, payout outflow on
+                          payout_paid). User-side top_up / payout_request rows
+                          carry the same cash number on the DB row as
+                          contextual metadata, but showing "+$10.00" next to a
+                          viewer's name reads as "viewer got $10 cash" — they
+                          paid it via card, didn't receive it. Hide there. */}
                       <td
                         className={cn(
                           "px-4 py-2 text-right font-heading font-bold tabular-nums whitespace-nowrap",
-                          row.amount_cash_cents != null && row.amount_cash_cents > 0
+                          row.account_role === "platform_cash" &&
+                            row.amount_cash_cents != null &&
+                            row.amount_cash_cents > 0
                             ? "text-emerald-600 dark:text-emerald-400"
-                            : row.amount_cash_cents != null && row.amount_cash_cents < 0
+                            : row.account_role === "platform_cash" &&
+                                row.amount_cash_cents != null &&
+                                row.amount_cash_cents < 0
                               ? "text-rose-600 dark:text-rose-400"
                               : "",
                         )}
                       >
-                        {row.amount_cash_cents == null ? (
+                        {row.account_role !== "platform_cash" ||
+                        row.amount_cash_cents == null ? (
                           <span className="text-muted-foreground">—</span>
                         ) : (
                           <>
