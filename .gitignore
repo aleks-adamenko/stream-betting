@@ -45,3 +45,6 @@ dist-ssr
 # root-level `supabase/.temp/` and the per-app one inside
 # `apps/user-app/supabase/.temp/`.
 **/supabase/.temp/
+
+# TypeScript incremental build cache
+*.tsbuildinfo

@@ -11,8 +11,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button, Input } from "@liverush/ui";
-import { cn, formatCents } from "@liverush/lib";
+import { Button, CoinAmount, Input } from "@liverush/ui";
+import { cn } from "@liverush/lib";
 import { supabase } from "@/integrations/supabase/client";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -273,7 +273,7 @@ function UserRowItem({
           </div>
         </td>
         <td className="px-4 py-2 text-right font-heading text-sm font-bold tabular-nums whitespace-nowrap">
-          {formatCents(user.balance_cents ?? 0)}
+          <CoinAmount cents={user.balance_cents ?? 0} className="justify-end" />
         </td>
 
         {/* Viewer column — every user is a viewer; status tracks

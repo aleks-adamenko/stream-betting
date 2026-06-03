@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   BadgeCheck,
+  Banknote,
   Clock,
   Instagram,
   Music2,
@@ -10,11 +12,20 @@ import {
   Youtube,
 } from "lucide-react";
 
-import { Button } from "@liverush/ui";
-import { cn } from "@liverush/lib";
+import { Button, CoinAmount } from "@liverush/ui";
+import {
+  MIN_PAYOUT_COINS,
+  RAKE_STREAMER_BPS,
+  balanceCentsToCoins,
+  balanceCentsToDollarCents,
+  cn,
+  formatDollarCents,
+} from "@liverush/lib";
 
 import { StudioPageTabs } from "@/components/StudioPageTabs";
+import { RequestPayoutModal } from "@/components/balance/RequestPayoutModal";
 import { useAuth } from "@/contexts/AuthContext";
+import { useStreamerBalance } from "@/hooks/useStreamerBalance";
 import { supabase } from "@/integrations/supabase/client";
 import { compactNumber } from "@/lib/balance";
 
@@ -56,9 +67,16 @@ function useCreatorFollowerCount(creatorId: string | undefined) {
 export default function Profile() {
   const { creator } = useAuth();
   const { data: followers } = useCreatorFollowerCount(creator?.id);
+  const { data: balanceCents = 0 } = useStreamerBalance();
+  const [payoutOpen, setPayoutOpen] = useState(false);
   // social_links is a JSONB column on creator_profiles — narrow it
   // here so per-network lookups stay typed.
   const socials = (creator?.social_links ?? {}) as SocialLinks;
+
+  const coins = balanceCentsToCoins(balanceCents);
+  const dollarEquivalent = balanceCentsToDollarCents(balanceCents);
+  const canRequestPayout = coins >= MIN_PAYOUT_COINS;
+  const coinsBelowMin = Math.max(0, MIN_PAYOUT_COINS - coins);
 
   const onEditProfile = () =>
     toast.info("Edit profile coming soon", {
@@ -150,9 +168,61 @@ export default function Profile() {
         />
         <StatCard
           label="Commission rate"
-          value={`${(creator?.commission_pct ?? 10).toFixed(2)}%`}
+          // Streamer's share of the rake. Sourced from the
+          // RAKE_STREAMER_BPS constant (same source the SQL settle_event
+          // RPC reads, so the displayed % can't drift from what the
+          // streamer actually gets credited). `creator_profiles.commission_pct`
+          // is dead display data from before the pari-mutuel rewrite —
+          // it still defaults to 10 in older rows.
+          value={`${(RAKE_STREAMER_BPS / 100).toFixed(2)}%`}
           hint="Your share of each event's settled pool."
         />
+      </section>
+
+      {/* Cashout — coin balance + dollar equivalent + Request payout
+          CTA. Replaces the legacy Withdraw button on Balance.tsx;
+          ledger writes happen via the `request_payout` RPC (see
+          migration 20260604_000001_ledger_rebuild.sql). */}
+      <section className="rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-muted-foreground">
+              Available to cash out
+            </p>
+            <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
+              {/* CoinAmount already renders the coin icon on its left,
+                  so no standalone <CoinIcon /> here — otherwise the
+                  glyph shows up twice. */}
+              <CoinAmount
+                cents={balanceCents}
+                fractionDigits={0}
+                iconClassName="h-7 w-7"
+              />
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground tabular-nums">
+              {formatDollarCents(dollarEquivalent)} equivalent
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {canRequestPayout
+                ? "Request a payout below. Pending admin approval."
+                : `Need ${coinsBelowMin.toLocaleString("en-US")} more coins to request payout (min ${MIN_PAYOUT_COINS.toLocaleString("en-US")}).`}
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="lg"
+            disabled={!canRequestPayout}
+            onClick={() => setPayoutOpen(true)}
+            title={
+              canRequestPayout
+                ? undefined
+                : `Available after ${MIN_PAYOUT_COINS.toLocaleString("en-US")} coins ($${(MIN_PAYOUT_COINS / 10).toFixed(0)}).`
+            }
+          >
+            <Banknote className="h-4 w-4" />
+            Request payout
+          </Button>
+        </div>
       </section>
 
       {/* Social links — only render the row if at least one is set. */}
@@ -193,6 +263,12 @@ export default function Profile() {
           </div>
         </section>
       )}
+
+      <RequestPayoutModal
+        open={payoutOpen}
+        onOpenChange={setPayoutOpen}
+        balanceCents={balanceCents}
+      />
     </div>
   );
 }

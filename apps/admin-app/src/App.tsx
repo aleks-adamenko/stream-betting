@@ -14,6 +14,7 @@ import AuthCallback from "@/pages/auth/AuthCallback";
 import Users from "@/pages/Users";
 import Events from "@/pages/Events";
 import Ledger from "@/pages/Ledger";
+import Settings from "@/pages/Settings";
 import Stats from "@/pages/Stats";
 import Wallet from "@/pages/Wallet";
 
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="/ledger" element={<Ledger />} />
               <Route path="/stats" element={<Stats />} />
               <Route path="/wallet" element={<Wallet />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
 
             {/* Catch-all → /users (signed-out users will bounce through

@@ -24,3 +24,10 @@ export {
   BettingCountdown,
   type BettingCountdownProps,
 } from "./betting-countdown";
+export {
+  CoinAmount,
+  CoinIcon,
+  formatCoins,
+  type CoinAmountProps,
+  type CoinIconProps,
+} from "./coin-amount";

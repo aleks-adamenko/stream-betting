@@ -1,17 +1,12 @@
 // Studio-side balance / commission helpers.
 //
-// Mirrors `apps/user-app/src/lib/balance.ts` so the two surfaces stay
-// visually + numerically consistent — same dollar formatting, same
-// MOCK_USDT_CENTS so the withdrawal modal has a non-zero USDT
-// pseudo-balance to show in the picker.
-//
-// When real commission settlement lands, swap MOCK_USDT_CENTS for a
-// real source and the rest of the studio surfaces (Balance card,
-// WithdrawModal) keep working with no shape change.
+// `dollars()` returns the bare amount (e.g. "12.45") — no
+// currency symbol. The visual unit marker is the rush-coin glyph
+// rendered by `<CoinAmount>` / `<CoinIcon>` from `@liverush/ui`.
+// Keep the function name for now so existing callsites continue
+// to compile; new code should pair the string with the icon.
 
-export const MOCK_USDT_CENTS = 12500;
-
-export const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+export const dollars = (cents: number) => `${(cents / 100).toFixed(2)}`;
 
 /** Compact formatter for follower counts and similar large numbers
  *  ("12.3K", "1.5M") — mirrors the inline helper in the user-app. */

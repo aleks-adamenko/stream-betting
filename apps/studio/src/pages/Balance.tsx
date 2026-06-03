@@ -2,14 +2,16 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Banknote, CheckCircle2, Clock, Wallet } from "lucide-react";
 
-import { Button } from "@liverush/ui";
-import { cn } from "@liverush/lib";
+import { CoinAmount } from "@liverush/ui";
+import {
+  balanceCentsToCoins,
+  coinsToDollarCents,
+  cn,
+  formatDollarCents,
+} from "@liverush/lib";
 
 import { StudioPageTabs } from "@/components/StudioPageTabs";
-import { WithdrawModal } from "@/components/balance/WithdrawModal";
 import {
-  MOCK_USDT_CENTS,
-  dollars,
   type CommissionStatus,
   type MockCommission,
 } from "@/lib/balance";
@@ -79,13 +81,12 @@ function statusOfPayout(
 
 export default function Balance() {
   const [filter, setFilter] = useState<Filter>("all");
-  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const { data: payouts } = useStudioPayouts();
-  // Locally-tracked "withdrawn" payout ids — the WithdrawModal still
-  // mocks the cash-out flow, so we mark approved rows as withdrawn in
-  // this Set to keep the UI feeling responsive without a DB write.
-  // Resets on page reload.
-  const [withdrawnIds, setWithdrawnIds] = useState<Set<string>>(new Set());
+  // Locally-tracked "withdrawn" payout ids — empty set in v2 because
+  // cashout requests now flip status on the actual `payouts` row via
+  // `request_payout`. Kept here as a no-op placeholder so the
+  // statusOfPayout helper stays a one-line callsite.
+  const withdrawnIds = useMemo<Set<string>>(() => new Set(), []);
 
   // Build the commission rows the UI renders. Backed by real
   // `payouts` data but shaped like the legacy MockCommission type so
@@ -131,29 +132,14 @@ export default function Balance() {
     return commissions.filter((c) => c.status === filter);
   }, [commissions, filter]);
 
-  const canWithdraw = totals.available > 0;
-
-  // Mark the oldest "payout" rows as withdrawn until the requested
-  // amount is covered. Mocked (no DB write) until real withdrawals
-  // ship — real settlement would attach a withdrawal_id to each
-  // payout row instead.
-  const markRowsWithdrawn = (amountCents: number) => {
-    let remaining = amountCents;
-    const ordered = [...commissions]
-      .filter((c) => c.status === "payout")
-      .sort((a, b) => a.created_at.localeCompare(b.created_at));
-    const ids = new Set(withdrawnIds);
-    for (const c of ordered) {
-      if (remaining <= 0) break;
-      if (c.amount_cents <= remaining) {
-        remaining -= c.amount_cents;
-        ids.add(c.id);
-      } else {
-        remaining = 0;
-      }
-    }
-    setWithdrawnIds(ids);
-  };
+  // Dollar equivalents — 1 coin = $0.10. `balance_cents` here is
+  // already "coins × 100", so coins = cents / 100 and dollars =
+  // coins × 0.10 = cents / 1000. Use the shared helpers to keep all
+  // currency math in one place.
+  const availableCoins = balanceCentsToCoins(totals.available);
+  const pendingCoins = balanceCentsToCoins(totals.pending);
+  const availableDollarCents = coinsToDollarCents(availableCoins);
+  const pendingDollarCents = coinsToDollarCents(pendingCoins);
 
   return (
     // Same reading-column width as the user-app's Balance — matches
@@ -168,39 +154,31 @@ export default function Balance() {
 
       <StudioPageTabs />
 
-      {/* Available + pending header card. Matches the visual weight
-          of the user-app Balance card so the two surfaces feel like
-          the same product. */}
+      {/* Available + pending header card. Withdraw button moved to
+          Profile.tsx (`Request payout`) — this card now just surfaces
+          the running totals + dollar equivalent so the streamer can
+          see how far they are from the 1,000-coin payout floor. */}
       <section className="rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Wallet className="h-4 w-4" />
-              <span className="text-sm font-medium">Available to withdraw</span>
+              <span className="text-sm font-medium">Lifetime commissions</span>
             </div>
             <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-foreground sm:text-4xl">
-              {dollars(totals.available)}
+              <CoinAmount cents={totals.available} fractionDigits={0} />
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground tabular-nums">
+              {formatDollarCents(availableDollarCents)} equivalent
             </p>
             {totals.pending > 0 && (
-              <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium leading-none text-amber-600 dark:text-amber-400">
                 <Clock className="h-3 w-3" />
-                {dollars(totals.pending)} pending approval
+                <CoinAmount cents={totals.pending} fractionDigits={0} /> pending approval ·{" "}
+                {formatDollarCents(pendingDollarCents)}
               </p>
             )}
           </div>
-          <Button
-            size="lg"
-            disabled={!canWithdraw}
-            onClick={() => setWithdrawOpen(true)}
-            title={
-              canWithdraw
-                ? undefined
-                : "No available balance to withdraw yet."
-            }
-          >
-            <Banknote className="h-4 w-4" />
-            Withdraw
-          </Button>
         </div>
       </section>
 
@@ -249,19 +227,6 @@ export default function Balance() {
         )}
       </section>
 
-      <WithdrawModal
-        open={withdrawOpen}
-        onOpenChange={setWithdrawOpen}
-        usdCents={totals.available}
-        usdtCents={MOCK_USDT_CENTS}
-        onWithdraw={(amountCents, currency) => {
-          // Only USD draws from the real commission ledger right
-          // now; USDT is still the pseudo-balance from the mock
-          // constant, so flipping rows on a USDT withdrawal would
-          // be misleading. Skip ledger updates when currency=usdt.
-          if (currency === "usd") markRowsWithdrawn(amountCents);
-        }}
-      />
     </div>
   );
 }
@@ -301,8 +266,8 @@ function CommissionRow({ commission }: { commission: MockCommission }) {
       </div>
 
       <div className="flex flex-shrink-0 flex-col items-end gap-1">
-        <p className="font-heading text-sm font-bold tabular-nums sm:text-base">
-          {dollars(commission.amount_cents)}
+        <p className="font-heading text-sm font-bold leading-none tabular-nums sm:text-base">
+          <CoinAmount cents={commission.amount_cents} />
         </p>
         <span
           className={cn(

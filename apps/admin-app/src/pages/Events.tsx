@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button, Input } from "@liverush/ui";
-import { cn, formatCents } from "@liverush/lib";
+import { Button, CoinAmount, Input } from "@liverush/ui";
+import { cn } from "@liverush/lib";
 import { supabase } from "@/integrations/supabase/client";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -309,7 +309,7 @@ export default function Events() {
                       </div>
                     </td>
                     <td className="px-4 py-2 text-right font-heading text-sm font-bold tabular-nums whitespace-nowrap">
-                      {formatCents(totalPoolCents(evt))}
+                      <CoinAmount cents={totalPoolCents(evt)} className="justify-end" />
                     </td>
                   </tr>
                 ))}
@@ -641,7 +641,7 @@ function EventDrawer({
                     {event.round_format}
                   </DetailField>
                   <DetailField label="Total pool">
-                    {formatCents(totalPoolCents(event))}
+                    <CoinAmount cents={totalPoolCents(event)} />
                   </DetailField>
                   <DetailField label="Betting window">
                     {event.betting_window_minutes != null
@@ -866,7 +866,7 @@ function PayoutRowCard({
         </div>
         <div className="flex-shrink-0 text-right">
           <p className="font-heading text-sm font-bold tabular-nums">
-            {formatCents(payout.amount_cents)}
+            <CoinAmount cents={payout.amount_cents} />
           </p>
         </div>
       </div>

@@ -6,6 +6,7 @@ import {
   LogOut,
   Menu,
   ScrollText,
+  Settings as SettingsIcon,
   Users as UsersIcon,
   Wallet as WalletIcon,
   X,
@@ -31,6 +32,7 @@ const nav: NavItem[] = [
   { to: "/ledger", label: "Ledger", icon: ScrollText },
   { to: "/stats", label: "Stats", icon: BarChart3 },
   { to: "/wallet", label: "Wallet", icon: WalletIcon },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 /**

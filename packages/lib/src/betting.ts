@@ -106,16 +106,21 @@ export function payoutPreview(
 }
 
 /**
- * Single source of truth for "12345 cents" → "$123.45". Negative
+ * Single source of truth for "12345 cents" → "123.45". Negative
  * inputs render with a leading minus.
  *
- * Use this instead of ad-hoc `dollars()` helpers scattered through
- * user-app + studio. Locale-stable: always en-US, dollar sign first,
- * two decimal places.
+ * No currency symbol — the platform's soft currency is rush-coins,
+ * and the visual unit marker is the coin glyph rendered by
+ * `<CoinAmount>` / `<CoinIcon>` from `@liverush/ui`. JSX surfaces
+ * pair this string with the icon; pure-text surfaces (toast
+ * messages, aria labels) emit the bare number and let surrounding
+ * copy carry the unit.
+ *
+ * Locale-stable: always en-US, two decimal places.
  */
 export function formatCents(cents: number | null | undefined): string {
-  if (cents == null || Number.isNaN(cents)) return "$0.00";
+  if (cents == null || Number.isNaN(cents)) return "0.00";
   const sign = cents < 0 ? "-" : "";
   const abs = Math.abs(cents);
-  return `${sign}$${(abs / 100).toFixed(2)}`;
+  return `${sign}${(abs / 100).toFixed(2)}`;
 }

@@ -49,17 +49,25 @@ export function useStudioPayouts() {
       const { data, error } = await supabase
         .from("payouts")
         .select(
-          `id, type, event_id, amount_cents, status, created_at, completed_at,
+          `id, type, event_id, recipient_id, amount_cents, status, created_at, completed_at,
            event:events!payouts_event_id_fkey ( title, creator_id )`,
         )
         .eq("type", "rake_streamer")
+        // Explicit recipient filter. The RLS policy on `payouts` scopes
+        // streamers to rows for events they own — but a streamer who's
+        // ALSO a super_admin sees every rake_streamer row via the
+        // "admin reads all" policy added in 20260531_000001. Without
+        // this filter, the Balance page would show rake rows for other
+        // creators' events. Filtering server-side keeps the payload
+        // small for non-admins too.
+        .eq("recipient_id", creator!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      // RLS already filters to the streamer's own rake rows, but the
-      // narrow shape we want here is flat — collapse the joined event
-      // title in.
       return ((data ?? []) as Array<
-        StudioPayout & { event: { title: string; creator_id: string } | null }
+        StudioPayout & {
+          recipient_id: string;
+          event: { title: string; creator_id: string } | null;
+        }
       >).map((row) => ({
         id: row.id,
         type: row.type,

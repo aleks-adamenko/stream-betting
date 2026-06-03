@@ -1,8 +1,14 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, TrendingUp } from "lucide-react";
+import {
+  AlertTriangle,
+  Banknote,
+  Loader2,
+  TrendingUp,
+} from "lucide-react";
 
-import { formatCents } from "@liverush/lib";
+import { formatCents, formatDollarCents } from "@liverush/lib";
+import { CoinAmount } from "@liverush/ui";
 import { supabase } from "@/integrations/supabase/client";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -42,6 +48,24 @@ export default function Wallet() {
       },
     });
 
+  // Cash treasury — separate from rake earnings. Top-ups add cash,
+  // approved cashout requests subtract it. RPC added by migration
+  // 20260604_000001_ledger_rebuild.sql.
+  const { data: treasury, isLoading: treasuryLoading } = useQuery({
+    queryKey: ["admin", "wallet", "treasury"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc(
+        "get_platform_cash_treasury",
+      );
+      if (error) throw error;
+      return data as {
+        net_cash_cents: number;
+        inflow_cents: number;
+        outflow_cents: number;
+      };
+    },
+  });
+
   const { data: recent, isLoading: recentLoading } = useQuery({
     queryKey: ["admin", "wallet", "recent"],
     queryFn: async () => {
@@ -72,23 +96,53 @@ export default function Wallet() {
 
       {earningsError && <ErrorBanner error={earningsError as Error} />}
 
-      {/* Lifetime total card */}
-      <section className="rounded-2xl border border-border/40 bg-gradient-to-br from-primary/10 to-primary/5 p-6 shadow-sm">
-        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-          <TrendingUp className="h-3.5 w-3.5" />
-          Platform earnings — lifetime
-        </div>
-        {earningsLoading ? (
-          <Loader2 className="mt-3 h-6 w-6 animate-spin text-muted-foreground" />
-        ) : (
-          <p className="mt-2 font-heading text-4xl font-bold tabular-nums text-foreground sm:text-5xl">
-            {formatCents(earnings?.lifetime_cents ?? 0)}
+      {/* Two-card split: rake earnings (coins) vs cash treasury (dollars).
+          Earnings keep the visual weight that was there before; the
+          treasury card sits beside it so the operator can compare at a
+          glance. */}
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-primary/10 to-primary/5 p-6 shadow-sm">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            <TrendingUp className="h-3.5 w-3.5" />
+            Platform earnings — lifetime
+          </div>
+          {earningsLoading ? (
+            <Loader2 className="mt-3 h-6 w-6 animate-spin text-muted-foreground" />
+          ) : (
+            <p className="mt-2 font-heading text-4xl font-bold tabular-nums text-foreground sm:text-5xl">
+              <CoinAmount cents={earnings?.lifetime_cents ?? 0} />
+            </p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">
+            Sum of rake + residual rows on the
+            {" "}<code className="font-mono">platform</code> account
+            (coin economy).
           </p>
-        )}
-        <p className="mt-2 text-xs text-muted-foreground">
-          Sum of rake + residual rows on the
-          {" "}<code className="font-mono">platform</code> account.
-        </p>
+        </div>
+
+        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 p-6 shadow-sm">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            <Banknote className="h-3.5 w-3.5" />
+            Platform cash treasury
+          </div>
+          {treasuryLoading ? (
+            <Loader2 className="mt-3 h-6 w-6 animate-spin text-muted-foreground" />
+          ) : (
+            <p className="mt-2 font-heading text-4xl font-bold tabular-nums text-foreground sm:text-5xl">
+              {formatDollarCents(treasury?.net_cash_cents ?? 0)}
+            </p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+            Top-ups{" "}
+            <span className="text-emerald-600 dark:text-emerald-400">
+              +{formatDollarCents(treasury?.inflow_cents ?? 0)}
+            </span>{" "}
+            · cashouts{" "}
+            <span className="text-rose-600 dark:text-rose-400">
+              −{formatDollarCents(treasury?.outflow_cents ?? 0)}
+            </span>
+          </p>
+        </div>
       </section>
 
       {/* 30-day breakdown */}
@@ -174,8 +228,8 @@ export default function Wallet() {
                     )}
                   </p>
                 </div>
-                <p className="font-heading text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                  +{formatCents(row.amount_cents)}
+                <p className="inline-flex items-center gap-1 font-heading text-sm font-bold leading-none tabular-nums text-emerald-600 dark:text-emerald-400">
+                  +<CoinAmount cents={row.amount_cents} />
                 </p>
               </div>
             ))}

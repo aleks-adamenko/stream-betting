@@ -264,6 +264,10 @@ export interface Database {
           display_name: string | null;
           avatar_url: string | null;
           balance_cents: number;
+          // Streamer-side cashable pot — added by 20260604_000002.
+          // Earned-rake-only; bet winnings and top-ups land on
+          // balance_cents instead. `request_payout` debits this column.
+          withdrawable_cents: number;
           // Global on/off for transactional emails. Defaults true.
           // In-app notifications are not affected by this flag.
           notifications_enabled: boolean;
@@ -280,6 +284,7 @@ export interface Database {
           display_name?: string | null;
           avatar_url?: string | null;
           balance_cents?: number;
+          withdrawable_cents?: number;
           notifications_enabled?: boolean;
           notifications_enabled_payouts?: boolean;
           created_at?: string;
@@ -446,13 +451,38 @@ export interface Database {
             | "refund"
             | "rake"
             | "residual"
-            | "adjustment";
+            | "adjustment"
+            // Added by 20260604_000001_ledger_rebuild.sql
+            | "top_up"
+            | "top_up_received"
+            | "starter_grant"
+            | "payout_request"
+            | "payout_paid";
           amount_cents: number;
+          // amount_cash_cents + event_id added by the ledger rebuild
+          // migration. Null on every row written before that migration.
+          amount_cash_cents: number | null;
+          event_id: string | null;
           balance_after_cents: number | null;
           reference_id: string | null;
           created_at: string;
           prev_hash: string | null;
           self_hash: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      coin_packs: {
+        Row: {
+          id: string;
+          coins: number;
+          price_dollar_cents: number;
+          stripe_product_id: string | null;
+          sort_order: number;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
         };
         Insert: never;
         Update: never;
@@ -605,9 +635,65 @@ export interface Database {
         Args: { p_avatar_url: string | null };
         Returns: void;
       };
+      // Rebuilt by 20260604_000001_ledger_rebuild.sql — takes coins +
+      // dollar cents separately so the ledger captures both sides.
       top_up_balance: {
-        Args: { p_amount_cents: number };
-        Returns: { new_balance_cents: number; amount_cents: number };
+        Args: { p_coins: number; p_cash_cents: number };
+        Returns: {
+          topup_id: string;
+          coins_added: number;
+          amount_cents: number;
+          cash_cents: number;
+          new_balance_cents: number;
+        };
+      };
+      request_payout: {
+        Args: { p_coins: number };
+        Returns: {
+          payout_id: string;
+          coins: number;
+          cash_cents: number;
+          // Renamed by 20260604_000002 — debit now lands on
+          // withdrawable_cents, not balance_cents.
+          new_withdrawable_cents: number;
+        };
+      };
+      list_coin_packs: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          id: string;
+          coins: number;
+          price_dollar_cents: number;
+          stripe_product_id: string | null;
+          sort_order: number;
+          is_active: boolean;
+          dollar_per_coin_cents: number;
+          created_at: string;
+          updated_at: string;
+        }>;
+      };
+      upsert_coin_pack: {
+        Args: {
+          p_id: string | null;
+          p_coins: number;
+          p_price_dollar_cents: number;
+          p_stripe_product_id: string | null;
+          p_sort_order: number;
+          p_is_active: boolean;
+        };
+        Returns: Database["public"]["Tables"]["coin_packs"]["Row"];
+      };
+      delete_coin_pack: {
+        Args: { p_id: string };
+        Returns: void;
+      };
+      get_platform_cash_treasury: {
+        Args: Record<string, never>;
+        Returns: {
+          net_cash_cents: number;
+          inflow_cents: number;
+          outflow_cents: number;
+        };
       };
       mark_notification_read: {
         Args: { p_id: string };

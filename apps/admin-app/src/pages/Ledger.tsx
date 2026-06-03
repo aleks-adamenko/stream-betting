@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Copy, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button, Input } from "@liverush/ui";
-import { cn, formatCents } from "@liverush/lib";
+import { Button, CoinAmount, Input } from "@liverush/ui";
+import { cn, formatDollarCents } from "@liverush/lib";
 import { supabase } from "@/integrations/supabase/client";
 
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -25,10 +25,17 @@ const TYPE_OPTIONS = [
   { value: "rake", label: "rake" },
   { value: "residual", label: "residual" },
   { value: "adjustment", label: "adjustment" },
+  // Added by the 20260604_000001_ledger_rebuild.sql migration.
+  { value: "top_up", label: "top_up" },
+  { value: "top_up_received", label: "top_up_received" },
+  { value: "starter_grant", label: "starter_grant" },
+  { value: "payout_request", label: "payout_request" },
+  { value: "payout_paid", label: "payout_paid" },
 ];
 
 const ROLE_BADGE_CLASSES: Record<string, string> = {
   platform: "bg-primary/15 text-primary",
+  platform_cash: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   event_pool: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   creator: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   viewer: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
@@ -37,6 +44,7 @@ const ROLE_BADGE_CLASSES: Record<string, string> = {
 
 const ROLE_LABELS: Record<string, string> = {
   platform: "Platform",
+  platform_cash: "Platform cash",
   event_pool: "Event pool",
   creator: "Creator",
   viewer: "Viewer",
@@ -46,11 +54,20 @@ const ROLE_LABELS: Record<string, string> = {
 type LedgerRow = {
   id: string;
   account: string;
-  account_role: "platform" | "event_pool" | "creator" | "viewer" | "unknown";
+  account_role:
+    | "platform"
+    | "platform_cash"
+    | "event_pool"
+    | "creator"
+    | "viewer"
+    | "unknown";
   account_label: string;
   account_id: string | null;
   type: string;
   amount_cents: number;
+  // Added by the 20260604_000001_ledger_rebuild.sql migration. Null
+  // on every row written before that migration.
+  amount_cash_cents: number | null;
   reference_id: string | null;
   event_id: string | null;
   event_title: string | null;
@@ -223,6 +240,7 @@ export default function Ledger() {
                     <th className="px-4 py-2 font-semibold">Event ID</th>
                     <th className="px-4 py-2 font-semibold">Type</th>
                     <th className="px-4 py-2 text-right font-semibold">Amount</th>
+                    <th className="px-4 py-2 text-right font-semibold">Cash</th>
                     <th className="px-4 py-2 font-semibold">Ref</th>
                   </tr>
                 </thead>
@@ -268,8 +286,33 @@ export default function Ledger() {
                               : "",
                         )}
                       >
-                        {row.amount_cents > 0 && "+"}
-                        {formatCents(row.amount_cents)}
+                        {row.amount_cents === 0 ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 leading-none">
+                            {row.amount_cents > 0 && "+"}
+                            <CoinAmount cents={row.amount_cents} />
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-4 py-2 text-right font-heading font-bold tabular-nums whitespace-nowrap",
+                          row.amount_cash_cents != null && row.amount_cash_cents > 0
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : row.amount_cash_cents != null && row.amount_cash_cents < 0
+                              ? "text-rose-600 dark:text-rose-400"
+                              : "",
+                        )}
+                      >
+                        {row.amount_cash_cents == null ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          <>
+                            {row.amount_cash_cents > 0 && "+"}
+                            {formatDollarCents(row.amount_cash_cents)}
+                          </>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-xs">
                         <ReferenceCell reference={row.reference_id} />
