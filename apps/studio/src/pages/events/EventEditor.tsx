@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -19,7 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Button, Input } from "@liverush/ui";
+import { Button, CoinIcon, Input } from "@liverush/ui";
 import { cn, MIN_BET_CENTS, MAX_BET_CENTS } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -1700,10 +1700,20 @@ export default function EventEditor() {
                 },
                 {
                   label: "Bet range",
+                  // Render as `<coin> N – <coin> M` instead of the old
+                  // `$0.50 – $10.00`. 1 coin = 100 cents (see
+                  // packages/lib/src/coins.ts), so the integer coin
+                  // count is `cents / 100`. Drops the decimals because
+                  // sub-coin bets aren't a thing in the virtual model.
                   value:
-                    minCents !== null && maxCents !== null
-                      ? `$${(minCents / 100).toFixed(2)} – $${(maxCents / 100).toFixed(2)}`
-                      : "",
+                    minCents !== null && maxCents !== null ? (
+                      <span className="inline-flex items-center gap-1">
+                        <CoinIcon className="h-3.5 w-3.5" />
+                        {Math.round(minCents / 100)} – {Math.round(maxCents / 100)}
+                      </span>
+                    ) : (
+                      ""
+                    ),
                   missing: !betLimitsValid,
                 },
                 {
@@ -2012,7 +2022,11 @@ function SummaryGroup({
 }: {
   title: string;
   anchor: string;
-  rows: Array<{ label: string; value: string; missing?: boolean }>;
+  // `value` is a ReactNode so a row can render a coin glyph + number
+  // (e.g. Bet range) alongside plain-string rows. Empty string still
+  // works as the "no value yet" signal — Missing chip kicks in via the
+  // sibling `missing` flag, not the type of `value`.
+  rows: Array<{ label: string; value: ReactNode; missing?: boolean }>;
 }) {
   return (
     <div className="rounded-2xl border border-border/40 bg-card p-4">

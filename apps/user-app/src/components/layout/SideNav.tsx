@@ -210,13 +210,25 @@ export function SideNav() {
       </nav>
 
       <div className="relative px-5 py-4">
+        {/* Terms + Privacy are surfaced as two separate links — they
+            point at independent /terms and /privacy routes so each
+            policy can be linked / printed / shared on its own. */}
         <p className="text-[11px] leading-tight text-white/75">
-          © {new Date().getFullYear()} LiveRush ·{" "}
+          © {new Date().getFullYear()} LiveRush
+        </p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-tight text-white/75">
           <Link
             to="/terms"
             className="underline underline-offset-2 transition-colors hover:text-white"
           >
-            Terms & Policies
+            Terms of Service
+          </Link>
+          <span aria-hidden>·</span>
+          <Link
+            to="/privacy"
+            className="underline underline-offset-2 transition-colors hover:text-white"
+          >
+            Privacy Policy
           </Link>
         </p>
       </div>

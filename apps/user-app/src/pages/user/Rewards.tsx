@@ -1,17 +1,28 @@
-import { useState, type ComponentType } from "react";
-import { toast } from "sonner";
+import { useState, type ComponentType, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { CoinIcon } from "@/components/ui/CoinAmount";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { cn } from "@/lib/utils";
+// Vite resolves `?url` to a public URL for the bundled SVG. The
+// reward glyph (`rs-icon.svg`) is the visual mark for the *second*
+// virtual currency — "reward shards" — which doesn't have a real
+// ledger yet. Until it does, the Rewards screen only renders the
+// icon next to the integer amount; nothing else in the app reads
+// `rewardCents` as that currency.
+import rsIconUrl from "@/assets/icons/rs-icon.svg?url";
 
 type Unit = "count" | "money" | "days";
 
 interface RewardActivity {
   id: string;
-  title: string;
-  description: string;
+  // `title` + `description` are ReactNodes (not strings) so money-
+  // denominated copy can inline the coin glyph in place of "$". The
+  // two staking rows ("Stake _coin_ 1,000 in total") use JSX; the
+  // rest stay as plain strings, which React still renders verbatim.
+  title: ReactNode;
+  description: ReactNode;
   icon: ComponentType<{ className?: string }>;
   iconColor: string;
   progress: number;
@@ -91,8 +102,16 @@ const ACTIVITIES: RewardActivity[] = [
   },
   {
     id: "one-k-staked",
-    title: "Stake $1,000 in total",
-    description: "Hit $1,000 cumulative across all your bets.",
+    title: (
+      <>
+        Stake <InlineCoin /> 1,000 in total
+      </>
+    ),
+    description: (
+      <>
+        Hit <InlineCoin /> 1,000 cumulative across all your bets.
+      </>
+    ),
     icon: DoodleCoin,
     iconColor: "text-amber-500",
     progress: 5000,
@@ -102,8 +121,16 @@ const ACTIVITIES: RewardActivity[] = [
   },
   {
     id: "ten-k-staked",
-    title: "Stake $10,000 in total",
-    description: "Big-stakes club — $10,000 cumulative.",
+    title: (
+      <>
+        Stake <InlineCoin /> 10,000 in total
+      </>
+    ),
+    description: (
+      <>
+        Big-stakes club — <InlineCoin /> 10,000 cumulative.
+      </>
+    ),
     icon: DoodleDiamond,
     iconColor: "text-cyan-500",
     progress: 5000,
@@ -135,10 +162,55 @@ const ACTIVITIES: RewardActivity[] = [
   },
 ];
 
-const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+/** Whole-coin amount from a cents value. `5000` → `50`. The coin
+ *  glyph is rendered separately by the caller so we keep the helper
+ *  string-typed for cases where pure text is enough (e.g. counters). */
+const coins = (cents: number) => Math.round(cents / 100).toLocaleString("en-US");
 
-function formatProgress(progress: number, target: number, unit: Unit): string {
-  if (unit === "money") return `${dollars(progress)} / ${dollars(target)}`;
+/** Reward shards are denominated as integer counts. `rewardCents` is
+ *  stored as cents for compatibility with the rest of the schema, but
+ *  in the UI we drop the cents and show the bare integer alongside the
+ *  rs-icon glyph. e.g. `rewardCents = 500` → "5". */
+const rewardCount = (cents: number) => Math.round(cents / 100);
+
+function RsIcon({ className }: { className?: string }) {
+  return (
+    <img
+      src={rsIconUrl}
+      alt=""
+      aria-hidden
+      className={cn("inline-block h-[1em] w-[1em] align-[-0.125em]", className)}
+    />
+  );
+}
+
+/** Inline-safe coin glyph for use inside flowing text. The shared
+ *  `<CoinIcon />` is `display: block` (expects an inline-flex parent
+ *  for vertical alignment), which forces a line break when dropped
+ *  bare inside a `<p>`. Wrap it in an `inline-flex` span so it
+ *  behaves like an inline image alongside the surrounding words. */
+function InlineCoin({ className }: { className?: string }) {
+  return (
+    <span className="inline-flex align-middle">
+      <CoinIcon className={className} />
+    </span>
+  );
+}
+
+function formatProgress(
+  progress: number,
+  target: number,
+  unit: Unit,
+): ReactNode {
+  if (unit === "money") {
+    // Coin glyph in place of "$". Format the integer with thousands
+    // separators so "1,000" reads the same as the title text.
+    return (
+      <>
+        <InlineCoin /> {coins(progress)} / <InlineCoin /> {coins(target)}
+      </>
+    );
+  }
   if (unit === "days") return `${progress} / ${target} days`;
   return `${progress} / ${target}`;
 }
@@ -146,15 +218,13 @@ function formatProgress(progress: number, target: number, unit: Unit): string {
 export default function Rewards() {
   const [claimed, setClaimed] = useState<Set<string>>(new Set());
 
-  const handleClaim = (activity: RewardActivity) => {
-    setClaimed((prev) => {
-      const next = new Set(prev);
-      next.add(activity.id);
-      return next;
-    });
-    toast.success(
-      `Claimed ${dollars(activity.rewardCents)} — added to your balance`,
-    );
+  // Reward shards are a SEPARATE virtual currency from the coins that
+  // power top-ups / bets / payouts (the `balance_cents` pot). The rs
+  // ledger / wallet doesn't exist yet, so the Claim button is a true
+  // no-op for now: no balance mutation, no local "claimed" state, no
+  // toast. When the rs wallet ships, restore the mutation here.
+  const handleClaim = (_activity: RewardActivity) => {
+    /* intentional no-op until reward-shard backend exists */
   };
 
   const totalEarnedCents = ACTIVITIES.filter((a) =>
@@ -175,8 +245,8 @@ export default function Rewards() {
             </p>
           </div>
           {totalEarnedCents > 0 && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-3 py-1.5 text-sm font-bold tabular-nums text-success">
-              +{dollars(totalEarnedCents)} earned
+            <span className="inline-flex items-center gap-1.5 font-heading text-base font-bold tabular-nums text-foreground sm:text-lg">
+              + <RsIcon /> {rewardCount(totalEarnedCents)} earned
             </span>
           )}
         </div>
@@ -266,8 +336,8 @@ function ActivityWidget({
 
         {/* Right column: amount on top, Claim button on bottom */}
         <div className="flex flex-shrink-0 flex-col items-end justify-between gap-3">
-          <span className="rounded-full bg-success/10 px-2.5 py-1 text-xs font-bold tabular-nums text-success sm:text-sm">
-            +{dollars(activity.rewardCents)}
+          <span className="inline-flex items-center gap-1.5 font-heading text-lg font-bold tabular-nums text-foreground sm:text-xl">
+            + <RsIcon /> {rewardCount(activity.rewardCents)}
           </span>
           <Button
             variant="accent"

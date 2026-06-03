@@ -15,6 +15,8 @@ import Notifications from "@/pages/user/Notifications";
 import Coins from "@/pages/user/Coins";
 import Rewards from "@/pages/user/Rewards";
 import Company from "@/pages/user/Company";
+import Terms from "@/pages/user/Terms";
+import Privacy from "@/pages/user/Privacy";
 import SignUp from "@/pages/auth/SignUp";
 import SignIn from "@/pages/auth/SignIn";
 import ForgotPassword from "@/pages/auth/ForgotPassword";
@@ -50,6 +52,8 @@ const App = () => (
             <Route path="/discover" element={<Feed />} />
             <Route path="/event/:id" element={<EventDetails />} />
             <Route path="/company" element={<Company />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
             <Route
               path="/my-bets"
               element={

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Camera,
   CameraOff,
@@ -12,7 +12,7 @@ import {
   Video,
 } from "lucide-react";
 
-import { Button } from "@liverush/ui";
+import { Button, CoinIcon } from "@liverush/ui";
 
 /**
  * Tiny self-contained "does my camera work?" panel for the event editor.
@@ -268,7 +268,19 @@ export function LiveStreamTest({ title }: LiveStreamTestProps = {}) {
               have="2/2"
               cleared
             />
-            <MockReadinessRow label="Pool" have="$18/$30" cleared={false} />
+            {/* Pool uses the coin glyph in place of $ — virtual rush-coins
+                are the soft currency, $ in this panel would lie about
+                the unit. Inline icons keep the row compact. */}
+            <MockReadinessRow
+              label="Pool"
+              have={
+                <span className="inline-flex items-center gap-0.5">
+                  <CoinIcon className="h-2.5 w-2.5" />
+                  18/30
+                </span>
+              }
+              cleared={false}
+            />
           </ul>
         </aside>
 
@@ -395,7 +407,11 @@ function MockReadinessRow({
   cleared,
 }: {
   label: string;
-  have: string;
+  // ReactNode so callers can inject a coin-icon + number JSX block
+  // for the Pool row while still passing plain strings ("3/5") for
+  // the rest. Type widened intentionally — keeps the rendering site
+  // a single span.
+  have: ReactNode;
   cleared: boolean;
 }) {
   return (

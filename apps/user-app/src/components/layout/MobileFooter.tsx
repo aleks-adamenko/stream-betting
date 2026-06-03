@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 
+// Terms + Privacy are split into two independent links — matches the
+// desktop sidebar footer so the two surfaces stay parallel.
 const links = [
   {
     to: "https://studio.liverush.co",
@@ -7,7 +9,8 @@ const links = [
     external: true,
   },
   { to: "/company", label: "Company", external: false },
-  { to: "/terms", label: "Terms & Policies", external: false },
+  { to: "/terms", label: "Terms of Service", external: false },
+  { to: "/privacy", label: "Privacy Policy", external: false },
 ] as const;
 
 export function MobileFooter() {

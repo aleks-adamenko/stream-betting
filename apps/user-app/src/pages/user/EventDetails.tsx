@@ -1,5 +1,5 @@
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -1329,19 +1329,36 @@ function ReadinessCard({
   // parent's `!progress.minimumsMet` predicate hides the whole
   // card. No progress numbers (3/5, $10/$30) — the viewer just
   // needs the prompt, not the leaderboard.
-  const poolDollars = (n: number) => `$${Math.round(n / 100)}`;
-  const items = [
+  // 1 coin = 100 cents internally. The pool minimum reads as
+  // "Min <coin> 30 total pool" — the coin glyph replaces the legacy
+  // "$" so the unit matches every other balance/odds display.
+  const poolCoins = (cents: number) => Math.round(cents / 100);
+  // `label` is a ReactNode (the Pool row interleaves a CoinIcon), so
+  // we can no longer use it as a React key. Each item gets a stable
+  // string id for keying.
+  const items: { id: string; label: ReactNode; cleared: boolean }[] = [
     {
+      id: "participants",
       label: `Min ${progress.minUniqueBettors} participants`,
       cleared: progress.uniqueBettors >= progress.minUniqueBettors,
     },
     {
+      id: "outcomes",
       label: `Min ${progress.minOutcomesWithBets} different outcomes`,
       cleared:
         progress.outcomesWithBets >= progress.minOutcomesWithBets,
     },
     {
-      label: `Min ${poolDollars(progress.minPoolCents)} total pool`,
+      id: "pool",
+      label: (
+        <>
+          Min{" "}
+          <span className="inline-flex items-center gap-0.5 align-middle">
+            <CoinIcon /> {poolCoins(progress.minPoolCents)}
+          </span>{" "}
+          total pool
+        </>
+      ),
       cleared: progress.totalPoolCents >= progress.minPoolCents,
     },
   ];
@@ -1364,7 +1381,7 @@ function ReadinessCard({
       </p>
       <ul className="mt-2 space-y-1 text-xs text-foreground">
         {outstanding.map((item) => (
-          <li key={item.label}>{item.label}</li>
+          <li key={item.id}>{item.label}</li>
         ))}
       </ul>
       <p className="mt-2 text-[10px] leading-tight text-muted-foreground">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ import {
 import {
   BettingCountdown,
   Button,
+  CoinIcon,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -1101,8 +1102,15 @@ function ReadinessOverlay({ progress }: { progress: EventProgress }) {
   // rows striking through and turning green. The streamer wants the
   // full picture (including the rows that are already met) so they
   // can see progress as it happens, not just the outstanding items.
-  const poolDollars = (n: number) => `$${Math.round(n / 100)}`;
-  const items = [
+  // 1 coin = 100 cents internally (see packages/lib/src/coins.ts).
+  // Pool labels show as `<coin> 18 / <coin> 30`, replacing the legacy
+  // "$18/$30" so the unit reads as virtual coins everywhere.
+  const poolCoins = (cents: number) => Math.round(cents / 100);
+  const items: {
+    label: string;
+    haveLabel: ReactNode;
+    cleared: boolean;
+  }[] = [
     {
       label: "Unique participants",
       haveLabel: `${progress.uniqueBettors}/${progress.minUniqueBettors}`,
@@ -1116,9 +1124,12 @@ function ReadinessOverlay({ progress }: { progress: EventProgress }) {
     },
     {
       label: "Total pool",
-      haveLabel: `${poolDollars(progress.totalPoolCents)}/${poolDollars(
-        progress.minPoolCents,
-      )}`,
+      haveLabel: (
+        <span className="inline-flex items-center gap-0.5">
+          <CoinIcon className="h-3 w-3" />
+          {poolCoins(progress.totalPoolCents)}/{poolCoins(progress.minPoolCents)}
+        </span>
+      ),
       cleared: progress.totalPoolCents >= progress.minPoolCents,
     },
   ];
