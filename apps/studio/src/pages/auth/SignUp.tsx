@@ -237,7 +237,30 @@ export default function SignUp() {
             className="mt-0.5 h-4 w-4 cursor-pointer rounded border-white/40 bg-white/10 accent-[#FEE53A]"
           />
           <span>
-            I am 18+ and accept the LiveRush Creator Terms and Responsible Play policy.
+            {/* Terms + Privacy live on the public user-app domain, not on
+                studio.liverush.co, so these are plain anchor tags pointing
+                across origin. Open in a new tab so the half-completed
+                signup form isn't lost. Age (18+) requirement is in the
+                Terms (Section 2) — no need to restate it on the checkbox. */}
+            I accept the LiveRush{" "}
+            <a
+              href="https://liverush.co/terms"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-medium underline underline-offset-2 hover:text-white"
+            >
+              Terms
+            </a>{" "}
+            and{" "}
+            <a
+              href="https://liverush.co/privacy"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-medium underline underline-offset-2 hover:text-white"
+            >
+              Privacy Policy
+            </a>
+            .
           </span>
         </label>
 

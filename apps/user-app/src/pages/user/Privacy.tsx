@@ -3,7 +3,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 /**
  * Privacy Policy — Australian-law document covering Privacy Act 1988
  * compliance, the Australian Privacy Principles, marketing, overseas
- * disclosure, NDB obligations, and complaints.
+ * disclosure, NDB obligations, additional EU/UK/CA rights, and complaints.
  *
  * Source: legal draft template adapted on operator request. Substitutions
  * applied:
@@ -24,7 +24,9 @@ export default function Privacy() {
           <h1 className="font-heading text-3xl font-bold text-foreground sm:text-4xl">
             Privacy Policy
           </h1>
-          <p className="text-sm text-muted-foreground">Last updated: TBD</p>
+          <p className="text-sm text-muted-foreground">
+            Last updated: 4 June 2026
+          </p>
         </header>
 
         <p>
@@ -123,7 +125,7 @@ export default function Privacy() {
             </li>
             <li>
               send you service-related and, where permitted, marketing
-              communications (see clause 8);
+              communications (see Section 8);
             </li>
             <li>
               comply with applicable laws and respond to lawful requests.
@@ -238,7 +240,44 @@ export default function Privacy() {
           </Numbered>
         </Section>
 
-        <Section title="10. Children">
+        <Section title="10. Additional rights for users in the EU/EEA, UK and California">
+          <p>
+            This Section applies in addition to the rest of this Policy where
+            the relevant laws apply to you.
+          </p>
+          <p>
+            <strong>
+              (A) European Economic Area and United Kingdom (GDPR / UK GDPR).
+            </strong>{" "}
+            If you are located in the EEA or the UK, we process your personal
+            data on one or more of the following legal bases: performance of
+            our contract with you (to provide the Service); your consent (for
+            example, certain marketing or cookies); our legitimate interests
+            (such as security, fraud prevention and improving the Service);
+            and compliance with our legal obligations. You have the right to
+            access your personal data; request its correction or erasure;
+            restrict or object to its processing; request data portability;
+            and withdraw consent at any time. You may also lodge a complaint
+            with your local data protection authority (in the UK, the
+            Information Commissioner&rsquo;s Office). To exercise these
+            rights, contact us at <Email />.
+          </p>
+          <p>
+            <strong>(B) California (CCPA/CPRA).</strong> If you are a
+            California resident, you have the right to know what personal
+            information we collect, use and disclose; to request access to and
+            deletion of your personal information; to correct inaccurate
+            personal information; and not to be discriminated against for
+            exercising these rights. We do not sell your personal
+            information, and we do not &ldquo;share&rdquo; it for
+            cross-context behavioural advertising, as those terms are defined
+            under California law. To exercise your rights, contact us at{" "}
+            <Email />. You may use an authorised agent to submit a request on
+            your behalf.
+          </p>
+        </Section>
+
+        <Section title="11. Children">
           <p>
             The Service is intended for adults aged 18 and over. We do not
             knowingly collect personal information from anyone under 18. If we
@@ -247,7 +286,7 @@ export default function Privacy() {
           </p>
         </Section>
 
-        <Section title="11. Third-party links and services">
+        <Section title="12. Third-party links and services">
           <p>
             The Service may contain links to, or integrate with, third-party
             websites and services (including payment providers). Their privacy
@@ -256,7 +295,7 @@ export default function Privacy() {
           </p>
         </Section>
 
-        <Section title="12. Data breaches">
+        <Section title="13. Data breaches">
           <p>
             We comply with the Notifiable Data Breaches (NDB) scheme under the{" "}
             <em>Privacy Act 1988</em> (Cth). If we become aware of an eligible
@@ -266,13 +305,13 @@ export default function Privacy() {
           </p>
         </Section>
 
-        <Section title="13. How to make a complaint">
-          <Numbered n="13.1">
+        <Section title="14. How to make a complaint">
+          <Numbered n="14.1">
             If you have a privacy concern or complaint, contact our Privacy
             Officer at <Email /> with details. We will acknowledge and
             investigate your complaint and respond within a reasonable time.
           </Numbered>
-          <Numbered n="13.2">
+          <Numbered n="14.2">
             If you are not satisfied with our response, you may contact the{" "}
             <strong>
               Office of the Australian Information Commissioner (OAIC)
@@ -291,7 +330,7 @@ export default function Privacy() {
           </Numbered>
         </Section>
 
-        <Section title="14. Changes to this Policy">
+        <Section title="15. Changes to this Policy">
           <p>
             We may update this Privacy Policy from time to time. The current
             version will always be available on the Service, and material
@@ -300,7 +339,7 @@ export default function Privacy() {
           </p>
         </Section>
 
-        <Section title="15. Contact us">
+        <Section title="16. Contact us">
           <p>
             <strong>Liverush</strong>
             <br />

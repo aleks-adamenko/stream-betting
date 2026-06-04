@@ -238,7 +238,31 @@ export default function SignUp() {
             onChange={(e) => setAccept(e.target.checked)}
             className="mt-0.5 h-4 w-4 cursor-pointer rounded border-white/40 bg-white/10 accent-[#FEE53A]"
           />
-          <span>I am 18+ and accept the LiveRush Terms and Responsible Play policy.</span>
+          <span>
+            {/* Age (18+) is already covered by section 2 of the Terms and
+                section 10 of the Privacy Policy — no need to restate it on
+                the checkbox. Each policy is linked directly so the user can
+                read it from here without leaving signup. */}
+            I accept the LiveRush{" "}
+            <Link
+              to="/terms"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-medium underline underline-offset-2 hover:text-white"
+            >
+              Terms
+            </Link>{" "}
+            and{" "}
+            <Link
+              to="/privacy"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="font-medium underline underline-offset-2 hover:text-white"
+            >
+              Privacy Policy
+            </Link>
+            .
+          </span>
         </label>
 
         {error && (
