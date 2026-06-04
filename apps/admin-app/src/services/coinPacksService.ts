@@ -14,7 +14,6 @@ export interface AdminCoinPack {
   id: string;
   coins: number;
   priceDollarCents: number;
-  stripeProductId: string | null;
   sortOrder: number;
   isActive: boolean;
   /** Computed `price_dollar_cents / coins`, server-side. */
@@ -27,7 +26,6 @@ interface ListRow {
   id: string;
   coins: number;
   price_dollar_cents: number;
-  stripe_product_id: string | null;
   sort_order: number;
   is_active: boolean;
   dollar_per_coin_cents: number;
@@ -42,7 +40,6 @@ export async function listCoinPacks(): Promise<AdminCoinPack[]> {
     id: row.id,
     coins: row.coins,
     priceDollarCents: Number(row.price_dollar_cents),
-    stripeProductId: row.stripe_product_id,
     sortOrder: row.sort_order,
     isActive: row.is_active,
     dollarPerCoinCents: Number(row.dollar_per_coin_cents),
@@ -56,7 +53,6 @@ export interface UpsertCoinPackInput {
   id: string | null;
   coins: number;
   priceDollarCents: number;
-  stripeProductId: string | null;
   sortOrder: number;
   isActive: boolean;
 }
@@ -68,7 +64,6 @@ export async function upsertCoinPack(
     p_id: input.id,
     p_coins: input.coins,
     p_price_dollar_cents: input.priceDollarCents,
-    p_stripe_product_id: input.stripeProductId,
     p_sort_order: input.sortOrder,
     p_is_active: input.isActive,
   });

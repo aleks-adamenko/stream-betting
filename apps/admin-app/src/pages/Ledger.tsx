@@ -302,13 +302,14 @@ export default function Ledger() {
                         )}
                       </td>
                       {/* Cash only renders on the `platform_cash` side — that's
-                          the only account where actual money moves (Stripe
-                          inflow on top_up_received, payout outflow on
-                          payout_paid). User-side top_up / payout_request rows
+                          the only account where the cash inflow/outflow is
+                          recorded (top_up_received credits in, payout_paid
+                          debits out). User-side top_up / payout_request rows
                           carry the same cash number on the DB row as
                           contextual metadata, but showing "+$10.00" next to a
                           viewer's name reads as "viewer got $10 cash" — they
-                          paid it via card, didn't receive it. Hide there. */}
+                          paid it via the mock checkout, didn't receive it.
+                          Hide there. */}
                       <td
                         className={cn(
                           "px-4 py-2 text-right font-heading font-bold tabular-nums whitespace-nowrap",

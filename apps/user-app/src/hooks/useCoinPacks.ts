@@ -20,7 +20,6 @@ export interface CoinPack {
   coins: number;
   /** Dollar cents (`$X.XX` displays as `priceDollarCents / 100`). */
   priceDollarCents: number;
-  stripeProductId: string | null;
   sortOrder: number;
 }
 
@@ -28,7 +27,6 @@ interface CoinPackRow {
   id: string;
   coins: number;
   price_dollar_cents: number;
-  stripe_product_id: string | null;
   sort_order: number;
   is_active: boolean;
 }
@@ -46,7 +44,7 @@ export function useCoinPacks() {
     queryFn: async (): Promise<CoinPack[]> => {
       const { data, error } = await supabase
         .from("coin_packs")
-        .select("id, coins, price_dollar_cents, stripe_product_id, sort_order, is_active")
+        .select("id, coins, price_dollar_cents, sort_order, is_active")
         .eq("is_active", true)
         .order("sort_order", { ascending: true });
       if (error) throw error;
@@ -54,7 +52,6 @@ export function useCoinPacks() {
         id: row.id,
         coins: row.coins,
         priceDollarCents: Number(row.price_dollar_cents),
-        stripeProductId: row.stripe_product_id,
         sortOrder: row.sort_order,
       }));
     },

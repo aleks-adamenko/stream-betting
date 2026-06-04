@@ -16,19 +16,13 @@ import {
 /**
  * Admin Settings — coin-pack catalogue.
  *
- * The 6 IAP options the user-app shows on `/coins` are stored in the
+ * The IAP options the user-app shows on `/coins` are stored in the
  * `coin_packs` table (see migration `20260604_000001_ledger_rebuild.sql`).
  * Operators add / edit / delete / reorder them here. Save batches dirty
  * rows + new rows through `upsert_coin_pack` (one RPC per row, sequential)
  * and queued deletes through `delete_coin_pack`. Realtime on `coin_packs`
  * propagates the change to the user-app Coins page without a refresh.
- *
- * Stripe product IDs are free-text — paste from the Stripe dashboard
- * once a real product exists. Validation only checks the
- * `prod_<alphanum>` shape; nothing makes a Stripe API call yet.
  */
-
-const STRIPE_ID_RE = /^prod_[A-Za-z0-9_]+$/;
 
 // Local working-copy row shape. `id` is null for newly-added rows
 // (client-side draft id stashed in `draftId` for React keys); after
@@ -39,7 +33,6 @@ interface Draft {
   id: string | null;
   coins: string;
   priceDollars: string;
-  stripeProductId: string;
   sortOrder: number;
   isActive: boolean;
   dirty: boolean;
@@ -51,7 +44,6 @@ function packToDraft(p: AdminCoinPack): Draft {
     id: p.id,
     coins: String(p.coins),
     priceDollars: (p.priceDollarCents / 100).toFixed(2),
-    stripeProductId: p.stripeProductId ?? "",
     sortOrder: p.sortOrder,
     isActive: p.isActive,
     dirty: false,
@@ -64,7 +56,6 @@ function newDraft(sortOrder: number): Draft {
     id: null,
     coins: "",
     priceDollars: "",
-    stripeProductId: "",
     sortOrder,
     isActive: true,
     dirty: true,
@@ -74,7 +65,6 @@ function newDraft(sortOrder: number): Draft {
 interface ValidationError {
   coins?: string;
   priceDollars?: string;
-  stripeProductId?: string;
 }
 
 function validateDraft(d: Draft): ValidationError {
@@ -86,9 +76,6 @@ function validateDraft(d: Draft): ValidationError {
   const price = Number.parseFloat(d.priceDollars);
   if (!Number.isFinite(price) || price <= 0) {
     errors.priceDollars = "Must be > $0";
-  }
-  if (d.stripeProductId.trim() && !STRIPE_ID_RE.test(d.stripeProductId.trim())) {
-    errors.stripeProductId = "Must start with `prod_`";
   }
   return errors;
 }
@@ -189,7 +176,6 @@ export default function Settings() {
           priceDollarCents: Math.round(
             Number.parseFloat(d.priceDollars) * 100,
           ),
-          stripeProductId: d.stripeProductId.trim() || null,
           sortOrder: d.sortOrder,
           isActive: d.isActive,
         });
@@ -223,8 +209,7 @@ export default function Settings() {
           Settings
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          IAP catalogue, Stripe product mapping, and other operator
-          configuration.
+          Coin-pack catalogue and other operator configuration.
         </p>
       </div>
 
@@ -265,8 +250,8 @@ export default function Settings() {
                       // even when one (Price) has the live "$0.X / coin" rate
                       // caption hanging below — with items-end that caption
                       // made the price column taller and pushed its label /
-                      // input up out of line with Coins + Stripe ID.
-                      "grid gap-3 px-4 py-4 sm:grid-cols-[auto_1fr_1fr_1fr_auto_auto] sm:items-start sm:gap-4 sm:px-6",
+                      // input up out of line with Coins.
+                      "grid gap-3 px-4 py-4 sm:grid-cols-[auto_1fr_1fr_auto_auto] sm:items-start sm:gap-4 sm:px-6",
                       !d.isActive && "opacity-60",
                     )}
                   >
@@ -342,27 +327,6 @@ export default function Settings() {
                         <span className="text-[11px] text-muted-foreground">
                           ${rate.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}
                           {" / coin"}
-                        </span>
-                      )}
-                    </label>
-
-                    {/* Stripe product ID */}
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        Stripe product ID
-                      </span>
-                      <Input
-                        type="text"
-                        value={d.stripeProductId}
-                        onChange={(e) =>
-                          patch(d.draftId, { stripeProductId: e.target.value })
-                        }
-                        className="h-10 font-mono"
-                        placeholder="prod_…"
-                      />
-                      {errors.stripeProductId && (
-                        <span className="text-[11px] text-destructive">
-                          {errors.stripeProductId}
                         </span>
                       )}
                     </label>
