@@ -23,6 +23,12 @@ export interface TopUpRow {
   coins: number;
   /** Dollar cents the user "paid" — null on legacy rows pre-migration. */
   cashCents: number | null;
+  /** External reference for this top-up. For Stripe-driven rows this
+   *  is the Checkout Session id (`cs_…`); for the legacy dev-only
+   *  `top_up_balance` RPC path it's a UUID. The Coins page uses this
+   *  to match a redirect-return `?session_id=cs_…` to a webhook-
+   *  written ledger row. */
+  referenceId: string | null;
   createdAt: string;
 }
 
@@ -30,6 +36,7 @@ interface LedgerRow {
   id: string;
   amount_cents: number;
   amount_cash_cents: number | null;
+  reference_id: string | null;
   created_at: string;
 }
 
@@ -51,7 +58,7 @@ export function useTopUpHistory() {
       if (!account) return [];
       const { data, error } = await supabase
         .from("ledger_entries")
-        .select("id, amount_cents, amount_cash_cents, created_at")
+        .select("id, amount_cents, amount_cash_cents, reference_id, created_at")
         .eq("account", account)
         .eq("type", "top_up")
         .order("created_at", { ascending: false })
@@ -62,6 +69,7 @@ export function useTopUpHistory() {
         coins: Number(row.amount_cents) / 100,
         cashCents:
           row.amount_cash_cents == null ? null : Number(row.amount_cash_cents),
+        referenceId: row.reference_id,
         createdAt: row.created_at,
       }));
     },

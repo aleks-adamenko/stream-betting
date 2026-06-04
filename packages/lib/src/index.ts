@@ -31,3 +31,10 @@ export {
   balanceCentsToDollarCents,
   formatDollarCents,
 } from "./coins";
+export {
+  FX_RATES_FROM_AUD,
+  detectCurrency,
+  localPriceLabel,
+  audChargeLabel,
+} from "./fx";
+export type { SupportedCurrency } from "./fx";

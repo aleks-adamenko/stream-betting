@@ -488,6 +488,38 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      // Added by 20260605_000001_stripe_checkout.sql. One row per
+      // started Stripe Checkout session. Webhook drives the status
+      // transitions; clients never INSERT/UPDATE directly.
+      top_up_attempts: {
+        Row: {
+          id: string;
+          user_id: string;
+          coin_pack_id: string;
+          coins: number;
+          cash_cents: number;
+          stripe_session_id: string | null;
+          status: "pending" | "completed" | "expired" | "failed";
+          created_at: string;
+          completed_at: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "top_up_attempts_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "top_up_attempts_coin_pack_id_fkey";
+            columns: ["coin_pack_id"];
+            referencedRelation: "coin_packs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       user_bet_caps: {
         Row: {
           user_id: string;
@@ -657,6 +689,45 @@ export interface Database {
           // withdrawable_cents, not balance_cents.
           new_withdrawable_cents: number;
         };
+      };
+      // Added by 20260605_000001_stripe_checkout.sql. Called by the
+      // create-checkout-session edge function. Looks up the pack
+      // server-side so the client can't tamper with the price.
+      create_top_up_attempt: {
+        Args: { p_coin_pack_id: string };
+        Returns: {
+          attempt_id: string;
+          user_id: string;
+          coins: number;
+          cash_cents: number;
+          stripe_product_id: string;
+        };
+      };
+      // Sets the stripe_session_id on a pending attempt. Idempotent
+      // is enforced by the RPC (refuses re-attach once set).
+      attach_stripe_session: {
+        Args: { p_attempt_id: string; p_session_id: string };
+        Returns: void;
+      };
+      // Service-role only — called from the stripe-webhook function.
+      // Clients have execute permission revoked at the DB level so
+      // this typing exists for the edge function side, not browser.
+      complete_top_up_attempt: {
+        Args: { p_session_id: string };
+        Returns: {
+          idempotent_replay: boolean;
+          attempt_id: string;
+          session_id: string;
+          coins?: number;
+          cash_cents?: number;
+          new_balance_cents?: number;
+        };
+      };
+      // Service-role only — called from the stripe-webhook function
+      // on `checkout.session.expired` / `payment_intent.payment_failed`.
+      mark_top_up_attempt_failed: {
+        Args: { p_session_id: string; p_status: "expired" | "failed" };
+        Returns: void;
       };
       list_coin_packs: {
         Args: Record<string, never>;
