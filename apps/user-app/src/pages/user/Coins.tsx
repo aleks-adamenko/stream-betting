@@ -237,16 +237,17 @@ export default function Coins() {
                       <CoinIcon className="h-6 w-6" />
                       {coinFormatter.format(pack.coins)}
                     </span>
+                    {/* Single price label — visitor's local currency
+                        when they're not in AUD, otherwise the
+                        disambiguated "A$X.XX" form. No estimate
+                        caveat: Stripe will show the AUD amount on
+                        its hosted page if there's any currency
+                        mismatch. */}
                     <span className="text-xs font-medium text-muted-foreground">
                       {showLocalCaveat
                         ? localPriceLabel(pack.priceDollarCents, currency)
                         : audChargeLabel(pack.priceDollarCents)}
                     </span>
-                    {showLocalCaveat ? (
-                      <span className="text-[10px] tabular-nums text-muted-foreground/80">
-                        ≈ {audChargeLabel(pack.priceDollarCents)} AUD
-                      </span>
-                    ) : null}
                   </button>
                 );
               })}
@@ -261,7 +262,7 @@ export default function Coins() {
               <span className="font-heading text-base font-bold tabular-nums text-foreground">
                 {selected
                   ? showLocalCaveat
-                    ? `${localPriceLabel(selected.priceDollarCents, currency)} (${audChargeLabel(selected.priceDollarCents)} AUD)`
+                    ? localPriceLabel(selected.priceDollarCents, currency)
                     : audChargeLabel(selected.priceDollarCents)
                   : "—"}
               </span>
@@ -344,7 +345,16 @@ export default function Coins() {
                       </span>
                       {tx.cashCents != null ? (
                         <span className="text-[10px] tabular-nums text-muted-foreground">
-                          {audChargeLabel(tx.cashCents)} AUD
+                          {/* Same single-currency display logic as
+                              the pack tiles + modal: local currency
+                              when the visitor isn't in AUD, A$X.XX
+                              otherwise. The historical row was
+                              charged in AUD — we estimate the local
+                              amount using today's FX rates, which is
+                              close enough for a history label. */}
+                          {showLocalCaveat
+                            ? localPriceLabel(tx.cashCents, currency)
+                            : audChargeLabel(tx.cashCents)}
                         </span>
                       ) : null}
                     </div>

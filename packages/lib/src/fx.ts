@@ -106,16 +106,16 @@ export function localPriceLabel(
 
 /**
  * Format an AUD-cents amount as the explicit AUD label that matches
- * what Stripe will show on its hosted checkout — used for the
- * "Charged in AUD $X.XX" caveat and the "Pay AUD $X.XX with Stripe"
- * button so the handoff to Stripe never surprises the user.
+ * what Stripe will show on its hosted checkout.
  *
- * Always uses `en-AU` for predictable formatting regardless of the
- * visitor's locale — this string represents the merchant's charge,
- * not the visitor's local currency.
+ * Uses `en-US` (not `en-AU`) so the output is the disambiguated
+ * "A$10.00" form. In `en-AU` the same call produces a bare "$10.00",
+ * which collides visually with USD prices elsewhere in the UI — bad
+ * when the visitor is in a non-AUD locale and we want them to know
+ * the cash side is Australian dollars at a glance.
  */
 export function audChargeLabel(audCents: number): string {
-  return new Intl.NumberFormat("en-AU", {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "AUD",
     maximumFractionDigits: 2,

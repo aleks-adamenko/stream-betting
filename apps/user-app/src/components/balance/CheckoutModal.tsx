@@ -67,8 +67,12 @@ export function CheckoutModal({
   const [currency] = useState<SupportedCurrency>(() => detectCurrency());
 
   const audLabel = audChargeLabel(cashCents);
-  const showLocalCaveat = currency !== "AUD";
-  const localLabel = showLocalCaveat ? localPriceLabel(cashCents, currency) : null;
+  const showLocal = currency !== "AUD";
+  // Single price label everywhere in the modal — visitor's local
+  // currency when they're not in AUD, otherwise the disambiguated
+  // "A$X.XX" AUD label. The Pay button uses the same value so the
+  // summary and CTA never disagree.
+  const priceLabel = showLocal ? localPriceLabel(cashCents, currency) : audLabel;
 
   const handlePay = async () => {
     setSubmitting(true);
@@ -120,16 +124,9 @@ export function CheckoutModal({
               Credited to your balance after payment
             </p>
           </div>
-          <div className="flex flex-shrink-0 flex-col items-end">
-            <p className="font-heading text-base font-bold tabular-nums text-foreground">
-              {showLocalCaveat ? localLabel : audLabel}
-            </p>
-            {showLocalCaveat ? (
-              <p className="text-[10px] tabular-nums text-muted-foreground">
-                Charged in {audLabel}
-              </p>
-            ) : null}
-          </div>
+          <p className="flex-shrink-0 font-heading text-base font-bold tabular-nums text-foreground">
+            {priceLabel}
+          </p>
         </div>
 
         <div className="mt-1 flex flex-col gap-3">
@@ -147,7 +144,7 @@ export function CheckoutModal({
                 Redirecting to Stripe…
               </>
             ) : (
-              <>Pay {audLabel} with Stripe</>
+              <>Pay {priceLabel} with Stripe</>
             )}
           </Button>
 
