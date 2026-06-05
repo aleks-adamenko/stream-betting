@@ -27,7 +27,7 @@ import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
 import rewardsBannerDesktop from "@/assets/rewards-banner-2.jpg";
 import noLiveCoverMobile from "@/assets/live-rush-cover-image-3.jpg";
 import noLiveCoverDesktop from "@/assets/live-rush-cover-image-2.jpg";
-import type { StreamEvent } from "@/domain/types";
+import type { Influencer, StreamEvent } from "@/domain/types";
 
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
 
@@ -69,9 +69,15 @@ function SectionedHome({
   events: StreamEvent[] | undefined;
   isLoading: boolean;
 }) {
-  const { featured, live, upcoming, past } = useMemo(() => {
+  const { featured, live, upcoming, past, topCreators } = useMemo(() => {
     if (!events) {
-      return { featured: null, live: [], upcoming: [], past: [] };
+      return {
+        featured: null,
+        live: [],
+        upcoming: [],
+        past: [],
+        topCreators: [] as CreatorTally[],
+      };
     }
     const live = events.filter((e) => e.status === "live");
     const scheduled = events.filter((e) => e.status === "scheduled");
@@ -90,11 +96,36 @@ function SectionedHome({
         e.status === "cancelled",
     );
     const featured = live[0] ?? null;
+    // Top creators — count every event (any status) per creator,
+    // then sort descending. The Top Creators row shows whichever
+    // creators have run the most challenges so far. Capped to 6 so
+    // the row stays a single line at lg+ (matches the 5-up event
+    // grids — one extra slot fits comfortably with the narrower
+    // avatar tiles).
+    const tally = new Map<string, CreatorTally>();
+    for (const event of events) {
+      const id = event.influencer.id;
+      const entry = tally.get(id) ?? {
+        creator: event.influencer,
+        total: 0,
+      };
+      entry.total += 1;
+      tally.set(id, entry);
+    }
+    const topCreators = Array.from(tally.values())
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 7);
     // "Past challenges" surfaces finished/settled/cancelled streams
     // only — the section's Show more link drops the viewer onto
     // /discover/ended, so the home preview matches what the
     // ended-filter route would show.
-    return { featured, live, upcoming: scheduled, past: finished };
+    return {
+      featured,
+      live,
+      upcoming: scheduled,
+      past: finished,
+      topCreators,
+    };
   }, [events]);
 
   return (
@@ -130,6 +161,16 @@ function SectionedHome({
           className="mt-8 sm:mt-10"
         >
           <EventGrid events={upcoming.slice(0, 4)} />
+        </Section>
+      )}
+
+      {!isLoading && topCreators.length > 0 && (
+        <Section
+          title="Top Creators"
+          showAllHref="/following"
+          className="mt-8 sm:mt-10"
+        >
+          <TopCreatorsRow creators={topCreators} />
         </Section>
       )}
 
@@ -244,6 +285,49 @@ function Section({
       </div>
       {children}
     </section>
+  );
+}
+
+interface CreatorTally {
+  creator: Influencer;
+  /** Total events run by this creator (any status). */
+  total: number;
+}
+
+/**
+ * Top creators row sorted by most challenges. Single horizontal
+ * row at every breakpoint — 5 tiles on mobile (`grid-cols-5`), 7
+ * on desktop (`lg:grid-cols-7`). We render up to 7 always; the 6th
+ * and 7th `<li>` are `hidden lg:flex` so they're invisible on
+ * mobile and don't claim grid cells there.
+ *
+ * Per-row tiles aren't individually clickable — the section's
+ * "Show all" link in the header already routes to /following, and
+ * there's no per-creator detail page yet.
+ */
+function TopCreatorsRow({ creators }: { creators: CreatorTally[] }) {
+  return (
+    <ul className="grid grid-cols-5 gap-2 sm:gap-3 lg:grid-cols-7 lg:gap-4">
+      {creators.map(({ creator }, index) => (
+        <li
+          key={creator.id}
+          className={cn(
+            "flex min-w-0 flex-col items-center text-center",
+            // Mobile fits 5; everything past that is desktop-only.
+            index >= 5 && "hidden lg:flex",
+          )}
+        >
+          <img
+            src={creator.avatarUrl}
+            alt={creator.displayName}
+            className="h-16 w-16 rounded-full object-cover ring-2 ring-primary/20 lg:h-24 lg:w-24"
+          />
+          <p className="mt-2 w-full truncate font-heading text-xs font-semibold text-foreground lg:mt-3 lg:text-sm">
+            {creator.displayName}
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
