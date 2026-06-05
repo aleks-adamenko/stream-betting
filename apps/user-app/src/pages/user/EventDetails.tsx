@@ -1,5 +1,5 @@
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -30,7 +30,7 @@ import {
   resolveSocialEmbedUrl,
 } from "@/components/stream/SocialVideoEmbed";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { eventsKeys, useEvent } from "@/hooks/useEvents";
+import { eventsKeys, useEvent, useEvents } from "@/hooks/useEvents";
 import { supabase } from "@/integrations/supabase/client";
 import { useCreatorFollow } from "@/hooks/useCreatorFollow";
 import { useEventSubscription } from "@/hooks/useEventSubscription";
@@ -71,12 +71,36 @@ const compactFormatter = new Intl.NumberFormat("en-US", {
 export default function EventDetails() {
   const { id } = useParams<{ id: string }>();
   const { data: event, isLoading } = useEvent(id);
+  const { data: allEvents } = useEvents();
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const [overlaysHidden, setOverlaysHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Other events list (desktop-only left column). Excludes the
+  // current event + finished/cancelled ones. Live first, then
+  // scheduled. Within the scheduled bucket the soonest upcoming
+  // event sits at the top (ascending `scheduledAt`); live events
+  // keep whatever order the upstream `useEvents` query returns.
+  const otherEvents = useMemo(() => {
+    if (!allEvents) return [];
+    return allEvents
+      .filter(
+        (e) =>
+          e.id !== id &&
+          (e.status === "live" || e.status === "scheduled"),
+      )
+      .sort((a, b) => {
+        if (a.status !== b.status) return a.status === "live" ? -1 : 1;
+        if (a.status === "live") return 0;
+        return (
+          new Date(a.scheduledAt).getTime() -
+          new Date(b.scheduledAt).getTime()
+        );
+      });
+  }, [allEvents, id]);
   // Mute state lifted from CloudflareStreamPlayer so the fullscreen
   // bet overlay can render its own sound toggle at bottom-centre
   // (the player's own button would otherwise sit behind the overlay
@@ -177,7 +201,8 @@ export default function EventDetails() {
   if (isLoading) {
     return (
       <PageContainer>
-        <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
+        <div className="grid gap-6 lg:grid-cols-[240px_1.6fr_1fr] lg:gap-8">
+          <div className="hidden h-96 animate-pulse rounded-2xl bg-muted lg:block" />
           <div className="space-y-4">
             <div className="aspect-video animate-pulse rounded-2xl bg-muted" />
             <div className="h-8 w-2/3 animate-pulse rounded bg-muted" />
@@ -202,7 +227,17 @@ export default function EventDetails() {
 
   return (
     <PageContainer className="pt-4 lg:pt-[18px]">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr] lg:gap-8">
+      {/* 3-column desktop grid: [240px other-events | 1.6fr player+rules | 1fr bet+chat].
+          Mobile collapses to a single column and the OtherEventsList
+          is hidden — Home / Discover already surface the same data on
+          phones. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_1.6fr_1fr] lg:gap-8">
+        {/* Left column — Other events (desktop only). Sticky so the
+            viewer can browse other streams without losing the player. */}
+        <aside className="hidden lg:sticky lg:top-[66px] lg:block lg:h-[calc(100dvh-84px)] lg:min-w-0">
+          <OtherEventsList events={otherEvents} />
+        </aside>
+
         <div className="contents lg:block lg:min-w-0 lg:space-y-6">
           <div className="contents lg:block lg:min-w-0 lg:space-y-3">
           {/* Stream / cover slot — full-bleed on mobile (negative margins cancel PageContainer padding), framed on desktop. Sticky on mobile so it pins to the top of the viewport as the user scrolls. Mobile only: tapping it expands to fullscreen (X close + bet overlay). */}
@@ -216,7 +251,12 @@ export default function EventDetails() {
                   // anchors to the video container on desktop — `static` removes
                   // the positioning context and the overlay otherwise falls
                   // back to the viewport, appearing as a sticky page-bottom bar.
-                  "sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:relative lg:mx-auto lg:mt-0 lg:aspect-[4/5] lg:max-h-[calc(100dvh-200px)] lg:max-w-[420px] lg:rounded-2xl lg:border lg:border-border/30",
+                  // Desktop: container fills the center column (1.6fr of the
+                  // 3-col grid) at the default 16:9 aspect — the old 4:5 cap
+                  // at 420px is gone so cover/live video both span the full
+                  // column width. `max-h` still gates so the player never
+                  // pushes everything else below the fold on short screens.
+                  "sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:relative lg:mx-0 lg:mt-0 lg:max-h-[calc(100dvh-200px)] lg:rounded-2xl lg:border lg:border-border/30",
             )}
           >
             {isLive ? (
@@ -467,6 +507,107 @@ export default function EventDetails() {
         rules={event.rules}
       />
     </PageContainer>
+  );
+}
+
+/**
+ * Desktop-only sidebar listing the OTHER currently-live + upcoming
+ * events the viewer could jump to. One "Other events" header sits
+ * above the whole list; live rows are sorted ahead of upcoming
+ * rows so the page acts like a mini event browser without leaving
+ * the player. Each row is a Link to /event/:id.
+ *
+ * Per row we show: creator avatar (40px), a status pill (red LIVE
+ * badge or a compact scheduled-date pill), creator display name,
+ * and the event title clipped to two lines so very long titles
+ * don't push neighbouring rows off-balance.
+ */
+function OtherEventsList({ events }: { events: StreamEvent[] }) {
+  return (
+    <div className="flex h-full flex-col gap-3 overflow-y-auto">
+      {/* No horizontal padding on the header — the OtherEventsList
+          aside already sits at the PageContainer's lg:px-6 gutter,
+          so adding extra px in here would push content further
+          inward than the rest of the page. */}
+      <h2 className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        Other events
+      </h2>
+      {events.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border/60 p-6 text-center">
+          <p className="font-heading text-sm font-semibold">
+            Nothing else live
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Check back soon for more streams.
+          </p>
+        </div>
+      ) : (
+        <ul className="space-y-1">
+          {events.map((e) => (
+            <OtherEventRow key={e.id} event={e} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Compact scheduled-date label, e.g. "Jun 7, 8:30 PM". Uses the
+// browser's locale so timezone is implicit-correct.
+const otherEventsDateFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function OtherEventRow({ event }: { event: StreamEvent }) {
+  const isLive = event.status === "live";
+  return (
+    <li>
+      <Link
+        to={`/event/${event.id}`}
+        // Negative -mx so the hover background can still bloom a
+        // few px past the column edge for visual breathing room,
+        // but the actual content (avatar + name + title) lines up
+        // flush with the PageContainer's left gutter.
+        className="-mx-2 flex items-start gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-secondary/40"
+      >
+        <img
+          src={event.influencer.avatarUrl}
+          alt=""
+          className="h-10 w-10 flex-shrink-0 rounded-full object-cover ring-2 ring-border/30"
+        />
+        <div className="min-w-0 flex-1">
+          {/* Status pill on its own row above the creator name so it
+              never gets squeezed by long names. Red animated LIVE
+              badge reuses the shared component; upcoming gets a
+              neutral muted-bg date pill. */}
+          {isLive ? (
+            <LiveBadge size="sm" className="mb-1" />
+          ) : (
+            <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+              <Calendar className="h-3 w-3" />
+              {otherEventsDateFormatter.format(new Date(event.scheduledAt))}
+            </span>
+          )}
+          <p className="truncate text-sm font-semibold text-foreground">
+            {event.influencer.displayName}
+          </p>
+          {/*
+           * Two-line clamp keeps even long titles from elbowing the
+           * next row downward. `break-words` so very long single
+           * words wrap instead of overflowing horizontally.
+           */}
+          <p
+            className="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground"
+            title={event.title}
+          >
+            {event.title}
+          </p>
+        </div>
+      </Link>
+    </li>
   );
 }
 
