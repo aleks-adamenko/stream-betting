@@ -256,7 +256,17 @@ export default function EventDetails() {
                   // at 420px is gone so cover/live video both span the full
                   // column width. `max-h` still gates so the player never
                   // pushes everything else below the fold on short screens.
-                  "sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:relative lg:mx-0 lg:mt-0 lg:max-h-[calc(100dvh-200px)] lg:rounded-2xl lg:border lg:border-border/30",
+                  // Mobile keeps the natural 16:9 footprint. Desktop
+                  // drops the aspect lock entirely and sets an
+                  // explicit height — `100dvh − 84px` matches the
+                  // sticky aside heights (48px topnav + 18px top +
+                  // 18px bottom gutter) so the player fills the
+                  // visible viewport and scales with the user's
+                  // resolution. The video / cover inside uses
+                  // object-contain (player) or object-cover
+                  // (cover), so the tall container letterboxes
+                  // 16:9 video while cropping cover art to fill.
+                  "sticky top-0 z-20 -mx-4 -mt-4 aspect-[16/9] overflow-hidden bg-black shadow-lg sm:-mx-6 lg:relative lg:mx-0 lg:mt-0 lg:aspect-auto lg:h-[calc(100dvh-84px)] lg:rounded-2xl lg:border lg:border-border/30",
             )}
           >
             {isLive ? (

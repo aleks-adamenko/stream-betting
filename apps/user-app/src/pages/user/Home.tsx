@@ -69,9 +69,9 @@ function SectionedHome({
   events: StreamEvent[] | undefined;
   isLoading: boolean;
 }) {
-  const { featured, live, upcoming, more } = useMemo(() => {
+  const { featured, live, upcoming, past } = useMemo(() => {
     if (!events) {
-      return { featured: null, live: [], upcoming: [], more: [] };
+      return { featured: null, live: [], upcoming: [], past: [] };
     }
     const live = events.filter((e) => e.status === "live");
     const scheduled = events.filter((e) => e.status === "scheduled");
@@ -90,17 +90,11 @@ function SectionedHome({
         e.status === "cancelled",
     );
     const featured = live[0] ?? null;
-    // "Discover more" highlights everything else the user hasn't seen above.
-    const seen = new Set<string>();
-    if (featured) seen.add(featured.id);
-    live.slice(0, 4).forEach((e) => seen.add(e.id));
-    scheduled.slice(0, 4).forEach((e) => seen.add(e.id));
-    const more = [
-      ...live,
-      ...scheduled,
-      ...finished,
-    ].filter((e) => !seen.has(e.id));
-    return { featured, live, upcoming: scheduled, more };
+    // "Past challenges" surfaces finished/settled/cancelled streams
+    // only — the section's Show more link drops the viewer onto
+    // /discover/ended, so the home preview matches what the
+    // ended-filter route would show.
+    return { featured, live, upcoming: scheduled, past: finished };
   }, [events]);
 
   return (
@@ -120,24 +114,32 @@ function SectionedHome({
       )}
 
       {!isLoading && live.length > 0 && (
-        <Section title="Live now" showAllHref="/live" className="mt-8 sm:mt-10">
+        <Section
+          title="Live now"
+          showAllHref="/discover/live"
+          className="mt-8 sm:mt-10"
+        >
           <EventGrid events={live.slice(0, 4)} />
         </Section>
       )}
 
       {!isLoading && upcoming.length > 0 && (
-        <Section title="Upcoming" showAllHref="/discover" className="mt-8 sm:mt-10">
+        <Section
+          title="Upcoming"
+          showAllHref="/discover/upcoming"
+          className="mt-8 sm:mt-10"
+        >
           <EventGrid events={upcoming.slice(0, 4)} />
         </Section>
       )}
 
-      {!isLoading && more.length > 0 && (
+      {!isLoading && past.length > 0 && (
         <Section
-          title="Discover more"
-          showAllHref="/discover"
+          title="Past Challenges"
+          showAllHref="/discover/ended"
           className="mt-8 sm:mt-10"
         >
-          <EventGrid events={more.slice(0, 4)} />
+          <EventGrid events={past.slice(0, 4)} />
         </Section>
       )}
 

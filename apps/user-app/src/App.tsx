@@ -49,7 +49,13 @@ const App = () => (
             <Route path="/" element={<Home />} />
             <Route path="/live" element={<Home />} />
             <Route path="/following" element={<Following />} />
+            {/* `/discover` (no slug) shows all events; the three
+                status slugs (`/discover/live`, `/discover/upcoming`,
+                `/discover/ended`) pre-select the matching status
+                chip so the URL is deep-linkable and Home's
+                "Show more" buttons can target a specific bucket. */}
             <Route path="/discover" element={<Feed />} />
+            <Route path="/discover/:filter" element={<Feed />} />
             <Route path="/event/:id" element={<EventDetails />} />
             <Route path="/company" element={<Company />} />
             <Route path="/terms" element={<Terms />} />
