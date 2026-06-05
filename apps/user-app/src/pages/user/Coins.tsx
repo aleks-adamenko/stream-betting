@@ -2,9 +2,7 @@ import { type ComponentType, useEffect, useState } from "react";
 import { Banknote, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { PageContainer } from "@/components/layout/PageContainer";
 import { CheckoutModal } from "@/components/balance/CheckoutModal";
-import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { CoinAmount, CoinIcon } from "@/components/ui/CoinAmount";
 import { useCoinPacks, type CoinPack } from "@/hooks/useCoinPacks";
 import { useTopUpHistory, type TopUpRow } from "@/hooks/useTopUpHistory";
@@ -80,10 +78,8 @@ export default function Coins() {
   const rows: TopUpRow[] = history ?? [];
 
   return (
-    <PageContainer className="lg:pt-[18px]">
+    <>
       <div className="mx-auto w-full max-w-2xl">
-        <UserPageTabs />
-
         <h1 className="font-heading text-2xl font-bold sm:text-3xl">
           Get coins
         </h1>
@@ -251,6 +247,6 @@ export default function Coins() {
           priceDollars={selectedDollars}
         />
       ) : null}
-    </PageContainer>
+    </>
   );
 }

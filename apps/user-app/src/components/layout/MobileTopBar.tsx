@@ -1,15 +1,18 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Search, UserCircle, Home, Radio, TrendingUp, Heart, Compass } from "lucide-react";
+import { Compass, Heart, Home, Radio, UserCircle } from "lucide-react";
 
 import logoUrl from "@/assets/live-rush-white-logo-2.png";
+import { CoinIcon } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
+import { totalBalanceCents } from "@/lib/balance";
 import { NavBrushBg } from "./NavBrushBg";
 import { cn } from "@/lib/utils";
 
+// `/trending` was retired together with the desktop layout overhaul.
+// Four tabs left: For you / Live / Following / Discover.
 const tabs = [
   { to: "/", label: "For you", icon: Home, exact: true },
   { to: "/live", label: "Live", icon: Radio },
-  { to: "/trending", label: "Trending", icon: TrendingUp },
   { to: "/following", label: "Following", icon: Heart },
   { to: "/discover", label: "Discover", icon: Compass },
 ];
@@ -18,6 +21,7 @@ export function MobileTopBar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { user, profile } = useAuth();
+  const balanceDollars = totalBalanceCents(profile?.balance_cents) / 100;
 
   return (
     <header
@@ -70,14 +74,21 @@ export function MobileTopBar() {
           </ul>
         </nav>
 
-        <div className="flex flex-shrink-0 items-center gap-1">
-          <button
-            type="button"
-            aria-label="Search"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10"
-          >
-            <Search className="h-5 w-5" />
-          </button>
+        {/* Right cluster: bare balance link (signed-in only) + avatar.
+            Matches the desktop top nav — no pill, no + button, just
+            the coin glyph + amount. The whole thing is a Link to
+            /coins so a tap jumps to the top-up storefront. */}
+        <div className="flex flex-shrink-0 items-center gap-3">
+          {user && (
+            <Link
+              to="/coins"
+              aria-label={`Balance ${balanceDollars.toFixed(2)} — get coins`}
+              className="inline-flex items-center gap-1.5 font-heading text-base font-extrabold leading-none tabular-nums text-white outline-none transition-opacity hover:opacity-80"
+            >
+              <CoinIcon />
+              {balanceDollars.toFixed(2)}
+            </Link>
+          )}
           <Link
             to={user ? "/profile" : "/auth/sign-in"}
             aria-label={user ? "Profile" : "Sign in"}
@@ -87,7 +98,10 @@ export function MobileTopBar() {
               <img
                 src={profile.avatar_url}
                 alt=""
-                className="h-8 w-8 rounded-full object-cover ring-2 ring-white/40"
+                // Solid 2px white ring — matches the desktop top nav
+                // avatar. Was ring-white/40 (40% opacity) which read
+                // as a soft halo on the blue header.
+                className="h-8 w-8 rounded-full object-cover ring-2 ring-white"
               />
             ) : (
               <UserCircle className="h-6 w-6" />

@@ -2,14 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Outlet } from "react-router-dom";
 
-import { SideNav } from "./SideNav";
+import { DesktopTopNav } from "./DesktopTopNav";
 import { MobileTopBar } from "./MobileTopBar";
 import { EventMobileTopBar } from "./EventMobileTopBar";
 import { MobileFooter } from "./MobileFooter";
 import { cn } from "@/lib/utils";
 import bgUrl from "@/assets/live-rush-bg.jpg";
 
-const FEED_PATHS = new Set(["/live", "/trending"]);
+// `/trending` was removed alongside the desktop-layout overhaul —
+// /live is now the only snap-feed route.
+const FEED_PATHS = new Set(["/live"]);
 const BAR_HEIGHT = 56;
 const PULL_TAP_TOLERANCE = 18;
 
@@ -144,7 +146,6 @@ export function AppLayout() {
           backgroundRepeat: "no-repeat",
         }}
       />
-      <SideNav />
       <div className="relative flex min-w-0 flex-1 flex-col">
         {/* Non-event routes: standard mobile top bar above main */}
         {!isEventRoute && <MobileTopBar />}
@@ -157,6 +158,12 @@ export function AppLayout() {
         >
           {/* Event route: top bar is inside main so it scrolls with content */}
           {isEventRoute && <EventMobileTopBar style={topBarStyle} />}
+          {/* Desktop top nav — sticky inside main so it stays pinned
+              during scroll. Hidden under `lg`; mobile keeps the
+              MobileTopBar + MobileFooter pair. Rendered on every
+              route, event pages included — the event page's
+              fullscreen video lives below it, not on top of the bar. */}
+          <DesktopTopNav />
           <Outlet />
           <MobileFooter />
         </main>

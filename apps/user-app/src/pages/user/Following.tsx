@@ -43,7 +43,7 @@ export default function Following() {
   return (
     <PageContainer className="lg:pt-[18px]">
       {isLoading && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
@@ -54,7 +54,7 @@ export default function Following() {
       )}
 
       {!isLoading && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           {creators.map((c) => (
             <CreatorCard key={c.creator.id} data={c} />
           ))}

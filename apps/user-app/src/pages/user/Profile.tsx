@@ -1,18 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { Camera, LogOut, Wallet, Plus } from "lucide-react";
+import { Camera, KeyRound, LogOut, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { UserPageTabs } from "@/components/layout/UserPageTabs";
-import { CoinAmount } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { totalBalanceCents } from "@/lib/balance";
 import {
   uploadAvatar,
   updateDisplayName,
@@ -32,10 +28,11 @@ export default function Profile() {
     setNameDraft(profile?.display_name ?? "");
   }, [profile?.display_name]);
 
-  const balance = totalBalanceCents(profile?.balance_cents);
-  const fallbackHandle =
-    profile?.display_name ?? user?.email?.split("@")[0] ?? "you";
-  const initials = fallbackHandle.slice(0, 2).toUpperCase();
+  // `fallbackHandle` is still passed to uploadAvatar's success
+  // toast indirectly via the profile refresh — the avatar circle
+  // moved into the ProfileLayout sidebar so we no longer render it
+  // here, just keep the file upload trigger inside the "Profile
+  // photo" card.
 
   const avatarMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -83,80 +80,14 @@ export default function Profile() {
   const nameValid = trimmed.length >= 2 && trimmed.length <= 30;
 
   return (
-    <PageContainer className="lg:pt-[18px]">
-      <div className="mx-auto w-full max-w-2xl">
-        <UserPageTabs />
-        <h1 className="font-heading text-2xl font-bold sm:text-3xl">Profile</h1>
+    <div className="mx-auto w-full max-w-2xl">
+      <h1 className="font-heading text-2xl font-bold sm:text-3xl">Profile</h1>
         <p className="mt-1 text-sm text-muted-foreground sm:text-base">
           Manage how you appear on LiveRush.
         </p>
 
-        {/* Header card: avatar + name + email + balance */}
-        <div className="mt-6 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="group relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-full ring-2 ring-border/40"
-              aria-label="Change profile photo"
-            >
-              {profile?.avatar_url ? (
-                <img
-                  src={profile.avatar_url}
-                  alt={fallbackHandle}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-muted font-heading text-xl font-bold text-foreground">
-                  {initials}
-                </div>
-              )}
-              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                <Camera className="h-6 w-6 text-white" />
-              </div>
-            </button>
-
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-heading text-lg font-bold text-foreground">
-                {fallbackHandle}
-              </p>
-              <p className="mt-0.5 truncate text-sm text-muted-foreground">
-                {user?.email}
-              </p>
-            </div>
-          </div>
-
-          {/* Balance block — same visual as the Balance page header:
-              wallet icon + "Your balance" caption on top, big coin
-              + amount on the line below. Top up button is pulled
-              over to the right and vertically centred against the
-              whole block, the same way the SideNav's + button sits
-              next to its amount row. */}
-          <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl bg-muted/50 p-4">
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Wallet className="h-4 w-4" />
-                <span className="text-sm font-medium">Your balance</span>
-              </div>
-              <p className="mt-2 font-heading text-3xl font-bold tabular-nums text-foreground">
-                <CoinAmount cents={balance} />
-              </p>
-            </div>
-            <Button asChild size="lg" variant="accent">
-              {/* Top up navigates to the dedicated Get-coins
-                  storefront (IAP packs). Balance page is for ledger
-                  history + withdrawals; the in-app purchase entry
-                  point is separate so users land directly on the
-                  pack picker. */}
-              <Link to="/coins">
-                <Plus className="h-4 w-4" strokeWidth={3} /> Top up
-              </Link>
-            </Button>
-          </div>
-        </div>
-
         {/* Photo upload card */}
-        <div className="mt-5 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
+        <div className="mt-6 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
           <h2 className="font-heading text-base font-semibold">Profile photo</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             JPG or PNG, max 200 KB. Square images look best.
@@ -217,6 +148,61 @@ export default function Profile() {
           </div>
         </div>
 
+        {/* Account — sign-in email + connected accounts. The two
+            buttons are UI-only for now: no backend wiring exists
+            for password reset or Google account linking — they
+            fire a "coming soon" toast so the affordance is
+            testable without dead-clicks. */}
+        <div className="mt-5 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
+          <h2 className="font-heading text-base font-semibold">Account</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Sign-in email and connected accounts.
+          </p>
+
+          {/* Email row */}
+          <div className="mt-4 flex items-center gap-3 rounded-2xl bg-muted/50 p-4">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Mail className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Email
+              </p>
+              <p className="mt-0.5 truncate text-sm font-semibold text-foreground">
+                {user?.email}
+              </p>
+            </div>
+          </div>
+
+          {/* Sign-in options. `justify-start` so the icon + label
+              hug the left edge instead of centring inside a wide
+              w-full button — reads like a list row. */}
+          <div className="mt-4 space-y-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() =>
+                toast.info("Password reset is coming soon.")
+              }
+            >
+              <KeyRound className="h-4 w-4" />
+              Reset password
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() =>
+                toast.info("Google sign-in is coming soon.")
+              }
+            >
+              <GoogleIcon className="h-4 w-4" />
+              Connect Google
+            </Button>
+          </div>
+        </div>
+
         {/* Notifications card — global email opt-out + per-category
             opt-out for payouts/refunds. Both rows align on the left
             so the relationship reads as siblings; the payouts row
@@ -248,8 +234,7 @@ export default function Profile() {
             Sign out
           </Button>
         </div>
-      </div>
-    </PageContainer>
+    </div>
   );
 }
 
@@ -448,5 +433,38 @@ function PayoutsNotificationsToggle() {
         />
       </button>
     </div>
+  );
+}
+
+/**
+ * Brand-coloured Google "G" mark. Lucide deliberately ships no
+ * brand icons, so we inline the official multi-tone SVG. Sized
+ * via `h-* w-*` from the parent like a Lucide icon.
+ */
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 48 48"
+      aria-hidden
+      focusable="false"
+    >
+      <path
+        fill="#FFC107"
+        d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
+      />
+      <path
+        fill="#FF3D00"
+        d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"
+      />
+      <path
+        fill="#4CAF50"
+        d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0124 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
+      />
+      <path
+        fill="#1976D2"
+        d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
+      />
+    </svg>
   );
 }

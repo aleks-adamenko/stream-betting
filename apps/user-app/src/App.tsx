@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "sonner";
 
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ProfileLayout } from "@/components/layout/ProfileLayout";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Home from "@/pages/user/Home";
 import Feed from "@/pages/user/Feed";
@@ -47,53 +48,31 @@ const App = () => (
           <Route element={<AppLayout />}>
             <Route path="/" element={<Home />} />
             <Route path="/live" element={<Home />} />
-            <Route path="/trending" element={<Home />} />
             <Route path="/following" element={<Following />} />
             <Route path="/discover" element={<Feed />} />
             <Route path="/event/:id" element={<EventDetails />} />
             <Route path="/company" element={<Company />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
+            {/* Profile-cluster pages share a 2-column ProfileLayout:
+                avatar + nav in the left column, the chosen page
+                rendered in the right column via <Outlet />. The
+                ProtectedRoute gate wraps the whole layout so the
+                left-column avatar / nav are never visible to
+                signed-out users. */}
             <Route
-              path="/my-bets"
               element={
                 <ProtectedRoute>
-                  <MyBets />
+                  <ProfileLayout />
                 </ProtectedRoute>
               }
-            />
-            <Route
-              path="/profile"
-              element={
-                <ProtectedRoute>
-                  <Profile />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/notifications"
-              element={
-                <ProtectedRoute>
-                  <Notifications />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/coins"
-              element={
-                <ProtectedRoute>
-                  <Coins />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/rewards"
-              element={
-                <ProtectedRoute>
-                  <Rewards />
-                </ProtectedRoute>
-              }
-            />
+            >
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/my-bets" element={<MyBets />} />
+              <Route path="/notifications" element={<Notifications />} />
+              <Route path="/rewards" element={<Rewards />} />
+              <Route path="/coins" element={<Coins />} />
+            </Route>
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

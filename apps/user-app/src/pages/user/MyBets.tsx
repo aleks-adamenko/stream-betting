@@ -2,8 +2,6 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Trophy, Wallet, Clock, X, CheckCircle2 } from "lucide-react";
 
-import { PageContainer } from "@/components/layout/PageContainer";
-import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { CoinAmount, CoinIcon } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMyBets } from "@/hooks/useMyBets";
@@ -47,10 +45,8 @@ export default function MyBets() {
     bets?.reduce((sum, b) => sum + b.amount_cents, 0) ?? 0;
 
   return (
-    <PageContainer className="lg:pt-[18px]">
-      <div className="mx-auto w-full max-w-2xl">
-        <UserPageTabs />
-        <h1 className="font-heading text-2xl font-bold sm:text-3xl">My bets</h1>
+    <div className="mx-auto w-full max-w-2xl">
+      <h1 className="font-heading text-2xl font-bold sm:text-3xl">My bets</h1>
         <p className="mt-1 text-sm text-muted-foreground sm:text-base">
           Track your stakes, wins, and current balance.
         </p>
@@ -201,8 +197,7 @@ export default function MyBets() {
             })}
           </ul>
         )}
-      </div>
-    </PageContainer>
+    </div>
   );
 }
 

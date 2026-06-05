@@ -16,8 +16,6 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { CoinIcon } from "@/components/ui/CoinAmount";
 import {
   useNotifications,
@@ -181,10 +179,8 @@ export default function Notifications() {
   };
 
   return (
-    <PageContainer className="lg:pt-[18px]">
-      <div className="mx-auto w-full max-w-2xl">
-        <UserPageTabs />
-        <div className="flex items-end justify-between gap-3">
+    <div className="mx-auto w-full max-w-2xl">
+      <div className="flex items-end justify-between gap-3">
           <div>
             <h1 className="font-heading text-2xl font-bold sm:text-3xl">
               Notifications
@@ -280,7 +276,6 @@ export default function Notifications() {
             );
           })}
         </div>
-      </div>
-    </PageContainer>
+    </div>
   );
 }

@@ -37,22 +37,20 @@ const compactFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
 });
 
-type FeedTab = "live" | "trending";
-const PATH_TO_FEED: Record<string, FeedTab> = {
-  "/live": "live",
-  "/trending": "trending",
-};
+// `/trending` was retired together with the desktop layout overhaul —
+// `/live` is now the only path that opens the snap-feed view. Kept as
+// a const-set rather than a hardcoded equality check so re-adding a
+// snap-feed route in the future is a one-line tweak.
+const FEED_ROUTES = new Set<string>(["/live"]);
 
 export default function Home() {
   const { pathname } = useLocation();
   const { data: allEvents, isLoading } = useEvents();
-  const feedTab = PATH_TO_FEED[pathname];
+  const isFeedRoute = FEED_ROUTES.has(pathname);
 
-  // /live and /trending still use the original TikTok-style snap feed.
-  if (feedTab) {
-    return (
-      <FeedView events={allEvents} isLoading={isLoading} tab={feedTab} />
-    );
+  // /live uses the TikTok-style snap feed.
+  if (isFeedRoute) {
+    return <FeedView events={allEvents} isLoading={isLoading} />;
   }
 
   return (
@@ -207,7 +205,7 @@ function HomeSkeleton() {
         <div className="aspect-video animate-pulse rounded-2xl bg-muted" />
         <div className="h-72 animate-pulse rounded-2xl bg-muted" />
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
@@ -249,7 +247,7 @@ function Section({
 
 function EventGrid({ events }: { events: StreamEvent[] }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
       {events.map((event) => (
         <EventCard key={event.id} event={event} />
       ))}
@@ -466,22 +464,18 @@ function FeaturedPlayerInner({ event }: { event: StreamEvent }) {
 function FeedView({
   events,
   isLoading,
-  tab,
 }: {
   events: StreamEvent[] | undefined;
   isLoading: boolean;
-  tab: FeedTab;
 }) {
+  // After the layout overhaul `/live` is the only snap-feed route, so
+  // FeedView always shows live events. The old `tab` prop + trending
+  // branch (sorted by viewers+pool) was retired together with the
+  // /trending route.
   const filtered = useMemo(() => {
     if (!events) return [];
-    if (tab === "live") return events.filter((e) => e.status === "live");
-    return events
-      .filter((e) => e.status !== "finished")
-      .sort(
-        (a, b) =>
-          b.viewersCount + b.totalPool - (a.viewersCount + a.totalPool),
-      );
-  }, [events, tab]);
+    return events.filter((e) => e.status === "live");
+  }, [events]);
 
   return (
     <div className="mx-auto w-full max-w-2xl px-3 py-4 sm:px-4 sm:py-6">

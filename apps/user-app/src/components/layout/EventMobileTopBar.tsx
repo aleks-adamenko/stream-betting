@@ -1,8 +1,7 @@
 import type { CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, UserCircle } from "lucide-react";
+import { ArrowLeft, UserCircle } from "lucide-react";
 
-import logoUrl from "@/assets/live-rush-logo-2.png";
 import { CoinIcon } from "@/components/ui/CoinAmount";
 import { useAuth } from "@/contexts/AuthContext";
 import { totalBalanceCents } from "@/lib/balance";
@@ -11,6 +10,18 @@ interface EventMobileTopBarProps {
   style?: CSSProperties;
 }
 
+/**
+ * Mobile event-page top bar. Matches the visual treatment of the
+ * regular MobileTopBar (blue gradient, white text, bare balance
+ * link + ringed avatar) but drops the logo + nav-tab strip — the
+ * event page doesn't need feed navigation. The left slot is the
+ * back-arrow button so the viewer can return to wherever they came
+ * from (Home, Feed, Following, Discover) with one tap.
+ *
+ * Rendered INSIDE the scrolling main on event routes; the parent
+ * AppLayout passes a `style` prop that drives the pull-to-reveal
+ * gesture (translateY + margin-bottom + animated transition).
+ */
 export function EventMobileTopBar({ style }: EventMobileTopBarProps) {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
@@ -18,64 +29,58 @@ export function EventMobileTopBar({ style }: EventMobileTopBarProps) {
 
   return (
     <header
-      className="z-30 flex-shrink-0 bg-background lg:hidden"
+      className="z-30 flex-shrink-0 bg-gradient-to-r from-[#1973FF] to-[#5048FF] text-white lg:hidden"
       style={{ paddingTop: "env(safe-area-inset-top)", ...style }}
     >
-      <div className="relative flex h-14 items-center px-2.5">
-        {/* Back */}
+      <div className="flex h-14 items-center gap-2 pl-3 pr-2">
+        {/* Back arrow — replaces the LiveRush logo slot from the
+            standard MobileTopBar. Same h-10 w-10 hit-box, same
+            white-on-blue hover treatment as the avatar button on
+            the right so the two ends of the bar feel symmetric. */}
         <button
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Back"
-          className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-md ring-1 ring-primary/15 transition-transform hover:scale-105"
+          className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-white hover:bg-white/10"
         >
-          <ArrowLeft className="h-5 w-5 text-primary" strokeWidth={2.5} />
+          <ArrowLeft className="h-5 w-5" strokeWidth={2.5} />
         </button>
 
-        {/* Centered logo */}
-        <Link
-          to="/"
-          aria-label="LiveRush home"
-          className="absolute left-1/2 inline-flex -translate-x-1/2 items-center"
-        >
-          <img src={logoUrl} alt="LiveRush" className="h-6 w-auto" />
-        </Link>
+        {/* Spacer — flex-1 pushes the right cluster to the edge.
+            The standard MobileTopBar uses this slot for the nav-tab
+            strip; on the event page we leave it empty since the
+            user is already deep-linked to one event. */}
+        <div className="min-w-0 flex-1" />
 
-        {/* Right cluster: balance + avatar */}
-        <div className="ml-auto flex items-center gap-1.5">
+        {/* Right cluster: bare balance link (signed-in only) +
+            avatar. Identical to the regular MobileTopBar. Tapping
+            the balance jumps to /coins for top-up. */}
+        <div className="flex flex-shrink-0 items-center gap-3">
           {user && (
-            <div className="flex items-center gap-2 rounded-full bg-white py-1 pl-1 pr-3 shadow-md ring-1 ring-primary/10">
-              <Link
-                to="/coins"
-                aria-label="Add funds"
-                className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[hsl(227_47%_21%)] shadow-md ring-4 ring-[#FED448]/40 transition-transform hover:scale-105"
-                style={{ backgroundImage: "linear-gradient(90deg,#FFDD49,#FFBE3B)" }}
-              >
-                <Plus className="h-3.5 w-3.5" strokeWidth={3} />
-              </Link>
-              <span className="inline-flex items-center gap-1 font-heading text-sm font-bold leading-none tabular-nums text-foreground">
-                <CoinIcon />
-                {balanceDollars.toFixed(2)}
-              </span>
-            </div>
+            <Link
+              to="/coins"
+              aria-label={`Balance ${balanceDollars.toFixed(2)} — get coins`}
+              className="inline-flex items-center gap-1.5 font-heading text-base font-extrabold leading-none tabular-nums text-white outline-none transition-opacity hover:opacity-80"
+            >
+              <CoinIcon />
+              {balanceDollars.toFixed(2)}
+            </Link>
           )}
-
           <Link
             to={user ? "/profile" : "/auth/sign-in"}
             aria-label={user ? "Profile" : "Sign in"}
-            className="relative inline-flex h-10 w-10 flex-shrink-0 items-center justify-center"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10"
           >
             {user && profile?.avatar_url ? (
-              <>
-                <img
-                  src={profile.avatar_url}
-                  alt=""
-                  className="h-10 w-10 rounded-full object-cover ring-2 ring-white shadow-md"
-                />
-                <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-success" />
-              </>
+              <img
+                src={profile.avatar_url}
+                alt=""
+                // Solid 2px white ring — matches the MobileTopBar
+                // and DesktopTopNav avatar treatment.
+                className="h-8 w-8 rounded-full object-cover ring-2 ring-white"
+              />
             ) : (
-              <UserCircle className="h-7 w-7 text-primary" />
+              <UserCircle className="h-6 w-6" />
             )}
           </Link>
         </div>

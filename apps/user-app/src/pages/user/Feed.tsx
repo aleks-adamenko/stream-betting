@@ -24,7 +24,7 @@ export default function Feed() {
       </div>
 
       {isLoading && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
@@ -42,7 +42,7 @@ export default function Feed() {
       )}
 
       {!isLoading && visible.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {visible.map((event) => (
             <EventCard key={event.id} event={event} />
           ))}

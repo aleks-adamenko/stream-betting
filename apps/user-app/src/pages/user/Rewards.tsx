@@ -2,8 +2,6 @@ import { useState, type ComponentType, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { CoinIcon } from "@/components/ui/CoinAmount";
-import { PageContainer } from "@/components/layout/PageContainer";
-import { UserPageTabs } from "@/components/layout/UserPageTabs";
 import { cn } from "@/lib/utils";
 // Vite resolves `?url` to a public URL for the bundled SVG. The
 // reward glyph (`rs-icon.svg`) is the visual mark for the *second*
@@ -232,10 +230,8 @@ export default function Rewards() {
   ).reduce((sum, a) => sum + a.rewardCents, 0);
 
   return (
-    <PageContainer className="lg:pt-[18px]">
-      <div className="mx-auto w-full max-w-2xl">
-        <UserPageTabs />
-        <div className="flex items-end justify-between gap-3">
+    <div className="mx-auto w-full max-w-2xl">
+      <div className="flex items-end justify-between gap-3">
           <div>
             <h1 className="font-heading text-2xl font-bold sm:text-3xl">
               Rewards
@@ -261,8 +257,7 @@ export default function Rewards() {
             />
           ))}
         </ul>
-      </div>
-    </PageContainer>
+    </div>
   );
 }
 

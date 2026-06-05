@@ -414,14 +414,16 @@ export default function EventDetails() {
         </div>
 
         {/* Right-side / bottom panel.
-            Desktop: position: sticky at top:18px (matches the
-            PageContainer's lg:pt-[18px], so the aside hugs its
-            natural position and stays put as the centre column
-            scrolls). Height = viewport − 18px top − 18px bottom,
-            giving the chat card the same breathing room from the
-            screen edge at the bottom as the betting panel has at
-            the top. Only the centre column scrolls on desktop. */}
-        <aside className="flex flex-col gap-4 lg:sticky lg:top-[18px] lg:h-[calc(100dvh-36px)]">
+            Desktop: position: sticky BELOW the sticky DesktopTopNav
+            (h-12 = 48px). top:66px = 48px topnav + 18px gap, so the
+            aside hugs its natural position from PageContainer's
+            lg:pt-[18px] and stays put under the bar as the centre
+            column scrolls. Height = viewport − 48px topnav − 18px
+            top − 18px bottom = 100dvh − 84px, giving the chat card
+            the same breathing room from the screen edge at the
+            bottom as the betting panel has at the top. Only the
+            centre column scrolls on desktop. */}
+        <aside className="flex flex-col gap-4 lg:sticky lg:top-[66px] lg:h-[calc(100dvh-84px)]">
           <div ref={betPanelRef} className="order-1 scroll-mt-16 lg:order-2">
             {isLive ? (
               <BetPanel event={event} />
