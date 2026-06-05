@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 
+import { BrushButton } from "@/components/ui/BrushButton";
 import { Button } from "@/components/ui/button";
 import { CoinAmount, CoinIcon } from "@/components/ui/CoinAmount";
 import { LiveBadge } from "@/components/feed/LiveBadge";
@@ -378,14 +379,16 @@ export default function EventDetails() {
                 behind it. */}
             {isLive && !isFullscreen && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-end px-4 pb-4 lg:hidden">
-                <Button
-                  type="button"
+                {/* Mobile bet CTA — brushed yellow accent, matches
+                    the BetPanel and FullscreenBetOverlay buttons. */}
+                <BrushButton
                   variant="accent"
+                  size="default"
                   onClick={handleHeaderBet}
-                  className="pointer-events-auto"
+                  className="pointer-events-auto px-6"
                 >
                   {user ? "Place a bet" : "Sign in to bet"}
-                </Button>
+                </BrushButton>
               </div>
             )}
 
@@ -1018,18 +1021,19 @@ function FullscreenBetOverlay({
                     : "Shown after minimums clear"}
                 </p>
               </div>
-              <Button
-                type="button"
+              <BrushButton
                 variant="accent"
+                size="default"
                 onClick={handlePlace}
                 disabled={!canPlace}
+                className="px-6"
               >
                 {submitting
                   ? "Placing…"
                   : stakeExceeds
                     ? "Insufficient"
                     : "Place a bet"}
-              </Button>
+              </BrushButton>
             </div>
           </div>
         </div>
@@ -1039,14 +1043,14 @@ function FullscreenBetOverlay({
         // bottom-centre clear for the mute button and the rest of
         // the frame unobstructed for the stream.
         <div className="pointer-events-none absolute bottom-4 right-4">
-          <Button
-            type="button"
+          <BrushButton
             variant="accent"
+            size="default"
             onClick={handlePlace}
-            className="pointer-events-auto"
+            className="pointer-events-auto px-6"
           >
             Sign in to bet
-          </Button>
+          </BrushButton>
         </div>
       )}
     </div>
@@ -1425,10 +1429,12 @@ function BetPanel({ event }: { event: StreamEvent }) {
             </p>
           )}
 
-          <Button
-            onClick={handlePlaceBet}
+          {/* Desktop BetPanel place-bet CTA — brush + yellow accent
+              gradient, matches the mobile floater + fullscreen
+              overlay versions. */}
+          <BrushButton
             variant="accent"
-            size="lg"
+            onClick={handlePlaceBet}
             className="mt-4 w-full"
             disabled={!canPlace && !!user}
           >
@@ -1441,7 +1447,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
               : stakeExceedsBalance
                 ? "Insufficient balance"
                 : "Place bet"}
-          </Button>
+          </BrushButton>
           <p className="mt-2 text-center text-[11px] text-muted-foreground">
             Virtual balance only. Bets settle once the round ends.
           </p>
@@ -1672,20 +1678,31 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
   return (
     <div className="space-y-2">
       {showButton && (
-        <Button
-          onClick={onClick}
-          size="lg"
-          variant={isSubscribed ? "secondary" : "default"}
-          disabled={isPending || isSubscribedLoading}
-          className="w-full gap-2"
-        >
-          <Bell className="h-4 w-4" />
-          {!user
-            ? "Notify me when live"
-            : isSubscribed
-              ? "Subscribed ✓"
-              : "Notify me when live"}
-        </Button>
+        // Subscribed state keeps the rectangular secondary Button to
+        // signal a passive "already done" affordance; the primary
+        // "Notify me when live" CTA gets the brushed blue gradient.
+        isSubscribed ? (
+          <Button
+            onClick={onClick}
+            size="lg"
+            variant="secondary"
+            disabled={isPending || isSubscribedLoading}
+            className="w-full gap-2"
+          >
+            <Bell className="h-4 w-4" />
+            Subscribed ✓
+          </Button>
+        ) : (
+          <BrushButton
+            variant="primary"
+            onClick={onClick}
+            disabled={isPending || isSubscribedLoading}
+            className="w-full gap-2"
+          >
+            <Bell className="h-4 w-4" />
+            Notify me when live
+          </BrushButton>
+        )
       )}
       {count > 0 && (
         <p className="text-center text-xs text-muted-foreground">
