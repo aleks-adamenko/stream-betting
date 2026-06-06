@@ -1,13 +1,13 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   BadgeCheck,
   Banknote,
+  Camera,
   Clock,
   Instagram,
   Music2,
-  Pencil,
   Twitter,
   Youtube,
 } from "lucide-react";
@@ -34,8 +34,16 @@ import { compactNumber } from "@/lib/balance";
  * like on the user-app side, plus their core stats: handle, verified
  * status, follower count, default commission percentage. The
  * onboarding wizard at /onboarding still owns initial profile setup;
- * "Edit profile" is a stub for the eventual in-app edit flow.
+ * the Profile-photo card below is the only inline edit affordance
+ * for now — the rest of the bio / socials / handle edit flow stays
+ * on the eventual settings page (TBD).
  */
+
+// Avatar upload constraints — mirror the user-app's
+// `AVATAR_MAX_BYTES` / `AVATAR_ALLOWED_MIME` so the studio + viewer
+// sides reject the same payloads consistently.
+const AVATAR_MAX_BYTES = 200 * 1024; // 200 KB
+const AVATAR_ALLOWED_MIME = ["image/jpeg", "image/png"];
 
 type SocialLinks = {
   instagram?: string;
@@ -65,10 +73,11 @@ function useCreatorFollowerCount(creatorId: string | undefined) {
 }
 
 export default function Profile() {
-  const { creator } = useAuth();
+  const { creator, refreshCreator } = useAuth();
   const { data: followers } = useCreatorFollowerCount(creator?.id);
   const { data: balanceCents = 0 } = useStreamerBalance();
   const [payoutOpen, setPayoutOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // social_links is a JSONB column on creator_profiles — narrow it
   // here so per-network lookups stay typed.
   const socials = (creator?.social_links ?? {}) as SocialLinks;
@@ -78,10 +87,62 @@ export default function Profile() {
   const canRequestPayout = coins >= MIN_PAYOUT_COINS;
   const coinsBelowMin = Math.max(0, MIN_PAYOUT_COINS - coins);
 
-  const onEditProfile = () =>
-    toast.info("Edit profile coming soon", {
-      description: "For now, the onboarding wizard covers setup changes.",
-    });
+  // Avatar upload flow — mirrors the user-app's Profile page: upload
+  // to the `creator-assets` storage bucket, then call
+  // update_creator_profile to persist the new public URL on
+  // creator_profiles.avatar_url. We pass the other current fields
+  // through unchanged because the RPC requires all five.
+  const avatarMutation = useMutation({
+    mutationFn: async (file: File) => {
+      if (!creator) throw new Error("Creator profile required");
+      if (!AVATAR_ALLOWED_MIME.includes(file.type)) {
+        throw new Error("Use a JPG or PNG file.");
+      }
+      if (file.size > AVATAR_MAX_BYTES) {
+        throw new Error(
+          `File is too large (${(file.size / 1024).toFixed(0)} KB). Max 200 KB.`,
+        );
+      }
+      const ext = file.type === "image/png" ? "png" : "jpg";
+      const path = `${creator.id}/avatar-${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("creator-assets")
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: true,
+          contentType: file.type,
+        });
+      if (uploadErr) throw uploadErr;
+      const { data } = supabase.storage
+        .from("creator-assets")
+        .getPublicUrl(path);
+      const newUrl = data.publicUrl;
+
+      // update_creator_profile requires all five fields. Reuse the
+      // current values for everything except avatar_url.
+      const { error: rpcErr } = await supabase.rpc("update_creator_profile", {
+        p_handle: creator.handle,
+        p_display_name: creator.display_name,
+        p_avatar_url: newUrl,
+        p_bio: creator.bio ?? null,
+        p_social_links: (creator.social_links ?? {}) as never,
+      });
+      if (rpcErr) throw rpcErr;
+      return newUrl;
+    },
+    onSuccess: async () => {
+      await refreshCreator();
+      toast.success("Profile photo updated");
+    },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : "Upload failed";
+      toast.error(message);
+    },
+  });
+
+  const handleFile = (file: File) => {
+    avatarMutation.mutate(file);
+  };
 
   return (
     // Matches the user-app's Profile / Balance page width — content
@@ -145,15 +206,39 @@ export default function Profile() {
             )}
           </div>
 
+        </div>
+      </section>
+
+      {/* Profile photo — same card shape as the user-app's Profile
+          page so the avatar-edit affordance reads identically across
+          both apps. Wired to the `creator-assets` bucket + the
+          update_creator_profile RPC; refreshCreator() picks up the
+          new public URL afterwards. */}
+      <section className="rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
+        <h2 className="font-heading text-base font-semibold">Profile photo</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          JPG or PNG, max 200 KB. Square images look best.
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+            e.target.value = "";
+          }}
+        />
+        <div className="mt-4 flex flex-wrap gap-2">
           <Button
             type="button"
             variant="secondary"
-            size="default"
-            onClick={onEditProfile}
-            className="flex-shrink-0"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={avatarMutation.isPending}
           >
-            <Pencil className="h-4 w-4" />
-            Edit profile
+            <Camera className="h-4 w-4" />
+            {avatarMutation.isPending ? "Uploading…" : "Change photo"}
           </Button>
         </div>
       </section>
