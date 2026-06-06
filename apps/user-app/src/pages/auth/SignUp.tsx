@@ -48,6 +48,12 @@ export default function SignUp() {
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        // `signup_origin=user_app` lets the handle_new_user trigger
+        // mark this account as a viewer-first signup so the 100-coin
+        // starter still lands on email confirmation. (Default
+        // anyway — being explicit keeps the trigger's branch read
+        // clearly at the call site.)
+        data: { signup_origin: "user_app" },
       },
     });
     setSubmitting(false);

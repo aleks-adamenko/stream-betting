@@ -2,12 +2,10 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  CheckCircle2,
   Copy,
   Loader2,
   ShieldX,
   UserCircle2,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,6 +37,14 @@ type UserRow = {
   avatar_url: string | null;
   balance_cents: number;
   email_confirmed_at: string | null;
+  /** `studio` = signed up via studio first (creator-applicant);
+   *  `user_app` = signed up via the viewer app. Drives which
+   *  column the email-pending / verified status badge lives in. */
+  signup_origin: "studio" | "user_app" | null;
+  /** Stamp of the user's first user-app visit (where activate_viewer
+   *  awards the 100-coin starter). Null = they've never used the
+   *  viewer side; the Viewer column shows "—" in that case. */
+  viewer_activated_at: string | null;
   creator_status: "pending" | "verified" | "rejected" | null;
   creator_rejected_note: string | null;
   creator_moderated_at: string | null;
@@ -227,6 +233,8 @@ function UserRowItem({
   });
 
   const emailVerified = user.email_confirmed_at != null;
+  const viewerActivated = user.viewer_activated_at != null;
+  const isStudioFirst = user.signup_origin === "studio";
   const isCreator = user.creator_status != null;
   const isPendingCreator = user.creator_status === "pending";
   const isRejectedCreator = user.creator_status === "rejected";
@@ -276,48 +284,68 @@ function UserRowItem({
           <CoinAmount cents={user.balance_cents ?? 0} className="justify-end" />
         </td>
 
-        {/* Viewer column — every user is a viewer; status tracks
-            email confirmation. Verified green vs amber pending. */}
+        {/* Viewer column — only filled in once the user has actually
+            visited the user-app (viewer_activated_at stamped). Studio-
+            first signups read as "—" until they sign into the viewer
+            side. Within an activated row, email_confirmed_at decides
+            between Email pending and Verified. */}
         <td className="px-4 py-2">
-          <StatusBadge
-            tone={emailVerified ? "success" : "warning"}
-            label={emailVerified ? "Verified" : "Email pending"}
-          />
+          {!viewerActivated ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <StatusBadge
+              tone={emailVerified ? "success" : "warning"}
+              label={emailVerified ? "Verified" : "Email pending"}
+            />
+          )}
         </td>
 
-        {/* Creator column — `—` when not a creator. Otherwise:
-            email-not-confirmed → Email pending. Status pending →
-            Pending review + Approve/Reject inline. Status verified
-            → Verified + moderated date. Status rejected → Rejected
-            (note shows in colspan strip below). */}
+        {/* Creator column — branches on three cases:
+              1. Has creator_profile → existing pipeline (Email
+                 pending → Pending review → Verified | Rejected).
+              2. Studio-first signup without creator_profile yet →
+                 surface their email confirmation status HERE since
+                 the Viewer column reads "—" for these users.
+              3. Otherwise (user_app signup, no creator_profile) →
+                 plain "—". */}
         <td className="px-4 py-2">
           {!isCreator ? (
-            <span className="text-muted-foreground">—</span>
+            isStudioFirst ? (
+              <StatusBadge
+                tone={emailVerified ? "success" : "warning"}
+                label={emailVerified ? "Verified" : "Email pending"}
+              />
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )
           ) : !emailVerified ? (
             <StatusBadge tone="warning" label="Email pending" />
           ) : isPendingCreator ? (
-            <div className="flex flex-wrap items-center gap-2">
+            // Single row layout: status badge + plain-text Approve /
+            // Reject buttons (no rectangular container per the
+            // refreshed UI ask). Spinner replaces the Approve label
+            // while the mutation flies.
+            <div className="flex items-center gap-3 whitespace-nowrap">
               <StatusBadge tone="warning" label="Pending review" />
-              <Button
-                size="sm"
+              <button
+                type="button"
                 onClick={() => approveMutation.mutate()}
                 disabled={approveMutation.isPending}
+                className="text-xs font-semibold text-primary transition-opacity hover:underline disabled:opacity-50"
               >
                 {approveMutation.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="inline h-3 w-3 animate-spin" />
                 ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  "Approve"
                 )}
-                Approve
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
+              </button>
+              <button
+                type="button"
                 onClick={() => setRejectOpen((v) => !v)}
+                className="text-xs font-semibold text-destructive transition-opacity hover:underline"
               >
-                <XCircle className="h-3.5 w-3.5" />
                 Reject
-              </Button>
+              </button>
             </div>
           ) : user.creator_status === "verified" ? (
             <div className="flex flex-col gap-0.5">

@@ -53,6 +53,12 @@ export default function SignUp() {
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        // `signup_origin=studio` lands as raw_user_meta_data on the
+        // new auth.users row. The handle_new_user trigger reads it
+        // to skip the 100-coin viewer starter — studio-first users
+        // get those coins later via activate_viewer() on their
+        // first user-app login.
+        data: { signup_origin: "studio" },
       },
     });
     setSubmitting(false);

@@ -41,7 +41,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
       return;
     }
-    setProfile(data ?? null);
+
+    // Studio-first users land here on their first user-app visit
+    // with `viewer_activated_at = null`. activate_viewer() stamps it
+    // and credits the 100-coin starter. Idempotent: viewers who
+    // signed up via the user-app already got activated when their
+    // email confirmed, so the RPC short-circuits for them.
+    let profileRow = data ?? null;
+    if (profileRow && profileRow.viewer_activated_at == null) {
+      const { data: activated, error: activateErr } =
+        // The RPC's not in the generated types yet — narrow via
+        // `as never` until the operator regenerates after the
+        // 20260607_000002 migration runs.
+        await supabase.rpc("activate_viewer" as never);
+      if (activateErr) {
+        console.warn("activate_viewer failed", activateErr);
+      } else if (activated) {
+        profileRow = activated as typeof profileRow;
+      }
+    }
+
+    setProfile(profileRow);
   }, []);
 
   useEffect(() => {
