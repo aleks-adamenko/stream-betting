@@ -5,7 +5,12 @@ export type EventStatus =
   | "settled"
   | "finished"
   | "cancelled";
-export type RoundFormat = "time" | "event";
+/** `event` = single-round event, settled once at the end.
+ *  `multi` = multi-round event; the streamer controls round
+ *  advancement via Next/Final-round actions. The legacy `time`
+ *  value (timer-based rounds) was retired together with the
+ *  multi-round rework and now reads as `multi` after migration. */
+export type RoundFormat = "event" | "multi";
 
 export interface Influencer {
   id: string;
@@ -42,7 +47,16 @@ export interface StreamEvent {
   category: string;
   rules: string;
   roundFormat: RoundFormat;
-  roundDurationSec?: number;
+  /** Current round number (1-indexed). Always 1 for single-round
+   *  events; advances when the streamer clicks "Next round" on a
+   *  multi-round event. Drives the round pill in the user-app
+   *  video overlay + studio LiveStream toolbar. */
+  currentRound: number;
+  /** True once the streamer has clicked "Final round" on a
+   *  multi-round event: betting is closed for good, no more
+   *  rounds will be advanced, only End stream remains. Always
+   *  false for single-round events. */
+  isFinalRound: boolean;
   scheduledAt: string;
   startedAt?: string;
   /** Hard betting cutoff stamped server-side by `start_event` when

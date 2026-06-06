@@ -38,7 +38,8 @@ const EVENT_SELECT = `
   category,
   rules,
   round_format,
-  round_duration_sec,
+  current_round,
+  is_final_round,
   status,
   scheduled_at,
   started_at,
@@ -124,8 +125,12 @@ function mapEvent(row: EventRow): StreamEvent {
     playbackUrl: row.playback_url ?? null,
     category: row.category,
     rules: row.rules ?? "",
-    roundFormat: row.round_format,
-    roundDurationSec: row.round_duration_sec ?? undefined,
+    // Legacy 'time' rows were migrated to 'multi' but defensively
+    // coerce here so a not-yet-migrated env still maps cleanly to
+    // one of the new TS values.
+    roundFormat: row.round_format === "event" ? "event" : "multi",
+    currentRound: row.current_round ?? 1,
+    isFinalRound: Boolean(row.is_final_round),
     // The DB enum now includes 'draft' + 'cancelled' but both are filtered
     // out at the query level before reaching this mapper.
     status: row.status as EventStatus,

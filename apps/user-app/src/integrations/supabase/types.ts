@@ -39,8 +39,15 @@ export interface Database {
           video_url: string | null;
           category: string;
           rules: string | null;
-          round_format: "time" | "event";
-          round_duration_sec: number | null;
+          round_format: "event" | "multi";
+          /** Current round number (1-indexed). Defaults to 1 for
+           *  single-round events; advance_round bumps it for
+           *  multi-round events. */
+          current_round: number;
+          /** Set to true when the streamer clicks "Final round" on a
+           *  multi-round event. No more rounds can be advanced after
+           *  this; only End stream remains. */
+          is_final_round: boolean;
           status:
             | "draft"
             | "scheduled"
@@ -731,8 +738,7 @@ export interface Database {
           p_description: string | null;
           p_rules: string | null;
           p_category: string;
-          p_round_format: "time" | "event";
-          p_round_duration_sec: number | null;
+          p_round_format: "event" | "multi";
           p_scheduled_at: string;
           p_video_url: string | null;
           // Phase 6 betting/stream metadata — every new param has a server-
@@ -770,8 +776,7 @@ export interface Database {
           p_description: string | null;
           p_rules: string | null;
           p_category: string;
-          p_round_format: "time" | "event";
-          p_round_duration_sec: number | null;
+          p_round_format: "event" | "multi";
           p_scheduled_at: string;
           p_video_url: string | null;
           p_void_conditions?: string | null;

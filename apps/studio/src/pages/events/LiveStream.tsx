@@ -98,8 +98,14 @@ export default function LiveStream() {
 
   // Declare-winner modal — opens after betting_closes_at. Stores the
   // outcome ids the creator has checked; supports multi-select for
-  // dead heat scenarios.
+  // dead heat scenarios. `declareIntent` decides what runs AFTER
+  // the winner is declared:
+  //   - "end" (single-round default): declare + finish
+  //   - "next": declare + advance_round (multi-round only)
+  //   - "final": declare + mark_final_round (multi-round only)
+  type DeclareIntent = "end" | "next" | "final";
   const [declareOpen, setDeclareOpen] = useState(false);
+  const [declareIntent, setDeclareIntent] = useState<DeclareIntent>("end");
   const [selectedWinners, setSelectedWinners] = useState<Set<string>>(
     new Set(),
   );
@@ -166,6 +172,7 @@ export default function LiveStream() {
         .select(
           `id, title, status, scheduled_at, creator_id, started_at,
            betting_opens_at, betting_closes_at, winning_outcome_ids,
+           round_format, current_round, is_final_round,
            outcomes:event_outcomes!event_outcomes_event_id_fkey ( id, label, sort_order )`,
         )
         .eq("id", eventId!)
@@ -286,9 +293,10 @@ export default function LiveStream() {
     },
   });
 
-  // declare_winner: flips status live → pending_moderation and stamps
-  // winning_outcome_ids. A LiveRush moderator then runs settle_event
-  // from the SQL Editor (Phase 1 MVP — no admin UI yet).
+  // declare_winner: stamps winning_outcome_ids on the event. For
+  // single-round events this also flips status → pending_moderation.
+  // For multi-round events the status stays 'live' and the caller
+  // immediately follows up with advance_round or mark_final_round.
   const declareWinnerMutation = useMutation({
     mutationFn: async (outcomeIds: string[]) => {
       if (!eventId) throw new Error("Missing event id");
@@ -302,6 +310,44 @@ export default function LiveStream() {
       void queryClient.invalidateQueries({
         queryKey: ["studio", "events", creator?.id],
       });
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "event", eventId],
+      });
+    },
+  });
+
+  // advance_round / mark_final_round: multi-round only. Both settle
+  // the current round (calling settle_round → payouts to winners,
+  // rake to streamer + platform, ledger entries) and either bump to
+  // the next round (advance) or mark this round as final (final).
+  const advanceRoundMutation = useMutation({
+    mutationFn: async () => {
+      if (!eventId) throw new Error("Missing event id");
+      // `as never` because the new RPCs aren't reflected in the
+      // generated types yet — operator regenerates after migration.
+      const { error } = await supabase.rpc("advance_round" as never, {
+        p_event_id: eventId,
+        p_idempotency_key: crypto.randomUUID(),
+      } as never);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["studio", "event", eventId],
+      });
+    },
+  });
+
+  const markFinalRoundMutation = useMutation({
+    mutationFn: async () => {
+      if (!eventId) throw new Error("Missing event id");
+      const { error } = await supabase.rpc("mark_final_round" as never, {
+        p_event_id: eventId,
+        p_idempotency_key: crypto.randomUUID(),
+      } as never);
+      if (error) throw error;
+    },
+    onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["studio", "event", eventId],
       });
@@ -678,6 +724,26 @@ export default function LiveStream() {
     }
     try {
       await declareWinnerMutation.mutateAsync(Array.from(selectedWinners));
+
+      // Multi-round branches: declare + advance OR declare + mark
+      // final. The stream stays live in both cases; only End stream
+      // (separate button) closes the stream.
+      if (declareIntent === "next") {
+        await advanceRoundMutation.mutateAsync();
+        toast.success(`Round ${event?.current_round ?? ""} settled — next round opening`);
+        setDeclareOpen(false);
+        setSelectedWinners(new Set());
+        return;
+      }
+      if (declareIntent === "final") {
+        await markFinalRoundMutation.mutateAsync();
+        toast.success("Final round settled — click End stream when ready");
+        setDeclareOpen(false);
+        setSelectedWinners(new Set());
+        return;
+      }
+
+      // Single-round default: declare + close out via end-stream.
       await stopStream();
       toast.success("Stream ended — awaiting platform settlement");
       setDeclareOpen(false);
@@ -758,42 +824,122 @@ export default function LiveStream() {
               Resume camera fires) doesn't hide the timer the streamer
               still needs to see. */}
           {event?.status === "live" && event?.betting_closes_at && (
-            <BettingCountdown
-              closesAt={event.betting_closes_at}
-              variant="compact"
-            />
+            <div className="flex items-center gap-2">
+              {/* Round pill — multi-round events only. Same data the
+                  viewer sees, in compact-friendly sizing. */}
+              {event.round_format === "multi" && (
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider tabular-nums",
+                    event.is_final_round
+                      ? "bg-destructive text-destructive-foreground"
+                      : "bg-white/10 text-white ring-1 ring-white/20",
+                  )}
+                >
+                  {event.is_final_round
+                    ? "Final round"
+                    : `Round ${event.current_round ?? 1}`}
+                </span>
+              )}
+              <BettingCountdown
+                closesAt={event.betting_closes_at}
+                variant="compact"
+              />
+            </div>
           )}
         </div>
         {phase === "live" || phase === "ending" ? (
-          // Single CTA whose label tracks the *consequence* of clicking.
-          // "Cancel stream" when ending right now would refund everyone
-          // (minimums not met OR betting window still open) — the modal
-          // copy + confirm button then describe the cancel path.
-          // Otherwise "End stream" → declare-winner flow.
+          // Top-right toolbar — single-round vs multi-round divergence.
           //
-          // `style={{ backgroundImage: "none" }}` is the right way to
-          // strip the variant="accent" gradient without also wiping the
-          // bg-destructive solid color underneath (the old
-          // `[background:none]` arbitrary value killed both, which is
-          // why the button rendered white instead of red).
-          <Button
-            type="button"
-            variant="accent"
-            size="sm"
-            onClick={() => setDeclareOpen(true)}
-            disabled={phase === "ending" || declareWinnerMutation.isPending}
-            className="bg-destructive text-white hover:bg-destructive/90"
-            style={{ backgroundImage: "none" }}
-          >
-            {phase === "ending" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+          // Single round: one button switching between "Cancel stream"
+          // (window still open OR minimums not met → refund everyone)
+          // and "End stream" (declare + finish).
+          //
+          // Multi-round + not yet final round: Next round + Final
+          // round side-by-side. Both open the Declare Winner modal
+          // and, on confirm, advance OR mark-final.
+          //
+          // Multi-round + is_final_round: only End stream remains
+          // (Final-round settlement already done, viewer is past
+          // betting; finish_event closes the stream).
+          event?.round_format === "multi" ? (
+            event.is_final_round ? (
+              <Button
+                type="button"
+                variant="accent"
+                size="sm"
+                onClick={() => void handleEnd()}
+                disabled={phase === "ending" || finishMutation.isPending}
+                className="bg-destructive text-white hover:bg-destructive/90"
+                style={{ backgroundImage: "none" }}
+              >
+                {phase === "ending" || finishMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <PhoneOff className="h-4 w-4" />
+                    End stream
+                  </>
+                )}
+              </Button>
             ) : (
-              <>
-                <PhoneOff className="h-4 w-4" />
-                {willCancel ? "Cancel stream" : "End stream"}
-              </>
-            )}
-          </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setDeclareIntent("next");
+                    setDeclareOpen(true);
+                  }}
+                  disabled={
+                    declareWinnerMutation.isPending ||
+                    advanceRoundMutation.isPending
+                  }
+                >
+                  Next round
+                </Button>
+                <Button
+                  type="button"
+                  variant="accent"
+                  size="sm"
+                  onClick={() => {
+                    setDeclareIntent("final");
+                    setDeclareOpen(true);
+                  }}
+                  disabled={
+                    declareWinnerMutation.isPending ||
+                    markFinalRoundMutation.isPending
+                  }
+                >
+                  Final round
+                </Button>
+              </div>
+            )
+          ) : (
+            // Single-round path — unchanged behaviour.
+            <Button
+              type="button"
+              variant="accent"
+              size="sm"
+              onClick={() => {
+                setDeclareIntent("end");
+                setDeclareOpen(true);
+              }}
+              disabled={phase === "ending" || declareWinnerMutation.isPending}
+              className="bg-destructive text-white hover:bg-destructive/90"
+              style={{ backgroundImage: "none" }}
+            >
+              {phase === "ending" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <PhoneOff className="h-4 w-4" />
+                  {willCancel ? "Cancel stream" : "End stream"}
+                </>
+              )}
+            </Button>
+          )
         ) : (
           <button
             type="button"

@@ -62,8 +62,7 @@ type EventRow = {
   category: string;
   created_at: string;
   rules: string | null;
-  round_format: "time" | "event";
-  round_duration_sec: number | null;
+  round_format: "event" | "multi";
   min_bet_cents: number | null;
   max_bet_cents: number | null;
   source_type: string | null;
@@ -109,8 +108,7 @@ function completedStepsCount(event: EventRow): number {
     title.length >= 5 &&
     description.length > 0 &&
     !!event.cover_url &&
-    rules.length >= 30 &&
-    (event.round_format !== "time" || (event.round_duration_sec ?? 0) > 0);
+    rules.length >= 30;
 
   const betLimitsValid =
     event.min_bet_cents !== null &&
@@ -151,7 +149,7 @@ export default function EventList() {
         .select(
           `
           id, title, description, status, scheduled_at, cover_url, category, created_at,
-          rules, round_format, round_duration_sec,
+          rules, round_format,
           min_bet_cents, max_bet_cents,
           source_type, video_url,
           archived_at,

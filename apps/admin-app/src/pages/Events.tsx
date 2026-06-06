@@ -48,6 +48,7 @@ const EVENT_LIST_SELECT = `
   id,
   title,
   status,
+  round_format,
   created_at,
   scheduled_at,
   archived_at,
@@ -84,6 +85,7 @@ type EventListRow = {
   id: string;
   title: string;
   status: string;
+  round_format: "event" | "multi";
   created_at: string;
   scheduled_at: string;
   archived_at: string | null;
@@ -230,6 +232,7 @@ export default function Events() {
                 <tr>
                   <th className="px-4 py-2 font-semibold">When</th>
                   <th className="px-4 py-2 font-semibold">Name</th>
+                  <th className="px-4 py-2 font-semibold">Mode</th>
                   <th className="px-4 py-2 font-semibold">Event ID</th>
                   <th className="px-4 py-2 font-semibold">Creator</th>
                   <th className="px-4 py-2 font-semibold">Status</th>
@@ -269,6 +272,21 @@ export default function Events() {
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       </div>
+                    </td>
+                    {/* Mode — Single round vs Multi-round. Legacy
+                        'time' rows render as Multi-round since they
+                        migrate to that value in the schema. */}
+                    <td className="px-4 py-2">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                          evt.round_format === "multi"
+                            ? "bg-primary/15 text-primary"
+                            : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {evt.round_format === "multi" ? "Multi" : "Single"}
+                      </span>
                     </td>
                     <td className="px-4 py-2">
                       <button

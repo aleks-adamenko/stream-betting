@@ -29,7 +29,7 @@ import { LiveStreamTest } from "@/components/LiveStreamTest";
 // Types + constants
 // =========================================================================
 
-type RoundFormat = "time" | "event";
+type RoundFormat = "event" | "multi";
 type Outcome = { id?: string; label: string; odds: string; sort_order: number };
 
 type BetWindowOpens = "on_live" | "15m_before" | "1h_before" | "24h_before";
@@ -216,7 +216,6 @@ export default function EventEditor() {
   const [coverUploading, setCoverUploading] = useState(false);
   const [rules, setRules] = useState("");
   const [roundFormat, setRoundFormat] = useState<RoundFormat>("event");
-  const [roundDurationSec, setRoundDurationSec] = useState<string>("");
   const [voidConditions, setVoidConditions] = useState("");
   const [outcomes, setOutcomes] = useState<Outcome[]>([
     { label: "", odds: DEFAULT_ODDS, sort_order: 0 },
@@ -281,7 +280,7 @@ export default function EventEditor() {
         .select(
           `
           id, title, description, cover_url, video_url, category, rules,
-          round_format, round_duration_sec, status, scheduled_at, creator_id,
+          round_format, status, scheduled_at, creator_id,
           void_conditions,
           min_bet_cents, max_bet_cents,
           bet_window_opens, bet_window_locks,
@@ -308,8 +307,12 @@ export default function EventEditor() {
     setCategory(loaded.category || DEFAULT_CATEGORY);
     setCoverUrl(loaded.cover_url ?? null);
     setRules(loaded.rules ?? "");
-    setRoundFormat(loaded.round_format as RoundFormat);
-    setRoundDurationSec(loaded.round_duration_sec?.toString() ?? "");
+    // Legacy 'time' rows were migrated to 'multi' but defensively
+    // coerce here so a draft created pre-migration still loads
+    // cleanly into the editor.
+    setRoundFormat(
+      loaded.round_format === "event" ? "event" : "multi",
+    );
     setVoidConditions(loaded.void_conditions ?? "");
     setMinBetDollars(
       centsToDollarsString(loaded.min_bet_cents ?? DEFAULT_MIN_BET_CENTS),
@@ -407,11 +410,11 @@ export default function EventEditor() {
   // Minimums needed to call create_event / update_event without the
   // DB rejecting the row. Save activates as soon as the creator has
   // typed a title — outcomes can be added later, scheduledAt is pre-
-  // filled, and roundDuration is only required when format='time'.
+  // filled. Multi-round events no longer require a duration (the
+  // streamer controls round advancement manually).
   const canSave =
     title.trim().length >= 3 &&
     !!scheduledAt &&
-    (roundFormat !== "time" || Number(roundDurationSec) > 0) &&
     outcomeDuplicates.size === 0;
 
   // Compliance checks shown in the Review section. All must pass before
@@ -498,8 +501,7 @@ export default function EventEditor() {
       title.trim().length >= 5 &&
       description.trim().length > 0 &&
       !!coverUrl &&
-      rules.trim().length >= 30 &&
-      (roundFormat !== "time" || Number(roundDurationSec) > 0),
+      rules.trim().length >= 30,
     betting:
       validOutcomes.length >= 2 &&
       outcomeDuplicates.size === 0 &&
@@ -531,9 +533,12 @@ export default function EventEditor() {
     if (description !== (loaded.description ?? "")) return true;
     if (category !== (loaded.category || DEFAULT_CATEGORY)) return true;
     if (rules !== (loaded.rules ?? "")) return true;
-    if (roundFormat !== loaded.round_format) return true;
-    if (roundDurationSec !== (loaded.round_duration_sec?.toString() ?? ""))
-      return true;
+    // Treat the legacy 'time' value as 'multi' for dirty comparison
+    // since loaded.round_format on a pre-migration draft can still
+    // be 'time' until the migration runs.
+    const loadedFormat =
+      loaded.round_format === "event" ? "event" : "multi";
+    if (roundFormat !== loadedFormat) return true;
     if (voidConditions !== (loaded.void_conditions ?? "")) return true;
     if (minCents !== (loaded.min_bet_cents ?? DEFAULT_MIN_BET_CENTS))
       return true;
@@ -578,7 +583,6 @@ export default function EventEditor() {
     category,
     rules,
     roundFormat,
-    roundDurationSec,
     voidConditions,
     minCents,
     maxCents,
@@ -684,8 +688,6 @@ export default function EventEditor() {
         ? new Date(scheduledAt)
         : new Date();
     const isoScheduled = scheduledAtForSave.toISOString();
-    const duration =
-      roundFormat === "time" ? Number(roundDurationSec) || null : null;
 
     const rpcArgs = {
       p_title: title.trim(),
@@ -694,7 +696,6 @@ export default function EventEditor() {
       p_rules: rules.trim() || null,
       p_category: category,
       p_round_format: roundFormat,
-      p_round_duration_sec: duration,
       p_scheduled_at: isoScheduled,
       p_video_url: videoUrl.trim() || null,
       p_void_conditions: voidConditions.trim() || null,
@@ -1255,37 +1256,22 @@ export default function EventEditor() {
           <CharCounter value={rules} max={1000} />
         </FieldRow>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <FieldRow
-            label="Round format"
-            htmlFor="round-format"
-            helper="How many attempts or rounds make up this challenge?"
+        <FieldRow
+          label="Round format"
+          htmlFor="round-format"
+          helper="Single round = one outcome decides the whole event. Multi-round = you click Next round between rounds; betting + payouts repeat per round with the same betting window."
+        >
+          <select
+            id="round-format"
+            value={roundFormat}
+            onChange={(e) => setRoundFormat(e.target.value as RoundFormat)}
+            disabled={!editable}
+            className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-base disabled:opacity-60 sm:text-sm"
           >
-            <select
-              id="round-format"
-              value={roundFormat}
-              onChange={(e) => setRoundFormat(e.target.value as RoundFormat)}
-              disabled={!editable}
-              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-base disabled:opacity-60 sm:text-sm"
-            >
-              <option value="event">Single round</option>
-              <option value="time">Time-limited</option>
-            </select>
-          </FieldRow>
-          {roundFormat === "time" && (
-            <FieldRow label="Round duration (sec)" htmlFor="round-duration">
-              <Input
-                id="round-duration"
-                type="number"
-                min={5}
-                value={roundDurationSec}
-                onChange={(e) => setRoundDurationSec(e.target.value)}
-                disabled={!editable}
-                placeholder="30"
-              />
-            </FieldRow>
-          )}
-        </div>
+            <option value="event">Single round</option>
+            <option value="multi">Multi-round</option>
+          </select>
+        </FieldRow>
         </div>
       </section>
 
@@ -1675,11 +1661,8 @@ export default function EventEditor() {
                 {
                   label: "Round format",
                   value:
-                    roundFormat === "time"
-                      ? `Time-limited (${roundDurationSec || "?"}s)`
-                      : "Single round",
-                  missing:
-                    roundFormat === "time" && Number(roundDurationSec) <= 0,
+                    roundFormat === "multi" ? "Multi-round" : "Single round",
+                  missing: false,
                 },
               ]}
             />

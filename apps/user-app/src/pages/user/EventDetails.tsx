@@ -319,10 +319,30 @@ export default function EventDetails() {
             {isLive && event.bettingClosesAt && (
               <div
                 className={cn(
-                  "pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 transition-opacity duration-200",
+                  "pointer-events-none absolute left-1/2 top-4 flex -translate-x-1/2 flex-col items-center gap-1.5 transition-opacity duration-200",
                   overlaysHidden && !isFullscreen && "opacity-0 lg:opacity-100",
                 )}
               >
+                {/* Round pill — multi-round events only. Sits ABOVE
+                    the betting countdown so the viewer sees "Round 3
+                    · betting ends in 4:12" as one stacked overlay.
+                    Final round flips the pill to a destructive red
+                    "FINAL ROUND" badge so it's unmistakable that no
+                    more rounds follow. */}
+                {event.roundFormat === "multi" && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wider tabular-nums backdrop-blur",
+                      event.isFinalRound
+                        ? "bg-destructive/85 text-destructive-foreground ring-1 ring-destructive-foreground/40"
+                        : "bg-black/60 text-white ring-1 ring-white/20",
+                    )}
+                  >
+                    {event.isFinalRound
+                      ? "Final round"
+                      : `Round ${event.currentRound}`}
+                  </span>
+                )}
                 <BettingCountdown closesAt={event.bettingClosesAt} variant="overlay" />
               </div>
             )}
