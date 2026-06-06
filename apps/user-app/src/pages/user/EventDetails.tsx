@@ -1,5 +1,5 @@
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -995,7 +995,7 @@ function FullscreenBetOverlay({
                               : oddsPillClasses(odds, oddsMin, oddsMax),
                         )}
                       >
-                        {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                        {odds == null ? "—" : `${odds.toFixed(2)}×`}
                       </span>
                     </button>
                   );
@@ -1164,13 +1164,12 @@ function RulesBottomSheet({
 }
 
 function BetPanel({ event }: { event: StreamEvent }) {
+  // `selected` is the outcome whose stake-chip row is expanded.
+  // No stake state — clicking a chip below an outcome submits the
+  // bet at that fixed amount directly (no "Place bet" confirm).
   const [selected, setSelected] = useState<BetOutcome | null>(null);
-  const [stake, setStake] = useState<string>("10");
   const [submitting, setSubmitting] = useState(false);
-  // Collapse toggle — header stays visible, body folds away. The
-  // chevron in the top-right replaces the old "Open / Placed" status
-  // chip; lifecycle context is already implied by which panel
-  // (BetPanel / UpcomingPanel / FinishedPanel) is rendered.
+  // Collapse toggle — header stays visible, body folds away.
   const [collapsed, setCollapsed] = useState(false);
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -1183,8 +1182,6 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const liveOddsById = new Map(
     liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
   );
-  // Gate odds on settlement readiness — see FullscreenBetOverlay above
-  // for the rationale.
   const oddsFor = (outcome: BetOutcome) =>
     progress.minimumsMet ? (liveOddsById.get(outcome.id) ?? null) : null;
   const displayOddsList = event.outcomes.map((o) => oddsFor(o) ?? 1);
@@ -1202,37 +1199,27 @@ function BetPanel({ event }: { event: StreamEvent }) {
   );
 
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
-  const stakeNum = Math.max(0, Number(stake) || 0);
-  const selectedOdds = selected ? oddsFor(selected) : null;
-  const potentialPayout = selected
-    ? (payoutPreview(Math.round(stakeNum * 100), selectedOdds) / 100).toFixed(2)
-    : "0.00";
-  const stakeExceedsBalance = !!user && stakeNum > balanceDollars;
-  const stakeOverMax = stakeNum > MAX_BET_CENTS / 100;
-  const stakeUnderMin = stakeNum > 0 && stakeNum < MIN_BET_CENTS / 100;
-  const canPlace =
-    !!selected &&
-    stakeNum > 0 &&
-    !stakeOverMax &&
-    !stakeUnderMin &&
-    (!user || !stakeExceedsBalance) &&
-    !submitting;
   const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
 
-  async function handlePlaceBet() {
-    if (!user) {
-      navigate(`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`);
+  async function placeBetAt(outcome: BetOutcome, stakeCoins: number) {
+    if (!user) return;
+    if (submitting) return;
+    if (stakeCoins > balanceDollars) {
+      toast.error(`Insufficient balance for ${stakeCoins} coins.`);
       return;
     }
-    if (!selected || !canPlace) return;
     setSubmitting(true);
     try {
-      await placeBet(event.id, selected.id, Math.round(stakeNum * 100));
+      const cents = stakeCoins * 100;
+      if (cents < MIN_BET_CENTS || cents > MAX_BET_CENTS) {
+        throw new Error(
+          `Stake must be between ${MIN_BET_CENTS / 100} and ${MAX_BET_CENTS / 100} coins.`,
+        );
+      }
+      await placeBet(event.id, outcome.id, cents);
       await refreshProfile();
       queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
-      toast.success(`Bet placed: $${stakeNum.toFixed(2)} on "${selected.label}"`, {
-        description: `Potential payout $${potentialPayout}. See My Bets for status.`,
-      });
+      toast.success(`Bet placed: ${stakeCoins} on "${outcome.label}"`);
       setSelected(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to place bet";
@@ -1283,56 +1270,61 @@ function BetPanel({ event }: { event: StreamEvent }) {
       {!collapsed && (
       // Tight side padding: half the original p-5/p-6 so the
       // outcome rows + stake input use the full width of the
-      // right-rail card instead of leaving wide gutters.
+      // right-rail card instead of leaving wide gutters. Top and
+      // bottom padding match the side padding so the gap above the
+      // first outcome row and below the last element (ReadinessCard
+      // or sign-in CTA) are visually symmetric.
       <div className="p-2.5 sm:p-3">
 
-      {/* Sign-in CTA when unauthenticated */}
-      {!user && (
-        <Link
-          to={`/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`}
-          className="mb-4 flex items-center justify-between rounded-xl border border-primary/30 bg-primary/[0.04] px-3 py-2 text-sm font-medium text-primary hover:bg-primary/[0.08]"
-        >
-          <span className="flex items-center gap-2">
-            <LogIn className="h-4 w-4" /> Sign in to use your balance
-          </span>
-          <span className="inline-flex items-center gap-1 text-xs leading-none text-muted-foreground">
-            <CoinIcon /> 100 on signup
-          </span>
-        </Link>
-      )}
-
+      {/* Outcomes list — clicking an outcome row (signed-in users
+          only) replaces its odds pill with three stake chips
+          (1 / 5 / 10 coins). Clicking a chip places that bet
+          immediately. No separate stake / payout / Place bet
+          section below — the row IS the form. Signed-out viewers
+          see odds only; outcomes aren't clickable for them. */}
       <ul className="space-y-2">
         {event.outcomes.map((o) => {
-          // Once the user has bet, outcomes become read-only and the
-          // user's chosen outcome stays highlighted while live odds
-          // continue ticking on every row via useLiveOdds.
           const isUserPick = hasBet && existingBet?.outcome_id === o.id;
-          const active = hasBet ? isUserPick : selected?.id === o.id;
+          const isSelected = !hasBet && selected?.id === o.id;
+          const active = hasBet ? isUserPick : isSelected;
           const odds = oddsFor(o);
-          // The picked outcome's pill shows the viewer's stake in
-          // place of the odds — that's the most informative thing for
-          // the row they bet on, and we drop the separate "Your bet"
-          // card below so the stake doesn't appear twice.
           const userStakeDollars = isUserPick && existingBet
             ? (existingBet.amount_cents / 100).toFixed(2)
             : null;
+          // Row is clickable ONLY for signed-in users with no existing
+          // bet on this event. The disabled state for signed-out and
+          // post-bet viewers is purely visual — no onClick attached
+          // means the row reads as a static info pill.
+          const rowClickable = !!user && !hasBet && !submitting;
           return (
             <li key={o.id}>
-              <button
-                type="button"
+              <div
+                role={rowClickable ? "button" : undefined}
+                tabIndex={rowClickable ? 0 : undefined}
                 onClick={() => {
-                  if (hasBet) return; // read-only post-bet
-                  setSelected(o);
+                  if (!rowClickable) return;
+                  setSelected((cur) => (cur?.id === o.id ? null : o));
                 }}
-                disabled={hasBet}
+                onKeyDown={(e) => {
+                  if (!rowClickable) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelected((cur) => (cur?.id === o.id ? null : o));
+                  }
+                }}
                 className={cn(
-                  "flex w-full items-center justify-between rounded-lg border px-3 py-2.5 text-left transition-all",
+                  // Vertical padding halved (py-2.5 → py-1) so the
+                  // outcome rows sit tighter together — the row
+                  // contents are short (label + odds pill, both with
+                  // their own leading) so the extra breathing room
+                  // wasn't earning its keep.
+                  "flex w-full items-center justify-between rounded-lg border px-3 py-1 text-left transition-all",
                   active
                     ? "border-primary bg-primary/10 ring-2 ring-primary/20"
                     : "border-border/40 bg-background/60",
-                  !hasBet && !active &&
-                    "hover:border-primary/40 hover:bg-primary/[0.03]",
-                  hasBet && "cursor-default",
+                  rowClickable && !active &&
+                    "cursor-pointer hover:border-primary/40 hover:bg-primary/[0.03]",
+                  !rowClickable && "cursor-default",
                 )}
               >
                 <span className="flex items-center gap-2 truncate text-sm font-medium text-foreground">
@@ -1341,33 +1333,58 @@ function BetPanel({ event }: { event: StreamEvent }) {
                   )}
                   <span className="truncate">{o.label}</span>
                 </span>
-                {/* Right-side stack: stake chip (only on the user's
-                    picked row) + the canonical odds chip. The odds
-                    chip lives in the same spot on every row so the
-                    eye scans straight down a column; the stake chip
-                    is a smaller, less attention-grabbing badge to
-                    its left so the viewer still gets the "your bet"
-                    context without losing the live odds tick. */}
                 <span className="ml-3 flex flex-shrink-0 items-center gap-2">
+                  {/* Three states for the right-side slot:
+                      1. User-pick (hasBet): show their stake + odds.
+                      2. Selected outcome (!hasBet & signed-in): show
+                         stake chips that place the bet on click.
+                      3. Default: just the odds (or "Open" placeholder
+                         until minimums settle). */}
                   {isUserPick && userStakeDollars && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold leading-none tabular-nums text-primary">
                       Your bet <CoinIcon /> {userStakeDollars}
                     </span>
                   )}
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                      active
-                        ? "bg-primary text-primary-foreground"
-                        : odds == null
-                          ? "bg-muted text-muted-foreground"
+                  {isSelected && user ? (
+                    <span className="flex flex-shrink-0 items-center gap-1">
+                      {STAKE_CHIPS.map((amount) => (
+                        <button
+                          key={amount}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void placeBetAt(o, amount);
+                          }}
+                          disabled={submitting}
+                          className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-sm font-extrabold leading-none tabular-nums text-primary-foreground shadow-sm transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <CoinIcon />
+                          {amount}
+                        </button>
+                      ))}
+                    </span>
+                  ) : odds == null ? (
+                    // Pre-minimums: render a bare "—" without the
+                    // pill background so the column doesn't look
+                    // like every row is a clickable badge before
+                    // betting has actually opened.
+                    <span className="font-heading text-sm font-bold tabular-nums text-muted-foreground">
+                      —
+                    </span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                        active
+                          ? "bg-primary text-primary-foreground"
                           : oddsPillClasses(odds, oddsMin, oddsMax),
-                    )}
-                  >
-                    {odds == null ? "Open" : `${odds.toFixed(2)}×`}
-                  </span>
+                      )}
+                    >
+                      {`${odds.toFixed(2)}×`}
+                    </span>
+                  )}
                 </span>
-              </button>
+              </div>
             </li>
           );
         })}
@@ -1377,11 +1394,38 @@ function BetPanel({ event }: { event: StreamEvent }) {
         <ReadinessCard progress={progress} className="mt-3" />
       )}
 
+      {/* Sign-in CTA for unauthenticated viewers — sits below the
+          minimums card so the order reads "here are the outcomes,
+          here's why you can't bet yet, here's how to opt in." Uses
+          the brush BrushButton with the accent yellow gradient so
+          the CTA pops against the surrounding panel and the
+          starter-bonus line below feels like a single offer. */}
+      {!user && (
+        <div className="mt-3 space-y-1">
+          <BrushButton
+            variant="accent"
+            onClick={() =>
+              navigate(
+                `/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`,
+              )
+            }
+            className="w-full"
+          >
+            <LogIn className="h-4 w-4" />
+            Sign in to use your balance
+          </BrushButton>
+          {/* New-viewer starter bonus teaser — the viewer signup
+              flow grants 100 coins on first activation. Keep this
+              line tight so it reads as a caption to the CTA above. */}
+          <p className="flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
+            New here? Get <CoinIcon /> 100 on signup
+          </p>
+        </div>
+      )}
+
       {/* Post-bet footer — the picked outcome row above already shows
           the stake; this block just gives the viewer a way out and an
-          honest reminder that the pool will keep moving. The separate
-          Stake / Odds-at-placement card has been removed since the
-          stake now lives inline in the outcome row. */}
+          honest reminder that the pool will keep moving. */}
       {hasBet && existingBet && (
         <div className="mt-4 space-y-3">
           <p className="text-center text-[11px] text-muted-foreground">
@@ -1394,94 +1438,12 @@ function BetPanel({ event }: { event: StreamEvent }) {
         </div>
       )}
 
-      {!hasBet && (
-        <>
-          <div className="mt-4 space-y-2">
-            <label className="text-xs font-medium text-muted-foreground">
-              Stake
-            </label>
-            {/* Stake chips only — custom-amount input removed. With
-                MAX_BET=$10 the universe of useful values is tiny, so
-                three preset buttons cover everyone. Font weight + size
-                match the Place bet button below for visual parity. */}
-            <div className="grid grid-cols-3 gap-2">
-              {STAKE_CHIPS.map((amount) => {
-                const active = stakeNum === amount;
-                return (
-                  <button
-                    key={amount}
-                    type="button"
-                    onClick={() => setStake(String(amount))}
-                    className={cn(
-                      "inline-flex items-center justify-center gap-1 rounded-lg border px-3 py-2.5 text-base font-bold leading-none tabular-nums transition-all",
-                      active
-                        ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
-                        : "border-border/40 bg-background/60 text-foreground hover:border-primary/40 hover:bg-primary/[0.03]",
-                    )}
-                  >
-                    <CoinIcon />
-                    {amount}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Potential payout</span>
-            <span className="font-heading text-base font-bold text-foreground">
-              {progress.minimumsMet ? (
-                <CoinAmount value={Number(potentialPayout)} />
-              ) : (
-                "—"
-              )}
-            </span>
-          </div>
-          <p className="mt-1 text-center text-[11px] text-muted-foreground">
-            {progress.minimumsMet
-              ? "Indicative — final calculated at settlement."
-              : "Payout shown once the event clears the minimums above."}
-          </p>
-
-          {stakeExceedsBalance && (
-            <p className="mt-2 text-center text-xs font-medium text-destructive">
-              Stake exceeds available balance.
-            </p>
-          )}
-
-          {/* Desktop BetPanel place-bet CTA — brush + yellow accent
-              gradient, matches the mobile floater + fullscreen
-              overlay versions. */}
-          <BrushButton
-            variant="accent"
-            onClick={handlePlaceBet}
-            className="mt-4 w-full"
-            disabled={!canPlace && !!user}
-          >
-            {!user
-              ? "Sign in to place bet"
-              : submitting
-              ? "Placing…"
-              : !selected
-              ? "Pick an outcome"
-              : stakeExceedsBalance
-                ? "Insufficient balance"
-                : "Place bet"}
-          </BrushButton>
-          <p className="mt-2 text-center text-[11px] text-muted-foreground">
-            Virtual balance only. Bets settle once the round ends.
-          </p>
-        </>
-      )}
-
       {/* Subscriber count line stays visible while the event is live
-          as a social-proof signal. NotifyMeBlock hides its own button
-          here too if the event is past the scheduled state — actually
-          we let it stay so viewers who didn't pre-subscribe can still
-          tap and follow the creator for next time. */}
-      <div className="mt-4">
-        <NotifyMeBlock event={event} />
-      </div>
+          as a social-proof signal. NotifyMeBlock returns null when
+          it has nothing to show (live event with 0 subscribers) so
+          the BetPanel doesn't leave phantom space below the sign-in
+          CTA / post-bet footer. It owns its own top margin too. */}
+      <NotifyMeBlock event={event} />
       </div>
       )}
     </section>
@@ -1502,69 +1464,25 @@ function ReadinessCard({
   progress: EventProgress;
   className?: string;
 }) {
-  // Three guards mirroring `settle_event` server-side. The card
-  // shows only the requirements that are STILL outstanding — each
-  // cleared guard disappears, and when all three are met the
-  // parent's `!progress.minimumsMet` predicate hides the whole
-  // card. No progress numbers (3/5, $10/$30) — the viewer just
-  // needs the prompt, not the leaderboard.
-  // 1 coin = 100 cents internally. The pool minimum reads as
-  // "Min <coin> 30 total pool" — the coin glyph replaces the legacy
-  // "$" so the unit matches every other balance/odds display.
-  const poolCoins = (cents: number) => Math.round(cents / 100);
-  // `label` is a ReactNode (the Pool row interleaves a CoinIcon), so
-  // we can no longer use it as a React key. Each item gets a stable
-  // string id for keying.
-  const items: { id: string; label: ReactNode; cleared: boolean }[] = [
-    {
-      id: "participants",
-      label: `Min ${progress.minUniqueBettors} participants`,
-      cleared: progress.uniqueBettors >= progress.minUniqueBettors,
-    },
-    {
-      id: "outcomes",
-      label: `Min ${progress.minOutcomesWithBets} different outcomes`,
-      cleared:
-        progress.outcomesWithBets >= progress.minOutcomesWithBets,
-    },
-    {
-      id: "pool",
-      label: (
-        <>
-          Min{" "}
-          <span className="inline-flex items-center gap-0.5 align-middle">
-            <CoinIcon /> {poolCoins(progress.minPoolCents)}
-          </span>{" "}
-          total pool
-        </>
-      ),
-      cleared: progress.totalPoolCents >= progress.minPoolCents,
-    },
-  ];
-  const outstanding = items.filter((item) => !item.cleared);
-
-  // Defensive: if every item cleared but minimumsMet hasn't flipped
-  // yet (small lag between client compute + server compute), render
-  // nothing rather than a bare title with no list underneath.
-  if (outstanding.length === 0) return null;
+  // Viewer-facing variant — deliberately doesn't disclose the exact
+  // settlement minimums (participant count, distinct outcomes,
+  // minimum pool). The streamer side renders its own card with the
+  // numeric guards; here we just signal "not enough bets yet, you
+  // get refunded if it stays that way" in one line. The studio
+  // LiveStream page has its own multi-row readiness display for the
+  // creator to see exactly which guard is missing.
+  if (progress.minimumsMet) return null;
 
   return (
     <div
       className={cn(
-        "rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-3",
+        "rounded-xl border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2",
         className,
       )}
     >
-      <p className="font-heading text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-        Event needs minimum bets to start
-      </p>
-      <ul className="mt-2 space-y-1 text-xs text-foreground">
-        {outstanding.map((item) => (
-          <li key={item.id}>{item.label}</li>
-        ))}
-      </ul>
-      <p className="mt-2 text-[10px] leading-tight text-muted-foreground">
-        If the event doesn't reach these minimums, all bets refund in full.
+      <p className="text-xs leading-snug text-amber-700 dark:text-amber-300">
+        Waiting for enough bets to start — if the minimum isn't met, all
+        bets refund in full.
       </p>
     </div>
   );
@@ -1695,8 +1613,13 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
     }
   };
 
+  // Bail out entirely when there's nothing to show — keeps the
+  // BetPanel from leaving phantom space below the sign-in CTA /
+  // post-bet footer on a live event with 0 subscribers.
+  if (!showButton && count === 0) return null;
+
   return (
-    <div className="space-y-2">
+    <div className="mt-4 space-y-2">
       {showButton && (
         // Subscribed state keeps the rectangular secondary Button to
         // signal a passive "already done" affordance; the primary

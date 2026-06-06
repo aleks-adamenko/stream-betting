@@ -465,11 +465,14 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
                     <span
                       className={
                         odds == null
-                          ? "flex-shrink-0 font-heading text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                          ? "flex-shrink-0 font-heading font-bold tabular-nums text-muted-foreground"
                           : "flex-shrink-0 font-heading font-bold tabular-nums text-foreground"
                       }
                     >
-                      {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                      {/* Pre-minimums (no odds yet) reads as "—" so
+                          viewers don't get a misleading "Open" label
+                          that suggests betting is in progress. */}
+                      {odds == null ? "—" : `${odds.toFixed(2)}×`}
                     </span>
                   </li>
                 );

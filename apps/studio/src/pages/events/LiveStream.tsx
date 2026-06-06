@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { cn } from "@liverush/lib";
 import {
   Camera,
   CameraOff,
@@ -879,6 +880,35 @@ export default function LiveStream() {
                   <>
                     <PhoneOff className="h-4 w-4" />
                     End stream
+                  </>
+                )}
+              </Button>
+            ) : !bettingClosed ? (
+              // Betting window still open for the current round —
+              // Next / Final round can't fire yet (declare_winner
+              // would 22023 on the server anyway). Surface Cancel
+              // stream instead so the streamer has a clean exit
+              // path while bets are still being taken; the modal
+              // routes to the refund-everyone branch since
+              // willCancel is true.
+              <Button
+                type="button"
+                variant="accent"
+                size="sm"
+                onClick={() => {
+                  setDeclareIntent("end");
+                  setDeclareOpen(true);
+                }}
+                disabled={phase === "ending" || declareWinnerMutation.isPending}
+                className="bg-destructive text-white hover:bg-destructive/90"
+                style={{ backgroundImage: "none" }}
+              >
+                {phase === "ending" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <PhoneOff className="h-4 w-4" />
+                    Cancel stream
                   </>
                 )}
               </Button>

@@ -168,7 +168,10 @@ export function StreamCard({ event }: StreamCardProps) {
                         : oddsPillClasses(odds, oddsMin, oddsMax),
                     )}
                   >
-                    {odds == null ? "Open" : `${odds.toFixed(2)}×`}
+                    {/* Pre-minimums (no odds yet) reads as "—" so
+                        viewers don't get a misleading "Open" label
+                        that suggests betting is in progress. */}
+                    {odds == null ? "—" : `${odds.toFixed(2)}×`}
                   </span>
                 </Link>
               );

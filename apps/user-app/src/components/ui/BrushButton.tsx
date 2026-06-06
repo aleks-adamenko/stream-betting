@@ -1,4 +1,9 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import {
+  forwardRef,
+  useId,
+  type ButtonHTMLAttributes,
+  type ReactNode,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -76,8 +81,17 @@ export const BrushButton = forwardRef<HTMLButtonElement, BrushButtonProps>(
  * `preserveAspectRatio="none"`.
  */
 export function BrushBg({ variant }: { variant: BrushVariant }) {
-  const gradientId =
-    variant === "primary" ? "brush-gradient-primary" : "brush-gradient-accent";
+  // Use a per-render unique id for the linearGradient so multiple
+  // BrushButton instances on the same page can't shadow each
+  // other's gradients via `url(#brush-gradient-accent)`. The
+  // browser resolves fragment URLs against the FIRST matching
+  // element in the document; without this the second / third
+  // BrushBg on a page can read as transparent.
+  // React's useId returns `:r0:`-style strings; the colons confuse
+  // some browsers when used inside an SVG `url(#…)` reference, so
+  // strip them.
+  const reactId = useId().replace(/:/g, "");
+  const gradientId = `brush-gradient-${variant}-${reactId}`;
   return (
     <svg
       aria-hidden
@@ -86,29 +100,22 @@ export function BrushBg({ variant }: { variant: BrushVariant }) {
       className="brush pointer-events-none absolute inset-0 h-full w-full"
     >
       <defs>
-        {/* Primary blue — same stops as design-tokens'
-            `--gradient-primary`. */}
-        <linearGradient
-          id="brush-gradient-primary"
-          x1="0"
-          y1="0"
-          x2="1"
-          y2="0"
-        >
-          <stop offset="0%" stopColor="#498aff" />
-          <stop offset="100%" stopColor="#493bff" />
-        </linearGradient>
-        {/* Accent yellow — same stops as the shadcn Button's
-            `accent` variant. */}
-        <linearGradient
-          id="brush-gradient-accent"
-          x1="0"
-          y1="0"
-          x2="1"
-          y2="0"
-        >
-          <stop offset="0%" stopColor="#FFDD49" />
-          <stop offset="100%" stopColor="#FFBE3B" />
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+          {variant === "primary" ? (
+            <>
+              {/* Primary blue — same stops as design-tokens'
+                  `--gradient-primary`. */}
+              <stop offset="0%" stopColor="#498aff" />
+              <stop offset="100%" stopColor="#493bff" />
+            </>
+          ) : (
+            <>
+              {/* Accent yellow — same stops as the shadcn Button's
+                  `accent` variant. */}
+              <stop offset="0%" stopColor="#FFDD49" />
+              <stop offset="100%" stopColor="#FFBE3B" />
+            </>
+          )}
         </linearGradient>
       </defs>
       <path d={BRUSH_PATH} fill={`url(#${gradientId})`} />
