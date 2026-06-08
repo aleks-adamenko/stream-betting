@@ -102,8 +102,17 @@ export function NotificationToastCard({
     </>
   );
 
+  // Two-layer outline matching the reference design:
+  //   • Inner: `border-2 border-primary/30` — thin, darker primary
+  //     blue, hugs the card edge.
+  //   • Outer: `ring-4 ring-primary/15` — wider, lighter primary
+  //     blue, sits OUTSIDE the border like a soft halo.
+  // Tailwind's `ring` paints a box-shadow outside `border`, so the
+  // two stack naturally without overlapping. Both reference the
+  // same primary token so the colours stay in lockstep with the
+  // brand even if design-tokens.css evolves later.
   const baseClasses =
-    "flex w-[min(420px,calc(100vw-32px))] items-start gap-3 rounded-2xl border border-border/40 bg-card p-4 shadow-2xl";
+    "flex w-[min(420px,calc(100vw-32px))] items-start gap-3 rounded-2xl border-2 border-primary/30 ring-4 ring-primary/15 bg-card p-4 shadow-xl";
 
   if (clickable && eventId) {
     return (
