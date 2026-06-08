@@ -56,7 +56,10 @@ export function NotificationToastCard({
   const inner = (
     <>
       {/* Avatar circle — tinted by type per TYPE_META. h-10/w-10 to
-          match the reference screenshot's icon-on-the-left silhouette. */}
+          match the reference screenshot's icon-on-the-left silhouette.
+          `fill-current` for iconFilled types (welcome, round_starting)
+          renders the Lucide icon as a solid silhouette instead of the
+          default thin stroke that reads as AI-generated. */}
       <span
         aria-hidden
         className={cn(
@@ -64,7 +67,7 @@ export function NotificationToastCard({
           meta.iconClassName,
         )}
       >
-        <Icon className="h-5 w-5" />
+        <Icon className={cn("h-5 w-5", meta.iconFilled && "fill-current")} />
       </span>
 
       <div className="min-w-0 flex-1">

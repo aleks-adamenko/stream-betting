@@ -150,6 +150,15 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
    */
   const seenIdsRef = useRef<Set<string>>(new Set());
 
+  /**
+   * Tracks which user.id we've already replayed the sticky welcome
+   * toast for. Belt-and-suspenders for the userId-keyed useEffect
+   * below — even if React re-runs the effect (Strict Mode in dev,
+   * StateController shenanigans, etc.) we won't fire the welcome
+   * twice in a single session. Resets on user change.
+   */
+  const welcomeReplayedRef = useRef<string | null>(null);
+
   const renderRow = useCallback(
     (row: NotificationRow) => {
       // Dedupe on row id.
@@ -211,6 +220,15 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             // ~2^31 (24.8 days) down to 1ms, which would dismiss
             // the welcome toast before the viewer ever saw it.
             duration: behaviour.durationMs,
+            // unstyled=true tells Sonner NOT to wrap our custom JSX
+            // in its default rounded/border/shadow container. The
+            // global Sonner toastOptions classNames in App.tsx
+            // (rounded-2xl + border + shadow-2xl) would otherwise
+            // double up with the NotificationToastCard's own
+            // styling — producing the "second outer outline" the
+            // user reported. With unstyled, our card silhouette is
+            // the only one rendered.
+            unstyled: true,
           },
         );
       };
@@ -265,9 +283,19 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   // `user_id = auth.uid()`. Deferred via setTimeout to dodge React
   // Strict Mode's mount → cleanup → remount cycle (same pattern as
   // useEvents / useEventChat / useLiveOdds).
+  // Depend on `user?.id` (the UUID string), NOT the `user` object
+  // itself. Supabase auth auto-refreshes the JWT on tab focus, and
+  // each refresh hands back a NEW user OBJECT with the same id —
+  // shallow comparison on the object reference would re-fire this
+  // effect on every focus, tearing down the channel and (worse)
+  // wiping seenIdsRef in the cleanup, so the replay-on-mount below
+  // would re-toast the same welcome row every time the viewer
+  // switched tabs. Comparing the primitive id keeps the effect
+  // stable across token refreshes.
+  const userId = user?.id ?? null;
   useEffect(() => {
     if (loading) return;
-    if (!user) return;
+    if (!userId) return;
 
     let cancelled = false;
     let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -275,14 +303,14 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const setupId = setTimeout(() => {
       if (cancelled) return;
       channel = supabase
-        .channel(`notifications:user:${user.id}`)
+        .channel(`notifications:user:${userId}`)
         .on(
           "postgres_changes",
           {
             event: "INSERT",
             schema: "public",
             table: "notifications",
-            filter: `user_id=eq.${user.id}`,
+            filter: `user_id=eq.${userId}`,
           },
           (payload) => {
             renderRow(payload.new as NotificationRow);
@@ -295,12 +323,17 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearTimeout(setupId);
       if (channel) void supabase.removeChannel(channel);
-      // Reset dedupe state when the user changes — otherwise after
-      // sign-out + sign-in we'd silently swallow the welcome toast.
+      // Only resets when the user identity ACTUALLY changes (sign-
+      // out or different account signs in) — token refresh keeps the
+      // same userId so this cleanup doesn't run, and seenIds stays
+      // populated so a sticky welcome can't double-toast.
       seenIdsRef.current.clear();
       recentBetResultsRef.current.clear();
+      // Reset welcome-replay marker so a different account signing
+      // in can see their own welcome toast.
+      welcomeReplayedRef.current = null;
     };
-  }, [loading, user, renderRow]);
+  }, [loading, userId, renderRow]);
 
   // ---- Replay-on-mount for sticky DB-backed notifications -----------
   //
@@ -311,14 +344,23 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   // the user's first user-app session opens its channel (magic-link
   // confirm → auth callback → home page → provider mounts).
   //
-  // To catch that case, on each mount-or-user-change we fetch the
+  // To catch that case, exactly once per user identity we fetch the
   // most-recent unread welcome row (RLS scopes to the caller, so the
   // result set is small and safe). If we find one, render it via the
   // same toast path. The onDismiss handler in renderRow marks it
-  // read, so the next mount won't re-fire it.
+  // read, so signing out + back in (different account) replays for
+  // the new viewer; staying signed in across tab switches does NOT.
+  //
+  // welcomeReplayedRef captures which user.id we've already replayed
+  // for — belt-and-suspenders even if React were to re-run the
+  // effect for some other reason. Combined with the userId-only dep,
+  // this guarantees one welcome toast per user session, not one per
+  // tab focus.
   useEffect(() => {
     if (loading) return;
-    if (!user) return;
+    if (!userId) return;
+    if (welcomeReplayedRef.current === userId) return;
+    welcomeReplayedRef.current = userId;
 
     let cancelled = false;
 
@@ -326,7 +368,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("notifications")
         .select("id, user_id, type, title, body, event_id, read, created_at")
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .eq("read", false)
         .eq("type", "welcome")
         .order("created_at", { ascending: false })
@@ -355,7 +397,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [loading, user, renderRow]);
+  }, [loading, userId, renderRow]);
 
   const pushLocalToast = useCallback((input: LocalToastInput) => {
     const duration = input.durationMs ?? 3000;
@@ -372,8 +414,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       ),
       // Same `Infinity → sticky` semantic as the realtime path
       // above. Don't normalise to MAX_SAFE_INTEGER — that gets
-      // clamped to ~1ms by the browser's setTimeout.
-      { duration },
+      // clamped to ~1ms by the browser's setTimeout. unstyled
+      // suppresses Sonner's outer container (see realtime path
+      // for the full rationale).
+      { duration, unstyled: true },
     );
   }, []);
 

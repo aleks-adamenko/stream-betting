@@ -6,7 +6,7 @@ import {
   PhoneOff,
   RotateCcw,
   Radio,
-  Sparkles,
+  Star,
   Trophy,
   Wallet,
   XCircle,
@@ -29,14 +29,24 @@ import type { NotificationType } from "@/services/notificationsService";
  * Pick tokens that exist in design-tokens (success / destructive /
  * primary / muted / pink-500) — random hex values would diverge from
  * the rest of the app.
+ *
+ * `iconFilled` makes the Lucide icon a solid silhouette
+ * (`fill-current` on the SVG) instead of the default outline. Used
+ * for the welcome / round_starting cards where the design calls for
+ * a filled-star look rather than the thin-stroke AI-style icons.
  */
 export interface NotificationTypeMeta {
   icon: typeof Bell;
   iconClassName: string;
+  iconFilled?: boolean;
 }
 
 export const TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
-  welcome: { icon: Sparkles, iconClassName: "bg-primary/10 text-primary" },
+  welcome: {
+    icon: Star,
+    iconClassName: "bg-primary/10 text-primary",
+    iconFilled: true,
+  },
   // bet_placed is new in 20260609_000001 — tinted accent yellow so a
   // viewer immediately recognises the "you just bet" beat without
   // confusing it with a win (which uses green/success).
@@ -56,7 +66,11 @@ export const TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
     icon: PhoneOff,
     iconClassName: "bg-muted text-muted-foreground",
   },
-  round_starting: { icon: Sparkles, iconClassName: "bg-primary/10 text-primary" },
+  round_starting: {
+    icon: Star,
+    iconClassName: "bg-primary/10 text-primary",
+    iconFilled: true,
+  },
   new_follower: { icon: Heart, iconClassName: "bg-pink-500/15 text-pink-600" },
   top_up: { icon: Wallet, iconClassName: "bg-success/15 text-success" },
   rake_credited: { icon: Coins, iconClassName: "bg-success/15 text-success" },
