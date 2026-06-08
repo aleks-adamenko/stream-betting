@@ -42,7 +42,16 @@ const App = () => (
             with our token-driven red. expand keeps the toast wide
             enough that long server-side error messages (e.g.
             "Streamers cannot bet on their own event") aren't
-            truncated. */}
+            truncated.
+
+            No `toast: "!border ..."` global className — it painted a
+            thin 1px outline on EVERY toast (including the custom-
+            card notifications) that read as a stray white wrapper
+            around our card. Sonner's own `richColors` already gives
+            success/error/warning toasts tinted backgrounds, and our
+            custom NotificationToastCard brings its own border + ring
+            styling. Title / description classNames stay because they
+            are typography tokens shared across all toast flavours. */}
         <Sonner
           position="top-center"
           richColors
@@ -50,8 +59,6 @@ const App = () => (
           expand
           toastOptions={{
             classNames: {
-              toast:
-                "!rounded-2xl !border !shadow-2xl !p-4 !text-sm !font-medium",
               title: "!font-heading !font-semibold !text-base",
               description: "!text-sm !leading-relaxed",
             },

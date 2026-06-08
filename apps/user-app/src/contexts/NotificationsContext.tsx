@@ -84,17 +84,15 @@ const DEFAULT_BEHAVIOUR: ToastBehaviour = {
 /**
  * Per-custom-toast override for Sonner's container styling.
  *
- * The user-app's global Sonner config in App.tsx applies
- * `!rounded-2xl !border !shadow-2xl !p-4 !text-sm !font-medium` to
- * EVERY toast wrapper. `unstyled: true` on toast.custom() drops the
- * Sonner DEFAULTS but does NOT remove the global toastOptions
- * classNames — those still paint a thin white-bordered wrapper
- * around our custom card.
+ * Belt-and-suspenders against a future global toastOptions config
+ * regression. The user-app's global Sonner config in App.tsx no
+ * longer applies `!border` / `!shadow-2xl` / `!rounded-2xl` to all
+ * toasts (those were painting the stray white outline around custom
+ * cards), so this override is defensive — if anyone adds them back,
+ * the custom-card silhouette stays clean.
  *
- * Zero everything out per-toast (border, background, shadow,
- * padding, radius) so the NotificationToastCard's own styling is
- * the only thing the viewer sees. `!important` (via Tailwind's `!`
- * prefix) beats the `!`-prefixed global classes.
+ * The `!` prefix in Tailwind = !important, which beats any global
+ * `!`-prefixed class via specificity tiebreak on rule order.
  */
 const TOAST_OVERRIDE_CLASSES = {
   toast:
