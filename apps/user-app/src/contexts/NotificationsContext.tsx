@@ -205,10 +205,12 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             />
           ),
           {
-            duration:
-              behaviour.durationMs === Infinity
-                ? Number.MAX_SAFE_INTEGER
-                : behaviour.durationMs,
+            // Sonner officially treats `duration: Infinity` as
+            // "no auto-dismiss". DON'T convert to a large finite
+            // number — browsers clamp setTimeout values above
+            // ~2^31 (24.8 days) down to 1ms, which would dismiss
+            // the welcome toast before the viewer ever saw it.
+            duration: behaviour.durationMs,
           },
         );
       };
@@ -368,9 +370,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           clickable={false}
         />
       ),
-      {
-        duration: duration === Infinity ? Number.MAX_SAFE_INTEGER : duration,
-      },
+      // Same `Infinity → sticky` semantic as the realtime path
+      // above. Don't normalise to MAX_SAFE_INTEGER — that gets
+      // clamped to ~1ms by the browser's setTimeout.
+      { duration },
     );
   }, []);
 
