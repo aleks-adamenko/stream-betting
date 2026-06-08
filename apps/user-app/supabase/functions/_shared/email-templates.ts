@@ -229,12 +229,21 @@ Manage notifications: ${unsubscribeUrl()}`;
 export function renderNewScheduled(
   ctx: EventCtx & { scheduledAt: string /* ISO */ },
 ): RenderedEmail {
-  const dateLabel = new Date(ctx.scheduledAt).toLocaleString(undefined, {
+  // IMPORTANT: Supabase Edge Functions run in UTC. `toLocaleString`
+  // with no `timeZone` option silently formats in the runtime's TZ
+  // (UTC), so an event scheduled at 13:00 UTC+3 (stored as 10:00Z)
+  // rendered as "10:00 AM" with no suffix — recipients read it as
+  // local time and showed up three hours early. Force UTC + emit
+  // the abbreviation so the time is unambiguous; recipients in
+  // different zones can convert reliably.
+  const dateLabel = new Date(ctx.scheduledAt).toLocaleString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
   });
   const subject = `📅 ${ctx.creatorName} scheduled: ${ctx.eventTitle}`;
   const text = `${ctx.creatorName} just scheduled a new event: "${ctx.eventTitle}".
