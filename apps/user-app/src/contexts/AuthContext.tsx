@@ -42,13 +42,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Orphan session: the JWT in localStorage is still
+    // cryptographically valid (Supabase auto-refreshes on a ~1h
+    // cycle), but the auth.users row has been deleted server-side
+    // — usually via the admin app. The profile row cascaded out
+    // with it, so we get data === null here. handle_new_user fires
+    // in the same transaction as the auth.users insert, so a brand-
+    // new sign-up never lands here with a missing profile — every
+    // null we see is a stale session.
+    //
+    // Force sign-out so the UI bails out of "half logged in"
+    // (session valid, no balance, no display name, no usable
+    // actions) and the next protected route sends the viewer to
+    // /auth/sign-in. supabase.auth.signOut() also clears
+    // localStorage and fires onAuthStateChange → SIGNED_OUT.
+    if (!data) {
+      console.warn(
+        "Profile not found for active session — signing user out",
+      );
+      setProfile(null);
+      void supabase.auth.signOut();
+      return;
+    }
+
     // Studio-first users land here on their first user-app visit
     // with `viewer_activated_at = null`. activate_viewer() stamps it
     // and credits the 100-coin starter. Idempotent: viewers who
     // signed up via the user-app already got activated when their
     // email confirmed, so the RPC short-circuits for them.
-    let profileRow = data ?? null;
-    if (profileRow && profileRow.viewer_activated_at == null) {
+    let profileRow = data;
+    if (profileRow.viewer_activated_at == null) {
       const { data: activated, error: activateErr } =
         // The RPC's not in the generated types yet — narrow via
         // `as never` until the operator regenerates after the
