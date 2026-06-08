@@ -15,9 +15,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { notificationsKeys } from "@/hooks/useNotifications";
 import { betsKeys } from "@/hooks/useMyBets";
-import type {
-  NotificationRow,
-  NotificationType,
+import {
+  markNotificationRead,
+  type NotificationRow,
+  type NotificationType,
 } from "@/services/notificationsService";
 import { NotificationToastCard } from "@/components/notifications/NotificationToastCard";
 
@@ -100,8 +101,16 @@ const TYPE_BEHAVIOUR: Partial<Record<NotificationType, ToastBehaviour>> = {
   // simultaneous bet-result toast for the same event.
   event_finished: { durationMs: 2000, clickable: false, suppressOnEventPage: false },
 
-  // Existing types we already insert today.
-  welcome:         { durationMs: 4000, clickable: false, suppressOnEventPage: false },
+  // Welcome — sticky. Inserted by handle_email_confirmed (user_app
+  // signups) and activate_viewer (studio-first signups) at the
+  // moment the 100-coin starter actually lands on the balance.
+  // The toast stays until the viewer dismisses; the dismiss
+  // handler (passed to NotificationToastCard via onDismiss below)
+  // marks the row as read so it doesn't re-fire on the next page
+  // load. Replay-on-mount in the effect below ensures the toast
+  // appears even when the row was INSERTed before the realtime
+  // channel opened (the typical magic-link flow).
+  welcome:         { durationMs: Infinity, clickable: false, suppressOnEventPage: false },
   new_follower:    { durationMs: 3000, clickable: false, suppressOnEventPage: false },
   top_up:          { durationMs: 3000, clickable: false, suppressOnEventPage: false },
   rake_credited:   { durationMs: 3000, clickable: false, suppressOnEventPage: false },
@@ -166,6 +175,22 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Sticky DB-backed types (welcome) need to be marked read on
+      // dismiss so the replay-on-mount logic below doesn't re-fire
+      // the same toast every time the user navigates. Other types
+      // (auto-dismissing) keep their unread state for the bell badge
+      // — the user reads them by visiting the Notifications page.
+      const onDismiss =
+        row.type === "welcome"
+          ? () => {
+              void markNotificationRead(row.id).then(() => {
+                void queryClient.invalidateQueries({
+                  queryKey: notificationsKeys.mine(),
+                });
+              });
+            }
+          : undefined;
+
       const push = () => {
         toast.custom(
           (toastId) => (
@@ -176,6 +201,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
               body={row.body ?? null}
               eventId={row.event_id ?? null}
               clickable={behaviour.clickable}
+              onDismiss={onDismiss}
             />
           ),
           {
@@ -271,6 +297,61 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       // sign-out + sign-in we'd silently swallow the welcome toast.
       seenIdsRef.current.clear();
       recentBetResultsRef.current.clear();
+    };
+  }, [loading, user, renderRow]);
+
+  // ---- Replay-on-mount for sticky DB-backed notifications -----------
+  //
+  // The Realtime channel only delivers INSERTs that happen AFTER it
+  // opens. Most notifications fall in that window (the trigger fires
+  // while the viewer is on the page), but the welcome row is INSERTed
+  // by handle_email_confirmed on the server side, typically BEFORE
+  // the user's first user-app session opens its channel (magic-link
+  // confirm → auth callback → home page → provider mounts).
+  //
+  // To catch that case, on each mount-or-user-change we fetch the
+  // most-recent unread welcome row (RLS scopes to the caller, so the
+  // result set is small and safe). If we find one, render it via the
+  // same toast path. The onDismiss handler in renderRow marks it
+  // read, so the next mount won't re-fire it.
+  useEffect(() => {
+    if (loading) return;
+    if (!user) return;
+
+    let cancelled = false;
+
+    const replay = async () => {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, user_id, type, title, body, event_id, read, created_at")
+        .eq("user_id", user.id)
+        .eq("read", false)
+        .eq("type", "welcome")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (cancelled) return;
+      if (error) {
+        console.warn("welcome replay fetch failed:", error.message);
+        return;
+      }
+      const row = (data ?? [])[0] as NotificationRow | undefined;
+      if (!row) return;
+
+      // Defer one tick so this fires AFTER the realtime channel is
+      // attached. If realtime ALSO delivers the same row (rare race
+      // — the row was INSERTed just as the channel opened), the
+      // seenIds dedupe in renderRow keeps it one-shot.
+      setTimeout(() => {
+        if (cancelled) return;
+        renderRow(row);
+      }, 100);
+    };
+
+    void replay();
+
+    return () => {
+      cancelled = true;
     };
   }, [loading, user, renderRow]);
 

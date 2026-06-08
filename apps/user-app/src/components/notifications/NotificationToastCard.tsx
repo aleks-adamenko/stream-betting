@@ -32,6 +32,13 @@ interface NotificationToastCardProps {
   eventId: string | null;
   /** When true, the entire card is a navigation link. */
   clickable?: boolean;
+  /**
+   * Optional side-effect to run when the user dismisses or
+   * navigates away from the toast. Used by sticky DB-backed
+   * notifications (e.g. welcome) to mark the underlying row as
+   * read so the toast doesn't re-fire on the next page load.
+   */
+  onDismiss?: () => void;
 }
 
 export function NotificationToastCard({
@@ -41,6 +48,7 @@ export function NotificationToastCard({
   body,
   eventId,
   clickable = false,
+  onDismiss,
 }: NotificationToastCardProps) {
   const meta = TYPE_META[type] ?? DEFAULT_META;
   const Icon = meta.icon;
@@ -72,14 +80,16 @@ export function NotificationToastCard({
 
       {/* X close — stopPropagation so the surrounding Link doesn't
           fire a navigation when the user explicitly dismissed.
-          Hidden from screen readers in favour of the toast's own
-          dismiss affordance handled by Sonner. */}
+          Runs the optional onDismiss side-effect FIRST so the
+          mark-read RPC fires before the toast unmounts and we
+          lose context. */}
       <button
         type="button"
         aria-label="Dismiss notification"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          onDismiss?.();
           toast.dismiss(toastId);
         }}
         className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
