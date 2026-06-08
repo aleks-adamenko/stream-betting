@@ -81,6 +81,26 @@ const DEFAULT_BEHAVIOUR: ToastBehaviour = {
   suppressOnEventPage: false,
 };
 
+/**
+ * Per-custom-toast override for Sonner's container styling.
+ *
+ * The user-app's global Sonner config in App.tsx applies
+ * `!rounded-2xl !border !shadow-2xl !p-4 !text-sm !font-medium` to
+ * EVERY toast wrapper. `unstyled: true` on toast.custom() drops the
+ * Sonner DEFAULTS but does NOT remove the global toastOptions
+ * classNames — those still paint a thin white-bordered wrapper
+ * around our custom card.
+ *
+ * Zero everything out per-toast (border, background, shadow,
+ * padding, radius) so the NotificationToastCard's own styling is
+ * the only thing the viewer sees. `!important` (via Tailwind's `!`
+ * prefix) beats the `!`-prefixed global classes.
+ */
+const TOAST_OVERRIDE_CLASSES = {
+  toast:
+    "!border-0 !bg-transparent !shadow-none !p-0 !rounded-none !w-auto",
+} as const;
+
 const TYPE_BEHAVIOUR: Partial<Record<NotificationType, ToastBehaviour>> = {
   // Persistent + auto-dismiss after 2s. Clickable so the viewer can
   // jump into the event page if they tap the card.
@@ -214,21 +234,17 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
             />
           ),
           {
-            // Sonner officially treats `duration: Infinity` as
-            // "no auto-dismiss". DON'T convert to a large finite
-            // number — browsers clamp setTimeout values above
-            // ~2^31 (24.8 days) down to 1ms, which would dismiss
-            // the welcome toast before the viewer ever saw it.
             duration: behaviour.durationMs,
-            // unstyled=true tells Sonner NOT to wrap our custom JSX
-            // in its default rounded/border/shadow container. The
-            // global Sonner toastOptions classNames in App.tsx
-            // (rounded-2xl + border + shadow-2xl) would otherwise
-            // double up with the NotificationToastCard's own
-            // styling — producing the "second outer outline" the
-            // user reported. With unstyled, our card silhouette is
-            // the only one rendered.
+            // unstyled drops Sonner's DEFAULT container styling,
+            // but the global toastOptions.classNames.toast in
+            // App.tsx (!border, !shadow-2xl, !rounded-2xl, !p-4)
+            // still paints a thin white-bordered wrapper around
+            // our card. Override per-custom-toast: zero border /
+            // background / shadow / padding / radius so the
+            // NotificationToastCard's own styling is the ONLY
+            // visible silhouette.
             unstyled: true,
+            classNames: TOAST_OVERRIDE_CLASSES,
           },
         );
       };
@@ -415,9 +431,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       // Same `Infinity → sticky` semantic as the realtime path
       // above. Don't normalise to MAX_SAFE_INTEGER — that gets
       // clamped to ~1ms by the browser's setTimeout. unstyled
-      // suppresses Sonner's outer container (see realtime path
-      // for the full rationale).
-      { duration, unstyled: true },
+      // + the override classNames suppress Sonner's outer
+      // container (see realtime path for the full rationale).
+      {
+        duration,
+        unstyled: true,
+        classNames: TOAST_OVERRIDE_CLASSES,
+      },
     );
   }, []);
 
