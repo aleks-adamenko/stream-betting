@@ -531,7 +531,14 @@ export interface Database {
             // by the notify-payout / notify-event-cancelled functions.
             | "bet_refunded"
             | "rake_credited"
-            | "payout_rejected";
+            | "payout_rejected"
+            // 20260609_000001_in_app_toast_notifications.sql — three
+            // new types fed by DB triggers on the bets / events
+            // tables. Drive the top-centre toast layer (see
+            // apps/user-app/src/contexts/NotificationsContext.tsx).
+            | "bet_placed"
+            | "event_finished"
+            | "round_starting";
           title: string;
           body: string | null;
           event_id: string | null;

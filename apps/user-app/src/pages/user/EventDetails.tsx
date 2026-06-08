@@ -38,6 +38,7 @@ import { useCreatorFollow } from "@/hooks/useCreatorFollow";
 import { useEventSubscription } from "@/hooks/useEventSubscription";
 import { useEventViewers } from "@/hooks/useEventViewers";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNotificationsToast } from "@/contexts/NotificationsContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
 import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
 import { placeBet } from "@/services/betsService";
@@ -1206,6 +1207,15 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const { user, profile, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { pushLocalToast } = useNotificationsToast();
+
+  // For studio-published events, event.influencer.id is the
+  // creator_profiles.id which equals auth.users.id. The streamer
+  // viewing their own event page can't place bets (place_bet RPC
+  // would reject with "Streamers cannot bet on their own event"
+  // anyway) — we disable the bet chips upfront so they don't see
+  // a clickable affordance for an action that's guaranteed to fail.
+  const isCreator = !!user && event.influencer.id === user.id;
 
   // Live pari-mutuel odds — each bet tick re-runs compute_live_odds via
   // a Realtime subscription on event_outcomes.
@@ -1267,7 +1277,12 @@ function BetPanel({ event }: { event: StreamEvent }) {
       // refetch makes the panel flip to "Your bet" before the click
       // target is even re-enabled.
       await queryClient.refetchQueries({ queryKey: betsKeys.mine() });
-      toast.success(`Bet placed: ${stakeCoins} on "${outcome.label}"`);
+      // No inline success toast — NotificationsProvider picks up
+      // the `bet_placed` row inserted by the AFTER INSERT trigger
+      // on public.bets (20260609_000001 migration) and renders the
+      // unified custom card. ~200ms latency, Sonner animation
+      // covers the gap. Keeping the optimistic toast here would
+      // double-toast.
       setSelected(null);
     } catch (err) {
       // PostgrestError carries .message via duck-typing (extends
@@ -1285,7 +1300,22 @@ function BetPanel({ event }: { event: StreamEvent }) {
           typeof (err as { message?: unknown }).message === "string" &&
           (err as { message: string }).message) ||
         "Failed to place bet";
-      toast.error(message);
+
+      // "Streamers cannot bet on their own event" → route through
+      // the custom-card warning toast so it matches the rest of
+      // the notification layer visually. Other errors stay on
+      // Sonner's native red-toast (sonner.error) — those are
+      // catastrophic + want the destructive treatment.
+      if (message.toLowerCase().includes("streamers cannot bet")) {
+        pushLocalToast({
+          type: "payout_rejected",
+          title: "Heads up",
+          body: "Creators can't bet on their own event.",
+          durationMs: 4000,
+        });
+      } else {
+        toast.error(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -1357,7 +1387,12 @@ function BetPanel({ event }: { event: StreamEvent }) {
           // bet on this event. The disabled state for signed-out and
           // post-bet viewers is purely visual — no onClick attached
           // means the row reads as a static info pill.
-          const rowClickable = !!user && !hasBet && !submitting;
+          // `isCreator` blocks the streamer from clicking their own
+          // outcomes (server-side place_bet rejects with 42501 anyway;
+          // disabling here avoids surfacing a click target that's
+          // guaranteed to fail). The inline caption below the
+          // outcome list explains.
+          const rowClickable = !!user && !hasBet && !submitting && !isCreator;
           return (
             <li key={o.id}>
               <div
@@ -1454,6 +1489,17 @@ function BetPanel({ event }: { event: StreamEvent }) {
 
       {!progress.minimumsMet && (
         <ReadinessCard progress={progress} className="mt-3" />
+      )}
+
+      {/* Streamer self-bet block — only the event creator sees this.
+          Renders a small inline caption explaining why the outcome
+          rows aren't clickable. Server-side place_bet still rejects
+          (42501) if somehow called, and the catch in placeBetAt
+          surfaces the same message via pushLocalToast. */}
+      {isCreator && (
+        <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-center text-xs text-amber-700 dark:text-amber-300">
+          You can't bet on your own event.
+        </p>
       )}
 
       {/* Sign-in CTA for unauthenticated viewers — sits below the

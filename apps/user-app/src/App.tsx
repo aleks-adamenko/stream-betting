@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster as Sonner } from "sonner";
 
 import { AuthProvider } from "@/contexts/AuthContext";
+import { NotificationsProvider } from "@/contexts/NotificationsContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProfileLayout } from "@/components/layout/ProfileLayout";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -56,6 +57,14 @@ const App = () => (
             },
           }}
         />
+        {/* NotificationsProvider opens one Realtime channel against
+            public.notifications (filtered by user_id = auth.uid()) and
+            renders a custom card via toast.custom() for every new row.
+            Must sit inside BrowserRouter (it uses useLocation()) and
+            inside AuthProvider (it reads the user). Wraps <Routes>
+            because the provider relies on the router context to read
+            the current pathname for "suppress on event page" logic. */}
+        <NotificationsProvider>
         <Routes>
           {/* Auth routes — own layout, no sidebar/top-bar */}
           <Route path="/auth/sign-up" element={<SignUp />} />
@@ -102,6 +111,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
+        </NotificationsProvider>
       </AuthProvider>
     </BrowserRouter>
   </QueryClientProvider>
