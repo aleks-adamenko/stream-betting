@@ -1140,11 +1140,22 @@ export default function LiveStream() {
         </div>
       )}
 
+      {/* Multi-round cancel: any round before the current one has
+          already settled (declare_winner + advance_round / mark_final
+          fired its settle_round on the way through), so finish_event's
+          server-side branch only refunds the *current* incomplete
+          round. We surface that explicitly so the streamer isn't
+          surprised that round 1's pool didn't blow up when they
+          cancelled mid-round 2. */}
+      {(() => null)()}
       {/* End-stream modal — single entry point regardless of whether
-          the betting window has closed. Three flavours of copy
-          depending on what ending right now actually does:
-            • willCancel=true → cancel + refund (window still open
-              OR minimums not met). Copy emphasises the refund.
+          the betting window has closed. Four flavours of copy:
+            • Multi-round, currentRound > 1, willCancel=true →
+              per-round status list (settled vs refunded) + Cancel
+              stream. Only the current round refunds; prior rounds
+              already settled to payouts-pending-approval.
+            • willCancel=true (single-round OR multi-round on round 1)
+              → cancel + refund. Copy emphasises the refund.
             • bettingClosed && minimums met → declare-winner picker.
             • else (shouldn't really happen — willCancel covers it)
               → vanilla end-stream copy. */}
@@ -1158,12 +1169,55 @@ export default function LiveStream() {
             </DialogTitle>
             <DialogDescription>
               {willCancel
-                ? bettingClosed
+                ? event?.round_format === "multi" &&
+                  (event?.current_round ?? 1) > 1
+                  ? "Rounds you've already settled keep their payouts (waiting on LiveRush settlement approval). Only the current in-progress round will refund — see the breakdown below."
+                  : bettingClosed
                   ? "This event didn't reach the minimum bets needed to settle (participants, outcomes, or pool). Cancelling now refunds every bet in full and closes the stream."
                   : "The betting window is still open. Cancelling now closes the stream and refunds every bet in full — no winner is declared."
                 : "Pick the outcome(s) that won. Multi-select supports dead heats. Once submitted, the event flips to Pending settlement and a LiveRush moderator releases payouts."}
             </DialogDescription>
           </DialogHeader>
+
+          {/* Per-round status list — only when there's > 1 round to
+              show (multi-round events past their first round). */}
+          {willCancel &&
+            event?.round_format === "multi" &&
+            (event?.current_round ?? 1) > 1 && (
+              <ul className="space-y-2 py-2">
+                {Array.from({ length: event.current_round ?? 1 }, (_, i) => {
+                  const roundNum = i + 1;
+                  const isCurrent = roundNum === event.current_round;
+                  return (
+                    <li
+                      key={roundNum}
+                      className={cn(
+                        "flex items-start gap-3 rounded-lg border p-3 text-sm",
+                        isCurrent
+                          ? "border-destructive/40 bg-destructive/[0.06]"
+                          : "border-emerald-500/30 bg-emerald-500/[0.06]",
+                      )}
+                    >
+                      {isCurrent ? (
+                        <PhoneOff className="mt-0.5 h-4 w-4 flex-shrink-0 text-destructive" />
+                      ) : (
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-semibold">
+                          Round {roundNum}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {isCurrent
+                            ? "Bets in this round will refund in full."
+                            : "Settled — payouts pending LiveRush approval."}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           {!willCancel && (
             <ul className="space-y-2 py-2">
               {outcomes.map((o) => {
@@ -1239,7 +1293,7 @@ export default function LiveStream() {
                 style={{ backgroundImage: "none" }}
               >
                 <PhoneOff className="h-4 w-4" />
-                Cancel stream & refund
+                Cancel stream
               </Button>
             )}
           </div>

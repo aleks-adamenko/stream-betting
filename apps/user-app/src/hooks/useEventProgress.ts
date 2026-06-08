@@ -112,6 +112,24 @@ export function useEventProgress(eventId: string | undefined): {
             void fetchProgress();
           },
         )
+        // Multi-round: when advance_round / mark_final_round bumps
+        // events.current_round, the RPC now scopes counts to the new
+        // round and we need an immediate refetch so the readiness
+        // gauge resets in the same tick the round changes. The
+        // event_outcomes pool_cents reset usually fires first, but
+        // subscribing to events too removes any ordering surprise.
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "events",
+            filter: `id=eq.${eventId}`,
+          },
+          () => {
+            void fetchProgress();
+          },
+        )
         .subscribe();
     }, 0);
 

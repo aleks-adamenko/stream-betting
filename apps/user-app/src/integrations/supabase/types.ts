@@ -369,6 +369,11 @@ export interface Database {
           odds_snapshot: number | null;
           // Client-generated UUID for idempotent retries.
           idempotency_key: string | null;
+          // Per-round scoping (multi-round migration). Single-round
+          // events keep this at 1; multi-round events bump it on each
+          // `advance_round` so per-round pools / settlements / "one
+          // bet per round" uniqueness all key off this column.
+          round_index: number;
         };
         Insert: Omit<Database["public"]["Tables"]["bets"]["Row"], "id" | "placed_at"> & {
           id?: string;

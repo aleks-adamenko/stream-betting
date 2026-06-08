@@ -121,6 +121,7 @@ export async function listMyBets(): Promise<BetWithContext[]> {
       `
       id, user_id, event_id, outcome_id, amount_cents, odds_decimal,
       odds_snapshot, status, payout_cents, placed_at, settled_at,
+      round_index,
       event:events!bets_event_id_fkey ( id, title, cover_url, status, category ),
       outcome:event_outcomes!bets_outcome_id_fkey ( id, label ),
       payout:payouts!payouts_bet_id_fkey ( id, type, amount_cents, status, completed_at )

@@ -149,6 +149,16 @@ export default function EventDetails() {
             void queryClient.invalidateQueries({
               queryKey: eventsKeys.detail(id),
             });
+            // Multi-round: when the streamer advances rounds
+            // (advance_round → current_round bumps and the prior
+            // round's bets settle to won/lost/refunded), we want the
+            // viewer's bet list to refresh too so My Bets / the "Your
+            // bet" panel show the new status without a manual reload.
+            // The BetPanel's existingBet lookup already filters by
+            // round_index === currentRound so it flips back to "Place
+            // a bet" the moment the event row arrives; this just keeps
+            // the underlying bet rows accurate.
+            void queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
           },
         )
         .subscribe();
@@ -506,24 +516,29 @@ export default function EventDetails() {
               <FinishedPanel event={event} />
             )}
           </div>
-          {/* Mobile-only rewards banner — sits between bet panel and chat */}
-          <Link
-            to="/rewards"
-            aria-label="Rewards"
-            className="order-2 block w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:hidden"
-          >
-            <img src={rewardsBannerImg} alt="" className="block h-auto w-full" />
-          </Link>
           {/* Chat slot takes the remaining vertical space inside the
               sticky aside on desktop. min-h-0 is the magic flex
               utility that lets the slot shrink below its content's
               natural height so the inner ul can scroll. When the
               betting panel collapses, its row shrinks and the
-              flex-1 chat grows to absorb the freed pixels. */}
-          <div className="order-3 lg:order-3 lg:flex-1 lg:min-h-0">
+              flex-1 chat grows to absorb the freed pixels. On
+              mobile this sits directly under the bet panel — the
+              rewards banner now drops below it (order-3 below) so
+              the chat stays adjacent to the betting flow. */}
+          <div className="order-2 lg:order-3 lg:flex-1 lg:min-h-0">
             <ChatPanel eventId={event.id} eventStatus={event.status} />
           </div>
-          {/* Event info — mobile placement, below the chat container.
+          {/* Mobile-only rewards banner — sits below the chat
+              container on phones; desktop renders its own copy in
+              the main column under Rules. */}
+          <Link
+            to="/rewards"
+            aria-label="Rewards"
+            className="order-3 block w-full overflow-hidden rounded-2xl border border-border/30 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 lg:hidden"
+          >
+            <img src={rewardsBannerImg} alt="" className="block h-auto w-full" />
+          </Link>
+          {/* Event info — mobile placement, below the rewards banner.
               On desktop this same block already renders inside the
               main column under Rules; lg:hidden removes the dupe so
               we don't render twice on desktop. */}
@@ -1186,12 +1201,19 @@ function BetPanel({ event }: { event: StreamEvent }) {
     progress.minimumsMet ? (liveOddsById.get(outcome.id) ?? null) : null;
   const displayOddsList = event.outcomes.map((o) => oddsFor(o) ?? 1);
 
-  // One bet per (user, event). If the viewer has already placed a bet
-  // on this event, show their position instead of the form.
+  // One bet per (user, event, round). The DB enforces uniqueness on
+  // (user_id, event_id, round_index); the UI mirrors that filter so
+  // the moment the streamer advances rounds (events.current_round
+  // increments via Realtime → React Query invalidates → event re-
+  // fetches), the previous round's settled bet drops out of this
+  // lookup and the panel flips back to "Place a bet" for the new
+  // round without any manual reload. Single-round events keep
+  // current_round = 1 forever, so the behaviour is identical.
   const { data: myBets } = useMyBets();
   const existingBet = myBets?.find(
     (b) =>
       b.event_id === event.id &&
+      b.round_index === event.currentRound &&
       (b.status === "open" ||
         b.status === "placed" ||
         b.status === "won_pending_payout" ||
@@ -1218,7 +1240,16 @@ function BetPanel({ event }: { event: StreamEvent }) {
       }
       await placeBet(event.id, outcome.id, cents);
       await refreshProfile();
-      queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
+      // Refetch the bets cache and AWAIT it (not invalidateQueries +
+      // fire-and-forget). The BetPanel decides "Place a bet" vs
+      // "Your bet" from `myBets`; if we release the submitting lock
+      // before the new bet is in the cache, the user sees the stake
+      // chips again and double-clicks → place_bet RPC rejects with
+      // `already_bet` because the DB-side uniqueness on
+      // (user_id, event_id, round_index) already holds. Awaiting the
+      // refetch makes the panel flip to "Your bet" before the click
+      // target is even re-enabled.
+      await queryClient.refetchQueries({ queryKey: betsKeys.mine() });
       toast.success(`Bet placed: ${stakeCoins} on "${outcome.label}"`);
       setSelected(null);
     } catch (err) {
@@ -1424,18 +1455,15 @@ function BetPanel({ event }: { event: StreamEvent }) {
       )}
 
       {/* Post-bet footer — the picked outcome row above already shows
-          the stake; this block just gives the viewer a way out and an
-          honest reminder that the pool will keep moving. */}
+          the stake; this caption is just an honest reminder that the
+          pool will keep moving. (No "View in My Bets" button — the
+          existing bet panel above already names the outcome + stake,
+          and My Bets is one tap away from the bottom nav.) */}
       {hasBet && existingBet && (
-        <div className="mt-4 space-y-3">
-          <p className="text-center text-[11px] text-muted-foreground">
-            One bet per event. Live odds keep moving — final payout is set
-            at settlement.
-          </p>
-          <Button asChild variant="secondary" size="lg" className="w-full">
-            <Link to="/my-bets">View in My Bets</Link>
-          </Button>
-        </div>
+        <p className="mt-4 text-center text-[11px] text-muted-foreground">
+          One bet per event. Live odds keep moving — final payout is set
+          at settlement.
+        </p>
       )}
 
       {/* Subscriber count line stays visible while the event is live

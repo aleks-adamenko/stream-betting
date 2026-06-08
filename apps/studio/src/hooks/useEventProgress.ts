@@ -124,6 +124,24 @@ export function useEventProgress(eventId: string | undefined): {
             void fetchProgress();
           },
         )
+        // Multi-round: refetch when events.current_round changes
+        // (advance_round / mark_final_round) so the readiness panel
+        // flips back to red the instant the new round opens, even
+        // before any new bets land. Without this the panel would
+        // still show green until the first new-round bet bumped
+        // event_outcomes.pool_cents.
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "events",
+            filter: `id=eq.${eventId}`,
+          },
+          () => {
+            void fetchProgress();
+          },
+        )
         .subscribe();
     }, 0);
 

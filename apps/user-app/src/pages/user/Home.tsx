@@ -21,6 +21,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEvents } from "@/hooks/useEvents";
 import { useEventProgress } from "@/hooks/useEventProgress";
+import { useEventViewers } from "@/hooks/useEventViewers";
 import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { cn } from "@/lib/utils";
 import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
@@ -374,6 +375,13 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
   // viewers see misleading "2.00×" / sub-1× numbers on an event
   // that's guaranteed to refund.
   const { data: progress } = useEventProgress(event.id);
+  // Live viewer presence — same `event:{id}:viewers` channel the
+  // event-page BetPanel + studio LiveStream subscribe to, so the
+  // Home hero shows the same count anyone watching on the event
+  // page would see. `track: false` because this client is still on
+  // the Home page, not the player itself — only the event page
+  // bumps the count by registering as a viewer.
+  const liveViewerCount = useEventViewers(event.id, { track: false });
   const liveOddsById = new Map(
     liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
   );
@@ -407,7 +415,7 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
           <LiveBadge />
           <span className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur">
             <Users className="h-3.5 w-3.5" />
-            {numberFormatter.format(event.viewersCount)} watching
+            {numberFormatter.format(liveViewerCount)} watching
           </span>
         </div>
       </div>
