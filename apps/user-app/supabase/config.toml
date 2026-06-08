@@ -1,0 +1,38 @@
+# LiveRush — Supabase project config.
+#
+# Per-function verify_jwt overrides for Edge Functions that aren't
+# called from authenticated browsers.
+#
+# Why this file exists: trigger-dispatched functions
+# (notify-event-live, notify-new-scheduled-event, notify-payout,
+# notify-event-cancelled) are invoked by Postgres triggers via
+# net.http_post with our shared `internal_webhook_token` as the
+# bearer. That token is NOT a JWT — it's a random secret — so the
+# Supabase API Gateway's default JWT verification rejects every
+# trigger call with `UNAUTHORIZED_INVALID_JWT_FORMAT "Invalid JWT"`
+# and the function never runs.
+#
+# Setting `verify_jwt = false` here makes the Supabase CLI deploy
+# these functions with the right setting on every subsequent
+# `supabase functions deploy <name>` — no need to remember the
+# `--no-verify-jwt` CLI flag. Auth is still enforced inside the
+# function via `requireInternalToken()` (see
+# `_shared/auth.ts`), which constant-time compares the bearer
+# against the `INTERNAL_WEBHOOK_TOKEN` env var.
+#
+# DO NOT add user-facing functions here (send-subscription-email,
+# provision-stream, end-stream). Those validate the user's session
+# JWT via requireUser() and rely on the gateway's JWT pre-check as
+# defense-in-depth.
+
+[functions.notify-event-live]
+verify_jwt = false
+
+[functions.notify-new-scheduled-event]
+verify_jwt = false
+
+[functions.notify-payout]
+verify_jwt = false
+
+[functions.notify-event-cancelled]
+verify_jwt = false

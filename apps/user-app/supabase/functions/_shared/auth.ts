@@ -45,19 +45,22 @@ export class HttpError extends Error {
 
 /**
  * Internal-only auth: validate that the request carries our shared
- * bearer token from the Postgres dispatch trigger. Used by the
- * notify-event-live and notify-new-scheduled-event functions.
+ * bearer token from the Postgres dispatch trigger. Used by every
+ * trigger-dispatched function (notify-event-live,
+ * notify-new-scheduled-event, notify-payout, notify-event-cancelled).
  *
  * The token lives in Supabase Vault on the database side
  * (`vault.read_secret('internal_webhook_token')`) and as the
  * `INTERNAL_WEBHOOK_TOKEN` secret on the function side. Constant-
  * time compare so we don't leak length info via timing.
  *
- * These functions are deployed normally (not `--no-verify-jwt`) BUT
- * the JWT is the trigger's service-role JWT which the gateway already
- * accepts — this helper is the additional defense-in-depth check that
- * the call really did come from our trigger and not from a leaked
- * service-role key being misused.
+ * These functions are deployed with `verify_jwt = false` (see
+ * `supabase/config.toml`) because the trigger sends our shared
+ * secret as the bearer — NOT a JWT — and the Supabase API Gateway's
+ * default JWT verification would reject every call with
+ * `UNAUTHORIZED_INVALID_JWT_FORMAT`. With JWT verification disabled
+ * at the gateway, this helper is the ONLY auth gate, so the
+ * constant-time check matters.
  */
 export function requireInternalToken(req: Request): void {
   const expected = Deno.env.get("INTERNAL_WEBHOOK_TOKEN");

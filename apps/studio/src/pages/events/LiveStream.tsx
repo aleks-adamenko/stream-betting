@@ -771,10 +771,29 @@ export default function LiveStream() {
         return;
       }
       if (declareIntent === "final") {
+        // mark_final_round now advances the round AND opens a fresh
+        // betting window, so this opens the FINAL round for bets
+        // (instead of just flipping a flag and leaving the streamer
+        // with a closed betting window — the original bug). See
+        // 20260608_000005_multi_round_final_round_advance.sql.
         await markFinalRoundMutation.mutateAsync();
-        toast.success("Final round settled — click End stream when ready");
+        toast.success(
+          `Round ${event?.current_round ?? ""} settled — final round opening for bets`,
+        );
         setDeclareOpen(false);
         setSelectedWinners(new Set());
+        return;
+      }
+      if (declareIntent === "final-end") {
+        // The final round's betting window just closed and we
+        // declared winners for it above. Hand off to finish_event
+        // — its multi-round branch sees winning_outcome_ids set and
+        // runs settle_round under the hood (per the 20260608_000005
+        // migration), so this is the full declare → settle → finish
+        // chain in one click. handleEnd handles the navigate.
+        setDeclareOpen(false);
+        setSelectedWinners(new Set());
+        await handleEnd({ skipConfirm: true });
         return;
       }
 
@@ -899,24 +918,57 @@ export default function LiveStream() {
           // betting; finish_event closes the stream).
           event?.round_format === "multi" ? (
             event.is_final_round ? (
-              <Button
-                type="button"
-                variant="accent"
-                size="sm"
-                onClick={() => void handleEnd()}
-                disabled={phase === "ending" || finishMutation.isPending}
-                className="bg-destructive text-white hover:bg-destructive/90"
-                style={{ backgroundImage: "none" }}
-              >
-                {phase === "ending" || finishMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    <PhoneOff className="h-4 w-4" />
-                    End stream
-                  </>
-                )}
-              </Button>
+              !bettingClosed ? (
+                // Final round, betting still open — the streamer
+                // can bail early (refund + end). Same Cancel-stream
+                // path as any other in-progress round.
+                <Button
+                  type="button"
+                  variant="accent"
+                  size="sm"
+                  onClick={() => {
+                    setDeclareIntent("end");
+                    setDeclareOpen(true);
+                  }}
+                  disabled={phase === "ending" || declareWinnerMutation.isPending}
+                  className="bg-destructive text-white hover:bg-destructive/90"
+                  style={{ backgroundImage: "none" }}
+                >
+                  {phase === "ending" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <PhoneOff className="h-4 w-4" />
+                      Cancel stream
+                    </>
+                  )}
+                </Button>
+              ) : (
+                // Final round, betting closed — the streamer picks
+                // winners and the same submit declares + ends the
+                // stream (finish_event settles the round on the way
+                // out via the 20260608_000005 migration). One click,
+                // one modal, end of event.
+                <Button
+                  type="button"
+                  variant="accent"
+                  size="sm"
+                  onClick={() => {
+                    setDeclareIntent("final-end");
+                    setDeclareOpen(true);
+                  }}
+                  disabled={phase === "ending" || declareWinnerMutation.isPending}
+                >
+                  {phase === "ending" || declareWinnerMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Trophy className="h-4 w-4" />
+                      Declare winner & end
+                    </>
+                  )}
+                </Button>
+              )
             ) : !bettingClosed ? (
               // Betting window still open for the current round —
               // Next / Final round can't fire yet (declare_winner
