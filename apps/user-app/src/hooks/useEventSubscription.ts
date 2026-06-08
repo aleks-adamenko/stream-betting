@@ -78,16 +78,32 @@ export function useEventSubscription(eventId: string | undefined) {
       });
       if (rpcErr) throw rpcErr;
 
-      // Fire-and-forget the confirmation email. We don't surface an
-      // error toast if Resend has a hiccup — the subscription itself
-      // is what matters, and the in-app row is already there.
-      void supabase.functions
-        .invoke("send-subscription-email", {
-          body: { event_id: eventId },
-        })
-        .catch((err) =>
-          console.warn("send-subscription-email failed:", err),
-        );
+      // Fire-and-forget the confirmation email. The subscription
+      // itself is what matters, and the in-app row is already
+      // there if the email path hiccups.
+      //
+      // We pull the session access token and pass it explicitly in
+      // the Authorization header. `supabase.functions.invoke()`
+      // *should* attach the session JWT automatically, but in
+      // practice it sometimes ships only the anon key — the function
+      // gateway accepts that, but `auth.getUser()` inside the
+      // function rejects it with a 401 because the anon key isn't a
+      // user. Explicit header pinning makes the auth deterministic.
+      void (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const headers: Record<string, string> = {};
+          if (session?.access_token) {
+            headers.Authorization = `Bearer ${session.access_token}`;
+          }
+          await supabase.functions.invoke("send-subscription-email", {
+            body: { event_id: eventId },
+            headers,
+          });
+        } catch (err) {
+          console.warn("send-subscription-email failed:", err);
+        }
+      })();
     },
     onSuccess: () => {
       if (!eventId) return;
