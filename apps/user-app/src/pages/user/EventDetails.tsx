@@ -11,6 +11,7 @@ import {
   Trophy,
   LogIn,
   BadgeCheck,
+  Star,
   Volume2,
   VolumeX,
   X,
@@ -43,10 +44,12 @@ import { placeBet } from "@/services/betsService";
 import { betsKeys, useMyBets } from "@/hooks/useMyBets";
 import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { useEventProgress, type EventProgress } from "@/hooks/useEventProgress";
+import { useEventRoundsSummary } from "@/hooks/useEventRoundsSummary";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { oddsPillClasses, oddsRange } from "@/lib/odds";
 import {
+  liveOddsFor,
   payoutPreview,
   MAX_BET_CENTS,
   MIN_BET_CENTS,
@@ -1563,15 +1566,21 @@ function UpcomingPanel({ event }: { event: StreamEvent }) {
         {event.outcomes.map((o) => (
           <li
             key={o.id}
-            className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-2"
+            // px-3 py-1 matches the BetPanel + FinishedPanel rows
+            // (live + finished states) so the right-rail card has
+            // consistent vertical rhythm across the three lifecycle
+            // variants.
+            className="flex items-center justify-between rounded-lg border border-border/40 bg-background/60 px-3 py-1"
           >
             <span className="truncate text-sm font-medium">{o.label}</span>
             {/* Scheduled events have no pool yet — odds don't exist
                 until the stream goes live and viewers start betting.
-                Show "Open" placeholder per spec §8.2 so we don't
-                mislead viewers with the legacy 2.00× default. */}
-            <span className="ml-3 inline-flex flex-shrink-0 items-center rounded-full bg-muted px-2.5 py-1 text-sm font-extrabold tabular-nums text-muted-foreground">
-              Open
+                Bare muted "—" (no pill bg) matches the BetPanel
+                pre-minimums rendering, so a scheduled event reads
+                the same as a live event waiting for its first
+                bets — both states share "no odds yet" semantics. */}
+            <span className="ml-3 font-heading text-sm font-bold tabular-nums text-muted-foreground">
+              —
             </span>
           </li>
         ))}
@@ -1650,8 +1659,11 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
     <div className="mt-4 space-y-2">
       {showButton && (
         // Subscribed state keeps the rectangular secondary Button to
-        // signal a passive "already done" affordance; the primary
-        // "Notify me when live" CTA gets the brushed blue gradient.
+        // signal a passive "already done" affordance; the "Notify
+        // me when live" CTA gets the brushed accent yellow gradient
+        // so it carries the same visual weight as the sign-in CTA
+        // on the live BetPanel — both are the headline action for
+        // unauthenticated / pre-live viewers on the right rail.
         isSubscribed ? (
           <Button
             onClick={onClick}
@@ -1665,7 +1677,7 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
           </Button>
         ) : (
           <BrushButton
-            variant="primary"
+            variant="accent"
             onClick={onClick}
             disabled={isPending || isSubscribedLoading}
             className="w-full gap-2"
@@ -1686,35 +1698,89 @@ function NotifyMeBlock({ event }: { event: StreamEvent }) {
 }
 
 function FinishedPanel({ event }: { event: StreamEvent }) {
-  // Final odds = pari-mutuel ratio frozen at cutoff. compute_live_odds
-  // reads the current pool_cents which is unchanged after the betting
-  // window closes, so it's the right number to display here. Legacy
-  // event_outcomes.odds is ignored.
+  // Live odds = pari-mutuel ratio from the CURRENT pool_cents on
+  // event_outcomes. For a single-round event that's still the right
+  // number after the betting window closes (pool_cents doesn't move
+  // post-cutoff). For a multi-round event the live pools reflect
+  // only the LAST round, so the per-round summary RPC (below) is
+  // the source of truth for switching back through earlier rounds.
   const { data: liveOddsData } = useLiveOdds(event.id);
   const { data: progress } = useEventProgress(event.id);
+  // Per-round summary — only meaningfully populated for multi-round
+  // events. Used to drive the round switcher tabs and to recompute
+  // per-round odds from the per-round bet pools.
+  const { data: roundsData } = useEventRoundsSummary(
+    event.roundFormat === "multi" ? event.id : undefined,
+  );
+  const isMultiRound = event.roundFormat === "multi";
+  // Selected round for the switcher. Defaults to round 1 (user
+  // explicitly asked for round 1 as the initial tab). Falls back to
+  // 1 when rounds haven't loaded yet — the switcher just won't
+  // appear until roundsData populates.
+  const [selectedRound, setSelectedRound] = useState<number>(1);
+
+  // For multi-round events, pick the selected round's summary. For
+  // single-round, the "round" concept doesn't render so we fall
+  // through to the live-odds path below.
+  const selectedRoundSummary = useMemo(() => {
+    if (!isMultiRound || !roundsData) return null;
+    return (
+      roundsData.find((r) => r.roundIndex === selectedRound) ??
+      roundsData[0] ??
+      null
+    );
+  }, [isMultiRound, roundsData, selectedRound]);
+
+  // Build the per-outcome (odds, isWinner) map for whichever view we're
+  // rendering. Multi-round reads from the selected round's summary;
+  // single-round uses the live (frozen) odds and event.winning_outcome_ids.
   const liveOddsById = new Map(
     liveOddsData.outcomes.map((o) => [o.outcome_id, o.live_odds] as const),
   );
-  const finalOddsList = event.outcomes.map(
-    (o) => liveOddsById.get(o.id) ?? 1,
-  );
-  const { min: oddsMin, max: oddsMax } = oddsRange(finalOddsList);
-  // Collapse toggle — chevron in the top-right replaces the old
-  // "Ended / Cancelled / Awaiting result" status chip. Lifecycle
-  // context is now carried by the inline hero block (and by the
-  // panel just being the FinishedPanel) instead of by the header.
+  const winningIds = new Set<string>();
+  const oddsById = new Map<string, number | null>();
+  if (isMultiRound && selectedRoundSummary) {
+    // Per-round odds: total pool from this round's outcome sums,
+    // distributable applies the standard rake (RAKE_BPS = 1000).
+    const total = selectedRoundSummary.outcomePools.reduce(
+      (acc, p) => acc + p.pool_cents,
+      0,
+    );
+    const poolById = new Map(
+      selectedRoundSummary.outcomePools.map((p) => [p.outcome_id, p.pool_cents] as const),
+    );
+    for (const o of event.outcomes) {
+      oddsById.set(o.id, liveOddsFor(poolById.get(o.id) ?? 0, total));
+    }
+    // Suppress winner highlights entirely when the round was refunded
+    // (settle_round short-circuited on minimums, no winner declared).
+    if (!selectedRoundSummary.wasRefunded) {
+      selectedRoundSummary.winningOutcomeIds.forEach((id) => winningIds.add(id));
+    }
+  } else {
+    // Single-round path: live odds + event-level winner list.
+    for (const o of event.outcomes) {
+      oddsById.set(o.id, liveOddsById.get(o.id) ?? null);
+    }
+    (event.winningOutcomeIds ?? []).forEach((id) => winningIds.add(id));
+  }
+
+  const displayOddsList = event.outcomes.map((o) => oddsById.get(o.id) ?? 1);
+  const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
+
   const [collapsed, setCollapsed] = useState(false);
-  // `pending_moderation` and `settled` ride the same "Ended" panel as
-  // `finished`, but the inline hero changes to make the in-between
-  // states obvious.
   const isAwaitingResult = event.status === "pending_moderation";
   const isCancelled = event.status === "cancelled";
-  const hadBets = progress.totalPoolCents > 0;
-  // Map declared winning outcome ids → labels. We no longer render a
-  // separate "Winners: X · Y" hero card — the yellow-tinted rows in
-  // the Final odds list below already tell that story without doubling
-  // the headline up.
-  const winningIds = new Set(event.winningOutcomeIds ?? []);
+  const hadBets = progress.totalPoolCents > 0
+    || (roundsData?.some((r) => r.outcomePools.some((p) => p.pool_cents > 0)) ?? false);
+
+  // Round-switcher is only visible once we have summary data AND the
+  // event is genuinely multi-round with at least one settled round.
+  const showRoundSwitcher = isMultiRound && (roundsData?.length ?? 0) > 0;
+  // Refunded badge under the outcome list — only multi-round, only
+  // when the currently-selected round was refunded.
+  const selectedWasRefunded = !!selectedRoundSummary?.wasRefunded;
+
   return (
     <section className="card-elevated overflow-hidden">
       <div className="flex items-center justify-between bg-gradient-to-r from-[#1973FF] to-[#5048FF] px-4 py-1.5 text-white">
@@ -1742,12 +1808,11 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
       {!collapsed && (
       <div className="space-y-4 p-2.5 sm:p-3">
 
-      {/* Lifecycle hero — only rendered for the "no winner to point
-          at" cases (awaiting result, cancelled, finished-but-no-bets,
-          or legacy finished events without winning_outcome_ids).
-          When winners ARE declared, we skip this block entirely so
-          the yellow-tinted rows in the Final odds list below carry
-          the message on their own — no duplication. */}
+      {/* Lifecycle hero — kept only for the two cases that genuinely
+          need a sentence of context: awaiting moderator review, and
+          a cancelled (refunded) event. The "Stream finished" no-bets
+          and legacy no-winner cases are dropped per UX feedback —
+          the empty outcomes list speaks for itself. */}
       {isAwaitingResult ? (
         <div className="rounded-xl bg-amber-500/10 p-4 text-center">
           <p className="font-heading text-sm font-semibold text-amber-700 dark:text-amber-300">
@@ -1765,66 +1830,161 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
             All bets were refunded.
           </p>
         </div>
-      ) : !hadBets ? (
-        // Stream ended but nobody ever placed a bet. Showing a
-        // "Winner" line here would be misleading — there's no winner
-        // because there's nothing to win. Keep it short and neutral.
-        <div className="rounded-xl bg-muted/50 p-4 text-center">
-          <p className="font-heading text-sm font-semibold">Stream finished</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            No bets were placed on this event.
-          </p>
-        </div>
-      ) : winningIds.size === 0 ? (
-        // Legacy `finished` events from before the pari-mutuel pipeline
-        // — no winning_outcome_ids stamped. Show a generic ended message.
-        <div className="rounded-xl bg-muted/50 p-4 text-center">
-          <p className="font-heading text-sm font-semibold">Stream finished</p>
-        </div>
       ) : null}
 
-      {/* Final odds only make sense when the pool actually had bets.
-          Otherwise we'd be showing "Open" or "—" on every row, which
-          is just noise on a stream that ended empty. No section title
-          here — the panel header ("Final result") already frames what
-          the list is, and the yellow-tinted rows carry the "these
-          won" signal on their own. */}
+      {/* Final odds list. Winners get a pulsing glow + four
+          staggered sparkles drifting around the row so the result
+          is unmistakable at a glance. */}
       {hadBets && (
-        <div>
-          <ul className="space-y-2">
+        <div className="space-y-3">
+          <ul className="space-y-3">
             {event.outcomes.map((o) => {
-              const odds = liveOddsById.get(o.id) ?? null;
+              const odds = oddsById.get(o.id) ?? null;
               const isWinner = winningIds.has(o.id);
               return (
                 <li
                   key={o.id}
                   className={cn(
-                    "flex items-center justify-between rounded-lg border px-3 py-2",
+                    // px-3 py-1 matches the BetPanel outcome row
+                    // (live / upcoming states), keeping the finished
+                    // panel's vertical rhythm consistent with the
+                    // rest of the right-rail card.
+                    "relative flex items-center justify-between rounded-lg border px-3 py-1 transition-colors",
                     isWinner
-                      ? "border-accent/60 bg-accent/[0.12]"
+                      ? "winner-glow border-accent/70 bg-gradient-to-br from-accent/[0.18] via-accent/[0.10] to-transparent"
                       : "border-border/40 bg-background/60",
                   )}
                 >
-                  <span className="flex items-center gap-2 text-sm">
+                  {/* Stars — only on winners. Four classic
+                      5-point lucide `Star` icons filled solid in
+                      accent yellow, positioned at the four corners
+                      with unique drift vectors (--sparkle-dx /
+                      --sparkle-dy) + staggered animation delays so
+                      they twinkle out of phase. We use the simpler
+                      Star shape (instead of lucide's busier
+                      Sparkles) because the row is small and a
+                      filled silhouette reads as "winner" much
+                      faster than a multi-point sparkle. pointer-
+                      events-none keeps them clear of clicks. */}
+                  {isWinner && (
+                    <>
+                      <Star
+                        aria-hidden
+                        className="winner-sparkle pointer-events-none absolute -left-1 -top-2 h-4 w-4 fill-accent text-accent drop-shadow-[0_0_6px_hsl(var(--accent)/0.7)]"
+                        style={{
+                          // Drift up-left.
+                          ["--sparkle-dx" as never]: "-6px",
+                          ["--sparkle-dy" as never]: "-6px",
+                          animationDelay: "0ms",
+                        }}
+                      />
+                      <Star
+                        aria-hidden
+                        className="winner-sparkle pointer-events-none absolute -right-1 -top-2 h-3 w-3 fill-accent text-accent drop-shadow-[0_0_6px_hsl(var(--accent)/0.7)]"
+                        style={{
+                          ["--sparkle-dx" as never]: "6px",
+                          ["--sparkle-dy" as never]: "-7px",
+                          animationDelay: "650ms",
+                        }}
+                      />
+                      <Star
+                        aria-hidden
+                        className="winner-sparkle pointer-events-none absolute -bottom-2 left-6 h-3.5 w-3.5 fill-accent text-accent drop-shadow-[0_0_6px_hsl(var(--accent)/0.7)]"
+                        style={{
+                          ["--sparkle-dx" as never]: "-4px",
+                          ["--sparkle-dy" as never]: "8px",
+                          animationDelay: "1300ms",
+                        }}
+                      />
+                      <Star
+                        aria-hidden
+                        className="winner-sparkle pointer-events-none absolute -bottom-1 right-10 h-3 w-3 fill-accent text-accent drop-shadow-[0_0_6px_hsl(var(--accent)/0.7)]"
+                        style={{
+                          ["--sparkle-dx" as never]: "5px",
+                          ["--sparkle-dy" as never]: "7px",
+                          animationDelay: "1950ms",
+                        }}
+                      />
+                    </>
+                  )}
+                  <span className="relative flex items-center gap-2 text-sm">
                     {isWinner && (
-                      <Trophy className="h-3.5 w-3.5 text-accent" />
+                      <Trophy className="h-3.5 w-3.5 text-accent drop-shadow-[0_0_4px_hsl(var(--accent)/0.7)]" />
                     )}
                     {o.label}
                   </span>
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
-                      odds == null
-                        ? "bg-muted text-muted-foreground"
-                        : oddsPillClasses(odds, oddsMin, oddsMax),
-                    )}
-                  >
-                    {odds == null ? "—" : `${odds.toFixed(2)}×`}
-                  </span>
+                  {/* Bare "—" for no-odds (refunded round or no
+                      bets on this outcome) matches the BetPanel and
+                      StreamCard styling — no pill bg so the column
+                      doesn't look like a clickable badge on a
+                      result that's already locked in. */}
+                  {odds == null ? (
+                    <span className="relative font-heading text-sm font-bold tabular-nums text-muted-foreground">
+                      —
+                    </span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "relative inline-flex items-center rounded-full px-2.5 py-1 text-sm font-extrabold tabular-nums",
+                        oddsPillClasses(odds, oddsMin, oddsMax),
+                      )}
+                    >
+                      {`${odds.toFixed(2)}×`}
+                    </span>
+                  )}
                 </li>
               );
             })}
           </ul>
+
+          {/* Round switcher — only renders for multi-round events
+              once we have rounds data. Tabs default to round 1; the
+              selected tab drives the winners + odds shown above.
+              Single-round events skip this block entirely. */}
+          {showRoundSwitcher && (roundsData?.length ?? 0) > 1 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {roundsData!.map((r) => {
+                const isActive = r.roundIndex === selectedRound;
+                return (
+                  <button
+                    key={r.roundIndex}
+                    type="button"
+                    onClick={() => setSelectedRound(r.roundIndex)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                      isActive
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border/50 bg-background/60 text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                    )}
+                    aria-pressed={isActive}
+                  >
+                    Round {r.roundIndex}
+                    {r.wasRefunded && (
+                      <span
+                        className={cn(
+                          "ml-1.5 text-[10px]",
+                          isActive ? "opacity-80" : "text-muted-foreground/80",
+                        )}
+                      >
+                        · refunded
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Refund note — surfaces BELOW the round switcher for the
+              selected round when settle_round refunded everyone
+              (minimums not met). Short + factual; the round-pill
+              already carries the "refunded" badge so this is just
+              the human-readable reason. */}
+          {selectedWasRefunded && (
+            <p className="text-center text-xs text-muted-foreground">
+              Requirements were not met. Full round refund.
+            </p>
+          )}
         </div>
       )}
       </div>

@@ -77,6 +77,14 @@ type LedgerRow = {
   reference_id: string | null;
   event_id: string | null;
   event_title: string | null;
+  // Added by 20260608_000002_admin_ledger_payout_type.sql. When a
+  // ledger entry's reference_id resolves to a payouts row, these
+  // surface the destination so two visually-identical event_pool
+  // payout_pending outflows (rake_streamer vs rake_platform) can
+  // be told apart at a glance.
+  payout_type: string | null;
+  payout_recipient_role: "streamer" | "platform" | "viewer" | null;
+  payout_recipient_label: string | null;
   created_at: string;
 };
 
@@ -278,9 +286,30 @@ export default function Ledger() {
                         />
                       </td>
                       <td className="px-4 py-2 text-xs">
-                        <span className="rounded-full bg-secondary px-2 py-0.5 font-mono text-[10px]">
-                          {row.type}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-flex w-fit items-center rounded-full bg-secondary px-2 py-0.5 font-mono text-[10px]">
+                            {row.type}
+                          </span>
+                          {/* When the ledger row is a payout outflow
+                              from event_pool (rake_streamer /
+                              rake_platform / winner / residual /
+                              refund), surface the destination so
+                              two visually-identical -X.XX rows can
+                              be told apart at a glance. */}
+                          {row.payout_type && (
+                            <span className="inline-flex w-fit items-center gap-1 text-[10px] text-muted-foreground">
+                              <span className="font-mono">{row.payout_type}</span>
+                              {row.payout_recipient_label && (
+                                <>
+                                  <span>→</span>
+                                  <span className="font-semibold text-foreground">
+                                    {row.payout_recipient_label}
+                                  </span>
+                                </>
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td
                         className={cn(

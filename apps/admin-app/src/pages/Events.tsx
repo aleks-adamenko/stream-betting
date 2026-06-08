@@ -153,6 +153,39 @@ export default function Events() {
     },
   });
 
+  // Cumulative-pool lookup. event_outcomes.pool_cents only tracks the
+  // CURRENT round on multi-round events, so summing it client-side
+  // hides the total across rounds. get_admin_event_totals sums
+  // bets.amount_cents across every round in one round-trip; we cache
+  // the result as a Map keyed by event_id and use it in the table
+  // cell + the drawer's meta block.
+  const eventIds = useMemo(() => (data ?? []).map((e) => e.id), [data]);
+  const { data: totalsMap } = useQuery({
+    queryKey: ["admin", "events", "totals", eventIds],
+    queryFn: async () => {
+      if (eventIds.length === 0) return new Map<string, number>();
+      const { data: rows, error: rpcError } = await supabase.rpc(
+        "get_admin_event_totals",
+        { p_event_ids: eventIds },
+      );
+      if (rpcError) throw rpcError;
+      const m = new Map<string, number>();
+      for (const r of (rows ?? []) as Array<{
+        event_id: string;
+        total_pool_cents: number | string;
+      }>) {
+        m.set(r.event_id, Number(r.total_pool_cents ?? 0));
+      }
+      return m;
+    },
+    enabled: eventIds.length > 0,
+  });
+  // Cumulative pool helper. Falls back to event_outcomes.pool_cents
+  // (single-round-correct, current-round-only for multi-round) until
+  // the totals RPC resolves — so the cell isn't empty on first paint.
+  const totalPoolFor = (evt: EventListRow) =>
+    totalsMap?.get(evt.id) ?? totalPoolCents(evt);
+
   // Client-side filter. Matches across event name, event id, and the
   // creator's id / handle / display_name so an operator can paste any
   // of those into the search to narrow the list.
@@ -327,7 +360,10 @@ export default function Events() {
                       </div>
                     </td>
                     <td className="px-4 py-2 text-right font-heading text-sm font-bold tabular-nums whitespace-nowrap">
-                      <CoinAmount cents={totalPoolCents(evt)} className="justify-end" />
+                      {/* Cumulative pool across rounds for multi-round
+                          events; single-round events match the legacy
+                          event_outcomes.pool_cents sum exactly. */}
+                      <CoinAmount cents={totalPoolFor(evt)} className="justify-end" />
                     </td>
                   </tr>
                 ))}
@@ -374,8 +410,22 @@ type PayoutRow = {
   reject_reason: string | null;
   reject_notes: string | null;
   bet_id: string | null;
+  // Added by 20260608_000004_admin_per_round_payouts.sql — backfilled
+  // best-effort on existing rows; new payouts from settle_round always
+  // carry the value. Null means we couldn't recover the round
+  // (very old legacy payouts).
+  round_index: number | null;
   created_at: string;
   completed_at: string | null;
+};
+
+// Row returned by get_event_rounds_summary. Used by the drawer's
+// per-round pool block + the payouts grouping logic.
+type RoundSummaryRow = {
+  round_index: number;
+  was_refunded: boolean;
+  winning_outcome_ids: string[] | null;
+  outcome_pools: Array<{ outcome_id: string; pool_cents: number | string }> | null;
 };
 
 function EventDrawer({
@@ -419,7 +469,7 @@ function EventDrawer({
       const { data, error } = await supabase
         .from("payouts")
         .select(
-          "id, type, recipient_id, recipient_kind, amount_cents, status, reject_reason, reject_notes, bet_id, created_at, completed_at",
+          "id, type, recipient_id, recipient_kind, amount_cents, status, reject_reason, reject_notes, bet_id, round_index, created_at, completed_at",
         )
         .eq("event_id", eventId)
         .order("created_at", { ascending: true });
@@ -427,6 +477,40 @@ function EventDrawer({
       return (data as PayoutRow[]) ?? [];
     },
   });
+
+  // Per-round breakdown for the drawer. Single-round events still
+  // get one row back (round_index=1) so the "Pools per round" block
+  // is rendered for them too — but we only SHOW the block when
+  // there's more than one round (no value in a one-row breakdown).
+  const { data: rounds } = useQuery({
+    queryKey: ["admin", "events", eventId, "rounds-summary"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc(
+        "get_event_rounds_summary",
+        { p_event_id: eventId },
+      );
+      if (error) throw error;
+      return ((data ?? []) as RoundSummaryRow[]).map((r) => ({
+        roundIndex: Number(r.round_index ?? 1),
+        wasRefunded: !!r.was_refunded,
+        winningOutcomeIds: r.winning_outcome_ids ?? [],
+        totalPoolCents: (r.outcome_pools ?? []).reduce(
+          (acc, o) => acc + Number(o.pool_cents ?? 0),
+          0,
+        ),
+      }));
+    },
+  });
+
+  // Cumulative total pool across every round — replaces the legacy
+  // event_outcomes.pool_cents sum that only ever reflected the
+  // current (last) round on multi-round events.
+  const cumulativeTotalCents = useMemo(() => {
+    if (!rounds) return event ? totalPoolCents(event) : 0;
+    return rounds.reduce((acc, r) => acc + r.totalPoolCents, 0);
+  }, [rounds, event]);
+
+  const isMultiRound = event?.round_format === "multi";
 
   const invalidateAll = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin", "events"] });
@@ -659,7 +743,12 @@ function EventDrawer({
                     {event.round_format}
                   </DetailField>
                   <DetailField label="Total pool">
-                    <CoinAmount cents={totalPoolCents(event)} />
+                    {/* Cumulative across every round — single-round
+                        events get the same value the legacy summary
+                        produced; multi-round events now correctly
+                        include rounds whose pool_cents has been
+                        reset to 0 by advance_round. */}
+                    <CoinAmount cents={cumulativeTotalCents} />
                   </DetailField>
                   <DetailField label="Betting window">
                     {event.betting_window_minutes != null
@@ -698,6 +787,44 @@ function EventDrawer({
                   )}
                 </dl>
               </section>
+
+              {/* Per-round pool breakdown — only useful when there's
+                  more than one round to compare. Renders settled
+                  rounds in emerald + refunded rounds in muted with
+                  a "refunded" tag so the admin can see at a glance
+                  how the volume distributed across rounds. */}
+              {isMultiRound && rounds && rounds.length > 1 && (
+                <section>
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Pools per round
+                  </h3>
+                  <ul className="space-y-2">
+                    {rounds.map((r) => (
+                      <li
+                        key={r.roundIndex}
+                        className={cn(
+                          "flex items-center justify-between rounded-lg border px-3 py-2",
+                          r.wasRefunded
+                            ? "border-border/40 bg-muted/30"
+                            : "border-emerald-500/30 bg-emerald-500/[0.06]",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 text-sm font-semibold">
+                          Round {r.roundIndex}
+                          {r.wasRefunded && (
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Refunded
+                            </span>
+                          )}
+                        </span>
+                        <span className="font-heading text-sm font-bold tabular-nums">
+                          <CoinAmount cents={r.totalPoolCents} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
               {/* Action buttons */}
               <section className="rounded-xl border border-border/40 bg-card p-4">
@@ -741,7 +868,18 @@ function EventDrawer({
                 )}
               </section>
 
-              {/* Payouts table */}
+              {/* Payouts — grouped by round_index for multi-round
+                  events so the operator can approve a round's
+                  winner(s) + rake_streamer + rake_platform together
+                  before moving to the next round. Single-round
+                  events only have one bucket (round 1) and the
+                  bucket header is suppressed below to keep the
+                  view identical to the legacy flat list.
+
+                  Legacy payouts with round_index=null (predate the
+                  20260608_000004 backfill OR backfill couldn't
+                  recover the round) land in a trailing "Unknown
+                  round" bucket so they're still visible + actionable. */}
               <section>
                 <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
                   Payouts ({(payouts ?? []).length})
@@ -756,17 +894,72 @@ function EventDrawer({
                     No payouts yet — settle the event to create them.
                   </p>
                 )}
-                {payouts && payouts.length > 0 && (
-                  <div className="divide-y divide-border/40 rounded-xl border border-border/40 bg-card">
-                    {payouts.map((p) => (
-                      <PayoutRowCard
-                        key={p.id}
-                        payout={p}
-                        onChange={invalidateAll}
-                      />
-                    ))}
-                  </div>
-                )}
+                {payouts && payouts.length > 0 && (() => {
+                  // Bucket payouts by round_index, preserving original
+                  // chronological order within each bucket.
+                  const buckets = new Map<number | null, PayoutRow[]>();
+                  for (const p of payouts) {
+                    const key = p.round_index ?? null;
+                    if (!buckets.has(key)) buckets.set(key, []);
+                    buckets.get(key)!.push(p);
+                  }
+                  const orderedKeys = Array.from(buckets.keys()).sort((a, b) => {
+                    if (a === null) return 1;
+                    if (b === null) return -1;
+                    return a - b;
+                  });
+                  // Show round headers only when there's > 1 bucket
+                  // (multi-round event) — single-round payout lists
+                  // stay visually identical to before.
+                  const showHeaders = orderedKeys.length > 1;
+                  return (
+                    <div className="space-y-4">
+                      {orderedKeys.map((key) => {
+                        const rows = buckets.get(key)!;
+                        const pendingInBucket = rows.filter(
+                          (p) => p.status === "pending",
+                        ).length;
+                        return (
+                          <div key={key ?? "unknown"}>
+                            {showHeaders && (
+                              <div className="mb-2 flex items-baseline justify-between gap-2">
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+                                  {/* Null-round bucket holds payouts
+                                      the backfill couldn't pin to a
+                                      specific round (very old legacy
+                                      rows). Surface them as "General
+                                      event payouts" so the operator
+                                      sees them as event-scoped
+                                      housekeeping rather than as a
+                                      data error. */}
+                                  {key === null
+                                    ? "General event payouts"
+                                    : `Round ${key}`}
+                                </h4>
+                                <span className="text-[11px] text-muted-foreground">
+                                  {rows.length} payout
+                                  {rows.length === 1 ? "" : "s"}
+                                  {pendingInBucket > 0 && (
+                                    <> · {pendingInBucket} pending</>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                            <div className="divide-y divide-border/40 rounded-xl border border-border/40 bg-card">
+                              {rows.map((p) => (
+                                <PayoutRowCard
+                                  key={p.id}
+                                  payout={p}
+                                  onChange={invalidateAll}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </section>
             </div>
           )}
