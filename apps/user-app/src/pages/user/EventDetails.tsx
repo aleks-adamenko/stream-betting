@@ -920,7 +920,21 @@ function FullscreenBetOverlay({
       );
       onClose();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to place bet";
+      // PostgrestError carries .message via duck-typing (extends
+      // Error in supabase-js, but the `instanceof Error` check
+      // sometimes fails when the error came from a different realm
+      // — e.g. a Resend error bubbled up from an inner promise).
+      // Read .message defensively so the user sees the actual
+      // server-side reason ("Streamers cannot bet on their own
+      // event", "already_bet", insufficient balance, etc.) instead
+      // of the generic fallback.
+      const message =
+        (err &&
+          typeof err === "object" &&
+          "message" in err &&
+          typeof (err as { message?: unknown }).message === "string" &&
+          (err as { message: string }).message) ||
+        "Failed to place bet";
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -1256,7 +1270,21 @@ function BetPanel({ event }: { event: StreamEvent }) {
       toast.success(`Bet placed: ${stakeCoins} on "${outcome.label}"`);
       setSelected(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to place bet";
+      // PostgrestError carries .message via duck-typing (extends
+      // Error in supabase-js, but the `instanceof Error` check
+      // sometimes fails when the error came from a different realm
+      // — e.g. a Resend error bubbled up from an inner promise).
+      // Read .message defensively so the user sees the actual
+      // server-side reason ("Streamers cannot bet on their own
+      // event", "already_bet", insufficient balance, etc.) instead
+      // of the generic fallback.
+      const message =
+        (err &&
+          typeof err === "object" &&
+          "message" in err &&
+          typeof (err as { message?: unknown }).message === "string" &&
+          (err as { message: string }).message) ||
+        "Failed to place bet";
       toast.error(message);
     } finally {
       setSubmitting(false);

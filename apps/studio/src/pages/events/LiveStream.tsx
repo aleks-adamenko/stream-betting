@@ -657,8 +657,13 @@ export default function LiveStream() {
     }
   }, [phase, flippingCamera, facingMode, videoEnabled, audioEnabled]);
 
-  const handleEnd = async () => {
+  // Skip the confirm dialog when the call is initiated by the
+  // auto-end watchdog below (round minimums failed) — the system
+  // is the one ending the stream, not the streamer, so a prompt
+  // would be confusing.
+  const handleEnd = async (opts?: { skipConfirm?: boolean }) => {
     if (
+      !opts?.skipConfirm &&
       !confirm(
         "End the stream now? This marks the event as finished and stops accepting bets.",
       )
@@ -711,6 +716,35 @@ export default function LiveStream() {
   // should say "Cancel stream" rather than "End stream" so the
   // streamer knows what they're agreeing to.
   const willCancel = !bettingClosed || !minimumsMet;
+  // Multi-round "auto-end watchdog" — when the current round's
+  // betting window has closed AND the round didn't reach minimums,
+  // declare_winner would just settle into a full refund and Next /
+  // Final round wouldn't make sense. Force-end the stream from the
+  // client side immediately (finish_event refunds the current
+  // round, prior settled rounds keep their payouts) and surface
+  // a notification to the streamer explaining what happened. A
+  // ref guard makes this one-shot per page-load so the effect
+  // doesn't loop while the finish_event RPC is in flight.
+  const autoEndRoundFiredRef = useRef(false);
+  const shouldAutoEndRound =
+    event?.round_format === "multi" &&
+    !event.is_final_round &&
+    bettingClosed &&
+    !minimumsMet;
+
+  useEffect(() => {
+    if (!shouldAutoEndRound) return;
+    if (autoEndRoundFiredRef.current) return;
+    if (phase !== "live") return; // already ending / not yet live
+    autoEndRoundFiredRef.current = true;
+    const roundNum = event?.current_round ?? 1;
+    toast.warning(
+      `Round ${roundNum} didn't meet betting minimums — ending the stream and refunding bets in this round.`,
+      { duration: 5000 },
+    );
+    void handleEnd({ skipConfirm: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldAutoEndRound, phase, event?.current_round]);
   const outcomes = (event?.outcomes ?? [])
     .slice()
     .sort(
@@ -912,6 +946,18 @@ export default function LiveStream() {
                   </>
                 )}
               </Button>
+            ) : shouldAutoEndRound ? (
+              // Round closed without hitting minimums. Next/Final
+              // round are nonsensical here (declare_winner would
+              // route into refund_round anyway). The auto-end
+              // watchdog above is already firing finish_event; we
+              // just show a non-interactive "Ending stream…"
+              // affordance so the streamer sees what's happening
+              // until the page navigates away.
+              <span className="inline-flex items-center gap-2 rounded-md bg-destructive/15 px-3 py-1.5 text-xs font-semibold text-destructive">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Ending stream…
+              </span>
             ) : (
               <div className="flex items-center gap-2">
                 <Button

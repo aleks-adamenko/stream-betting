@@ -35,7 +35,27 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <BrowserRouter>
       <AuthProvider>
-        <Sonner position="top-right" richColors closeButton />
+        {/* Centered, design-system-styled notifications. Errors land
+            top-center (more visible than top-right + harder to miss
+            on mobile) with richColors so destructive states render
+            with our token-driven red. expand keeps the toast wide
+            enough that long server-side error messages (e.g.
+            "Streamers cannot bet on their own event") aren't
+            truncated. */}
+        <Sonner
+          position="top-center"
+          richColors
+          closeButton
+          expand
+          toastOptions={{
+            classNames: {
+              toast:
+                "!rounded-2xl !border !shadow-2xl !p-4 !text-sm !font-medium",
+              title: "!font-heading !font-semibold !text-base",
+              description: "!text-sm !leading-relaxed",
+            },
+          }}
+        />
         <Routes>
           {/* Auth routes — own layout, no sidebar/top-bar */}
           <Route path="/auth/sign-up" element={<SignUp />} />
