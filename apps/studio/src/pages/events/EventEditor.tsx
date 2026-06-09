@@ -19,7 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Button, CoinIcon, Input } from "@liverush/ui";
+import { Button, Input } from "@liverush/ui";
 import { cn, MIN_BET_CENTS, MAX_BET_CENTS } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -103,11 +103,15 @@ const SOURCE_TYPES: Array<{
 ];
 
 const DEFAULT_ODDS = "2.00";
-// Stake caps are platform-enforced now — single source of truth lives
-// in @liverush/lib (mirrored in the SQL get_betting_constants()
-// function). The editor just clamps user input to the same bounds.
-const DEFAULT_MIN_BET_CENTS = MIN_BET_CENTS; // $1.00 platform floor
-const DEFAULT_MAX_BET_CENTS = MAX_BET_CENTS; // $10.00 platform ceiling
+// Stake caps are platform-enforced. Single source of truth lives in
+// @liverush/lib (mirrored in the SQL get_betting_constants()
+// function). The viewer-side stake chips are the fixed [1, 5, 10]
+// set, and aggregate-per-round MAX_BET = $10 is enforced inside
+// place_bet — there's no per-event override anymore, so the editor
+// stopped surfacing min/max bet fields. We still WRITE the platform
+// constants into events.min_bet_cents / events.max_bet_cents on
+// save so legacy queries (EventList completeness, admin tools) keep
+// reading the same shape — they're just no longer creator-tunable.
 
 // =========================================================================
 // Helpers
@@ -145,17 +149,9 @@ function getDefaultScheduledAtIsoLocal(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function centsToDollarsString(cents: number | null | undefined): string {
-  if (cents == null) return "";
-  return (cents / 100).toFixed(2);
-}
-
-function dollarsStringToCents(s: string): number | null {
-  if (!s.trim()) return null;
-  const n = Number(s);
-  if (!Number.isFinite(n)) return null;
-  return Math.round(n * 100);
-}
+// centsToDollarsString / dollarsStringToCents helpers were only used
+// by the now-removed min/max bet inputs. The platform-fixed values
+// are written via MIN_BET_CENTS / MAX_BET_CENTS in the RPC payload.
 
 // Supabase RPC errors are plain PostgrestError objects, not Error instances.
 // Pull the most useful text out either way.
@@ -221,12 +217,6 @@ export default function EventEditor() {
     { label: "", odds: DEFAULT_ODDS, sort_order: 0 },
     { label: "", odds: DEFAULT_ODDS, sort_order: 1 },
   ]);
-  const [minBetDollars, setMinBetDollars] = useState(
-    centsToDollarsString(DEFAULT_MIN_BET_CENTS),
-  );
-  const [maxBetDollars, setMaxBetDollars] = useState(
-    centsToDollarsString(DEFAULT_MAX_BET_CENTS),
-  );
   const [betWindowOpens, setBetWindowOpens] =
     useState<BetWindowOpens>("on_live");
   const [betWindowLocks, setBetWindowLocks] =
@@ -314,12 +304,6 @@ export default function EventEditor() {
       loaded.round_format === "event" ? "event" : "multi",
     );
     setVoidConditions(loaded.void_conditions ?? "");
-    setMinBetDollars(
-      centsToDollarsString(loaded.min_bet_cents ?? DEFAULT_MIN_BET_CENTS),
-    );
-    setMaxBetDollars(
-      centsToDollarsString(loaded.max_bet_cents ?? DEFAULT_MAX_BET_CENTS),
-    );
     setBetWindowOpens(loaded.bet_window_opens ?? "on_live");
     setBetWindowLocks(loaded.bet_window_locks ?? "manual");
     setBettingWindowMinutes(
@@ -398,14 +382,12 @@ export default function EventEditor() {
     return dupes;
   }, [outcomeLabelsLower]);
 
-  const minCents = dollarsStringToCents(minBetDollars);
-  const maxCents = dollarsStringToCents(maxBetDollars);
-  const betLimitsValid =
-    minCents !== null &&
-    maxCents !== null &&
-    minCents >= MIN_BET_CENTS &&
-    maxCents >= minCents &&
-    maxCents <= MAX_BET_CENTS;
+  // Bet limits used to be creator-tunable but are now platform
+  // constants — we still need cents values to write into the row on
+  // save so EventList's completeness check + admin tools keep reading
+  // the same shape. They're hardcoded to the @liverush/lib globals.
+  const minCents = MIN_BET_CENTS;
+  const maxCents = MAX_BET_CENTS;
 
   // Minimums needed to call create_event / update_event without the
   // DB rejecting the row. Save activates as soon as the creator has
@@ -441,11 +423,9 @@ export default function EventEditor() {
         label: "At least 2 unique outcomes defined",
         passed: validOutcomes.length >= 2 && outcomeDuplicates.size === 0,
       },
-      {
-        key: "betlimits",
-        label: "Bet limits within platform range",
-        passed: betLimitsValid,
-      },
+      // Bet-limits compliance row deleted — stake range is platform-
+      // fixed (MIN_BET_CENTS / MAX_BET_CENTS from @liverush/lib), so
+      // it's not something the creator can fail.
       {
         key: "stream",
         label: "Stream source configured",
@@ -474,7 +454,6 @@ export default function EventEditor() {
     rules,
     validOutcomes.length,
     outcomeDuplicates.size,
-    betLimitsValid,
     sourceType,
     videoUrl,
     scheduledAt,
@@ -504,8 +483,7 @@ export default function EventEditor() {
       rules.trim().length >= 30,
     betting:
       validOutcomes.length >= 2 &&
-      outcomeDuplicates.size === 0 &&
-      betLimitsValid,
+      outcomeDuplicates.size === 0,
     stream:
       // Schedule clause:
       //  • If "Schedule for later" is on, require a future
@@ -540,10 +518,6 @@ export default function EventEditor() {
       loaded.round_format === "event" ? "event" : "multi";
     if (roundFormat !== loadedFormat) return true;
     if (voidConditions !== (loaded.void_conditions ?? "")) return true;
-    if (minCents !== (loaded.min_bet_cents ?? DEFAULT_MIN_BET_CENTS))
-      return true;
-    if (maxCents !== (loaded.max_bet_cents ?? DEFAULT_MAX_BET_CENTS))
-      return true;
     if (betWindowOpens !== (loaded.bet_window_opens ?? "on_live"))
       return true;
     if (betWindowLocks !== (loaded.bet_window_locks ?? "manual"))
@@ -584,8 +558,6 @@ export default function EventEditor() {
     rules,
     roundFormat,
     voidConditions,
-    minCents,
-    maxCents,
     betWindowOpens,
     betWindowLocks,
     scheduledAt,
@@ -1391,55 +1363,14 @@ export default function EventEditor() {
           </span>
         </p>
 
-        <FieldRow
-          label="Bet amount limits"
-          helper={`Per-user, per-event stake range. Platform caps: $${(MIN_BET_CENTS / 100).toFixed(2)}–$${(MAX_BET_CENTS / 100).toFixed(2)}.`}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label
-                htmlFor="min-bet"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                Minimum bet
-              </label>
-              <Input
-                id="min-bet"
-                type="number"
-                min={MIN_BET_CENTS / 100}
-                max={MAX_BET_CENTS / 100}
-                step="0.01"
-                value={minBetDollars}
-                onChange={(e) => setMinBetDollars(e.target.value)}
-                disabled={!editable}
-              />
-            </div>
-            <div className="space-y-1">
-              <label
-                htmlFor="max-bet"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                Maximum bet
-              </label>
-              <Input
-                id="max-bet"
-                type="number"
-                min={MIN_BET_CENTS / 100}
-                max={MAX_BET_CENTS / 100}
-                step="0.01"
-                value={maxBetDollars}
-                onChange={(e) => setMaxBetDollars(e.target.value)}
-                disabled={!editable}
-              />
-            </div>
-          </div>
-          {!betLimitsValid && (minBetDollars || maxBetDollars) && (
-            <p className="text-xs text-destructive">
-              Min must be ≥ ${(MIN_BET_CENTS / 100).toFixed(2)}, max must be ≥
-              min and ≤ ${(MAX_BET_CENTS / 100).toFixed(2)}.
-            </p>
-          )}
-        </FieldRow>
+        {/* The per-event "minimum / maximum bet" inputs used to live
+            here. The user-app's stake chips are a fixed [1, 5, 10]
+            set and the aggregate-per-round MAX_BET = $10 is enforced
+            inside place_bet (see 20260610_000001 migration), so the
+            range is no longer creator-tunable. We still write the
+            platform constants into events.min_bet_cents /
+            events.max_bet_cents on save for backward compatibility
+            with EventList completeness + admin tooling. */}
 
         <FieldRow
           label="When can viewers bet?"
@@ -1681,24 +1612,10 @@ export default function EventEditor() {
                   missing:
                     validOutcomes.length < 2 || outcomeDuplicates.size > 0,
                 },
-                {
-                  label: "Bet range",
-                  // Render as `<coin> N – <coin> M` instead of the old
-                  // `$0.50 – $10.00`. 1 coin = 100 cents (see
-                  // packages/lib/src/coins.ts), so the integer coin
-                  // count is `cents / 100`. Drops the decimals because
-                  // sub-coin bets aren't a thing in the virtual model.
-                  value:
-                    minCents !== null && maxCents !== null ? (
-                      <span className="inline-flex items-center gap-1">
-                        <CoinIcon className="h-3.5 w-3.5" />
-                        {Math.round(minCents / 100)} – {Math.round(maxCents / 100)}
-                      </span>
-                    ) : (
-                      ""
-                    ),
-                  missing: !betLimitsValid,
-                },
+                // Bet-range summary row removed — stake range is
+                // platform-fixed (1/5/10 coin chips, MAX_BET=$10 per
+                // round). The studio doesn't surface it anymore
+                // because the creator can't change it.
                 {
                   label: "Betting window",
                   value: `${
