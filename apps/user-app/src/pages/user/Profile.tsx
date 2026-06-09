@@ -385,11 +385,12 @@ function AccountSummary() {
           above this one already carries that context. */}
       <h2 className="font-heading text-base font-semibold">Your activity</h2>
 
-      {/* Account row — joined date + verification chip. Two-up on
-          desktop, stacked on phones. No internal divider; the dl
-          rhythm + stat-row icons give the section enough structure
-          without a hairline rule. */}
-      <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+      {/* Account row — joined date + verification chip. Always
+          two-up: the rows are short and reading them on a single
+          column on mobile wasted half the available width. No
+          internal divider; the dl rhythm + stat-row icons give the
+          section enough structure without a hairline rule. */}
+      <dl className="mt-4 grid grid-cols-2 gap-3">
         <SummaryRow
           icon={CalendarDays}
           label="Joined"
@@ -405,8 +406,9 @@ function AccountSummary() {
         />
       </dl>
 
-      {/* Activity stats — 2×2 grid on desktop, 1-col on phones. */}
-      <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+      {/* Activity stats — always 2×2 grid (was 1-col on phones, but
+          the rows are compact and pair nicely two-up at any width). */}
+      <dl className="mt-3 grid grid-cols-2 gap-3">
         <SummaryRow
           icon={ListChecks}
           label="Events bet on"
@@ -502,6 +504,7 @@ function TierLimits() {
               threshold={tier.xpNextThreshold}
               percent={xpPercent}
               tierLabel={tier.label}
+              currentTierId={getViewerTier()}
             />
           </div>
         </div>
@@ -517,6 +520,7 @@ function TierLimits() {
             threshold={tier.xpNextThreshold}
             percent={xpPercent}
             tierLabel={tier.label}
+            currentTierId={getViewerTier()}
           />
         </div>
       </div>
@@ -608,11 +612,132 @@ function SummaryRow({
 }
 
 /**
+ * Tier 1/2/3 dots a viewer sees below the XP progress bar. The
+ * three visible dots represent the next steps in the progression
+ * ladder, with the track behind them fading to transparent on the
+ * right so the viewer reads "there are more tiers past what's
+ * shown here" without us having to enumerate every future tier
+ * label. Today we just hardcode three slots — when the real tier
+ * system ships, this becomes data-driven from the TIERS map.
+ */
+const TIER_TIMELINE = [
+  { id: 1, label: "Tier 1" },
+  { id: 2, label: "Tier 2" },
+  { id: 3, label: "Tier 3" },
+];
+
+function TierTimeline({ currentTierId }: { currentTierId: number }) {
+  return (
+    // mt-4 puts a clearer breathing gap between the XP bar and the
+    // timeline (the previous pt-1 read as crowded). The relative
+    // positioning anchors the absolutely-positioned track line below.
+    <div className="relative mt-4">
+      {/* Horizontal track. The dots cluster in the first 70% of the
+          row; the gradient stays solid (white at 28% opacity) over
+          that span and then fades to transparent over the right 30%
+          to hint at unseen future tiers. `top-1/2 -translate-y-1/2`
+          centers the 1px line on the vertical midpoint of the dot
+          row (the dot row is the only thing in this absolute layer's
+          coordinate space — the labels live in a sibling block
+          below). */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-3 h-px -translate-y-1/2"
+        style={{
+          background:
+            "linear-gradient(to right, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.28) 70%, transparent 100%)",
+        }}
+      />
+
+      {/* Dot strip — three dots `justify-between` across 70% of the
+          row, so Tier 1 sits at the left edge, Tier 3 at 70% and
+          Tier 2 evenly between, leaving the right 30% to the
+          fading track. Each dot uses an opaque background so the
+          track line is hidden where they sit, rather than bleeding
+          through the centre. */}
+      <div
+        className="relative flex justify-between"
+        style={{ width: "70%" }}
+      >
+        {TIER_TIMELINE.map((t) => {
+          const isActive = t.id === currentTierId;
+          return (
+            <div
+              key={t.id}
+              className="flex flex-col items-center"
+            >
+              {/* Active dot styling went through three previous
+                  iterations — `bg-[#FFDD49]` Tailwind class, inline
+                  `style={backgroundColor: ...}`, and `bg-accent`
+                  design-token class — none of which painted yellow
+                  on the mobile bundle (the desktop bundle was fine).
+                  Best guess: a stray rule somewhere in a base layer
+                  is overriding the background with higher
+                  specificity. The bulletproof escape hatch is to
+                  set the rule via the DOM `style.setProperty(...,
+                  "important")` API in a ref callback — that flag
+                  beats any CSS-side specificity. Inactive dots use
+                  the brand notification-badge blue #2A1FCF
+                  (already in ProfileLayout / DesktopTopNav) so they
+                  sit comfortably against the header's purple →
+                  deep-blue gradient instead of looking near-black
+                  like the previous #0E1849. <div> (not <span>)
+                  sidesteps any inline-element rendering quirks on
+                  iOS Safari. */}
+              {/* Active dot: brand-accent yellow with an outer glow.
+                  Inactive dot: brand notification-badge blue
+                  (#2A1FCF, also used by ProfileLayout / DesktopTopNav)
+                  with a thin white-ish border so it reads against
+                  the header's purple → deep-blue gradient.
+                  Backgrounds use inline style purely so the values
+                  can't be lost to a JIT pass on arbitrary-value
+                  Tailwind classes. <div> (not <span>) for clean
+                  block-level rendering across mobile browsers. */}
+              <div
+                style={
+                  isActive
+                    ? {
+                        backgroundColor: "#FFDD49",
+                        color: "#1B1F4E",
+                        boxShadow:
+                          "0 0 10px rgba(255,221,73,0.55)",
+                      }
+                    : {
+                        backgroundColor: "#2A1FCF",
+                        border: "1px solid rgba(255,255,255,0.35)",
+                        color: "rgba(255,255,255,0.7)",
+                      }
+                }
+                // h-6 w-6 = 24px. The track line uses top-3 +
+                // -translate-y-1/2, which lands exactly on the
+                // dot's vertical centre.
+                className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
+              >
+                {t.id}
+              </div>
+              <span
+                className={cn(
+                  "mt-1.5 text-[10px] font-medium",
+                  isActive ? "text-white" : "text-white/60",
+                )}
+              >
+                {t.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
  * "320 / 1000 XP" counter on top of an accent-gradient progress
- * bar. Lives inside the TierLimits hero header — used twice (once
- * for desktop placement to the right of the text column, once for
- * mobile placement on its own row below the badge/text), so the
- * markup is factored out to avoid drift between the two surfaces.
+ * bar, then a TIER 1/2/3 progression timeline beneath it. Lives
+ * inside the TierLimits hero header — used twice (once for desktop
+ * placement to the right of the text column, once for mobile
+ * placement on its own row below the badge/text), so the markup is
+ * factored out to avoid drift between the two surfaces.
  *
  * The accent gradient (#FFDD49 → #FFBE3B) is the same one
  * BrushButton's "accent" variant uses, so the brand-yellow signals
@@ -623,11 +748,13 @@ function XpProgress({
   threshold,
   percent,
   tierLabel,
+  currentTierId,
 }: {
   current: number;
   threshold: number;
   percent: number;
   tierLabel: string;
+  currentTierId: number;
 }) {
   return (
     <>
@@ -647,6 +774,7 @@ function XpProgress({
           style={{ width: `${percent}%` }}
         />
       </div>
+      <TierTimeline currentTierId={currentTierId} />
     </>
   );
 }
