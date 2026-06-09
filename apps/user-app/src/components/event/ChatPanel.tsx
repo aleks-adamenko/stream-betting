@@ -89,6 +89,13 @@ export function ChatPanel({ eventId, eventStatus }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const listRef = useRef<HTMLUListElement>(null);
+  // Ref on the composer input so we can re-focus it after a successful
+  // send. The submit handler doesn't naturally preserve focus (the
+  // <button type="submit"> grabs it on the implicit form submission
+  // path), which made the cursor "fall out" of the input on every
+  // send — viewers had to tap back into it to fire off another line.
+  // On mobile that meant the soft keyboard collapsed mid-conversation.
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to the latest line on every new message. Skipped
   // while collapsed because the list isn't in the DOM then; on
@@ -110,6 +117,15 @@ export function ChatPanel({ eventId, eventStatus }: ChatPanelProps) {
     try {
       await sendMessage(trimmed);
       setDraft("");
+      // Re-focus the composer so the next message can be typed
+      // immediately. Deferred to the next frame so React has time
+      // to re-render with `sending=false` (the input was disabled
+      // during the send) before we call focus() on it — otherwise
+      // the focus() call lands on a still-disabled element and is
+      // a no-op on iOS Safari.
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
     } catch (err) {
       const message =
         typeof err === "object" && err !== null && "message" in err
@@ -208,13 +224,22 @@ export function ChatPanel({ eventId, eventStatus }: ChatPanelProps) {
                 className="flex items-center gap-2 border-t border-border/30 bg-muted/40 px-3 py-3"
               >
                 <input
+                  ref={inputRef}
                   type="text"
                   placeholder="Say something…"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value.slice(0, MAX_BODY))}
                   maxLength={MAX_BODY}
                   disabled={sending}
-                  className="flex-1 rounded-full border border-border/40 bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+                  // Mobile font-size MUST be ≥ 16px or iOS Safari
+                  // auto-zooms the viewport on focus (the bug the
+                  // user hit: tapping the chat input made the entire
+                  // event page snap-zoom). `text-base` is 16px;
+                  // `sm:text-sm` drops back to 14px on tablet+ so the
+                  // composer doesn't look chunky in the desktop right
+                  // rail. Same trick the EventEditor uses for its
+                  // mobile inputs (task #107).
+                  className="flex-1 rounded-full border border-border/40 bg-background px-3 py-2 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 sm:text-sm"
                 />
                 <button
                   type="submit"
