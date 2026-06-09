@@ -41,9 +41,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNotificationsToast } from "@/contexts/NotificationsContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
 import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
-import { placeBet, type BetWithContext } from "@/services/betsService";
+import { placeBet } from "@/services/betsService";
 import { betsKeys, useMyBets } from "@/hooks/useMyBets";
-import { useLiveOdds, type LiveOddsSnapshot } from "@/hooks/useLiveOdds";
+import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { useEventProgress, type EventProgress } from "@/hooks/useEventProgress";
 import { useEventRoundsSummary } from "@/hooks/useEventRoundsSummary";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
@@ -813,11 +813,6 @@ function FullscreenBetOverlay({
     () => new Map(myEventBets.map((b) => [b.outcome_id, b] as const)),
     [myEventBets],
   );
-  const aggregateStakeCents = useMemo(
-    () => myEventBets.reduce((acc, b) => acc + b.amount_cents, 0),
-    [myEventBets],
-  );
-
   // Live pari-mutuel odds — every bet on this event re-flows the
   // pools, the realtime channel re-fetches, and the displayed odds
   // shift instantly.
@@ -1045,25 +1040,6 @@ function FullscreenBetOverlay({
           be enjoyed unobstructed and the centred mute button stays reachable. */}
       {user ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
-          {/* Multi-outcome position summary — single tight line so it
-              doesn't elbow the bet form below. The full per-outcome
-              if-wins breakdown lives on the BetPanel summary (side
-              rail) where there's room for a table. Here we just
-              show the aggregate. */}
-          {myEventBets.length > 0 && (
-            <div className="pointer-events-auto mb-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white/90 backdrop-blur">
-              <span>Staked</span>
-              <CoinIcon />
-              <span className="font-semibold tabular-nums">
-                {(aggregateStakeCents / 100).toFixed(2)}
-              </span>
-              <span className="text-white/70">
-                across {myEventBets.length}{" "}
-                {myEventBets.length === 1 ? "outcome" : "outcomes"} —
-                payouts settle at end
-              </span>
-            </div>
-          )}
           <div className="flex items-end justify-between gap-3">
             {/* Left: outcome column directly above the stake row */}
             <div className="pointer-events-auto space-y-2">
@@ -1347,11 +1323,6 @@ function BetPanel({ event }: { event: StreamEvent }) {
       new Map(myEventBets.map((b) => [b.outcome_id, b] as const)),
     [myEventBets],
   );
-  const aggregateStakeCents = useMemo(
-    () => myEventBets.reduce((acc, b) => acc + b.amount_cents, 0),
-    [myEventBets],
-  );
-
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
   const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
 
@@ -1641,24 +1612,12 @@ function BetPanel({ event }: { event: StreamEvent }) {
         </div>
       )}
 
-      {/* Multi-outcome position summary — replaces the old single-
-          line "One bet per event" caption. Only renders when the
-          viewer has at least one bet on the CURRENT round.
-          Surfaces the aggregate stake, per-outcome if-wins payout
-          (via the same `liveOddsFor` helper that drives the panel's
-          live odds chips), and the net P/L for each outcome — so
-          "cover every outcome with equal stakes" reads as a
-          guaranteed loss on every row, making the rake cost
-          obvious before the viewer reaches that state. */}
-      {myEventBets.length > 0 && (
-        <YourPositionSummary
-          event={event}
-          myEventBets={myEventBets}
-          aggregateStakeCents={aggregateStakeCents}
-          liveOddsSnapshot={liveOddsData}
-          minimumsMet={progress.minimumsMet}
-        />
-      )}
+      {/* (The aggregate "You staked X across N outcomes" summary
+          block lived here in an earlier multi-outcome iteration but
+          was removed at the operator's request — the per-outcome
+          "Your bet $X" pill on each row already carries the relevant
+          per-bet info, and a separate net-position table was extra
+          chrome the panel didn't need.) */}
 
       {/* Subscriber count line stays visible while the event is live
           as a social-proof signal. NotifyMeBlock returns null when
@@ -1669,153 +1628,6 @@ function BetPanel({ event }: { event: StreamEvent }) {
       </div>
       )}
     </section>
-  );
-}
-
-/**
- * Multi-outcome position summary rendered below the BetPanel
- * outcomes list whenever the signed-in viewer has at least one
- * placed bet on the current round.
- *
- * Surfaces three pieces of information the per-outcome row alone
- * can't carry:
- *   • Aggregate stake — coins committed across all outcomes
- *     this round, so the viewer can sanity-check against their
- *     remaining balance before adding more.
- *   • Per-outcome if-wins payout — `stake × live_odds` for each
- *     outcome the viewer DID bet, `0` for the ones they didn't.
- *     Uses the same pool snapshot the panel's odds chips read
- *     from, so a tick on `event_outcomes.pool_cents` re-flows
- *     both surfaces in sync.
- *   • Net (payout − aggregate stake) — green when positive, red
- *     when negative, muted when zero. "Cover every outcome with
- *     even stakes" produces a negative net on every row → the
- *     rake loss becomes obvious before the viewer commits to it.
- *
- * The block intentionally hides numeric payouts (renders "—")
- * until `progress.minimumsMet` is true. Pre-minimums the live
- * odds are deliberately suppressed across the rest of the
- * BetPanel (since the event might still refund), so showing
- * confident payout numbers here would contradict that signal.
- */
-function YourPositionSummary({
-  event,
-  myEventBets,
-  aggregateStakeCents,
-  liveOddsSnapshot,
-  minimumsMet,
-}: {
-  event: StreamEvent;
-  myEventBets: BetWithContext[];
-  aggregateStakeCents: number;
-  liveOddsSnapshot: LiveOddsSnapshot;
-  minimumsMet: boolean;
-}) {
-  // Build a (outcome_id → bet) map so the per-outcome loop is O(1).
-  const betByOutcomeId = useMemo(
-    () => new Map(myEventBets.map((b) => [b.outcome_id, b] as const)),
-    [myEventBets],
-  );
-  // Build (outcome_id → pool_cents) so we can recompute per-outcome
-  // live_odds via the shared helper, instead of relying on the
-  // server-side rounded value alone. Keeps the math identical to
-  // the rest of the betting surfaces.
-  const poolByOutcomeId = useMemo(
-    () =>
-      new Map(
-        liveOddsSnapshot.outcomes.map(
-          (o) => [o.outcome_id, o.pool_cents] as const,
-        ),
-      ),
-    [liveOddsSnapshot.outcomes],
-  );
-  const totalPoolCents = liveOddsSnapshot.totalPoolCents;
-
-  const aggregateStakeDollars = (aggregateStakeCents / 100).toFixed(2);
-  const outcomesBackedCount = myEventBets.length;
-
-  return (
-    <div className="mt-3 rounded-xl border border-primary/25 bg-primary/[0.04] p-3">
-      <p className="font-heading text-xs font-semibold leading-none text-foreground">
-        Your position
-      </p>
-      <p className="mt-1.5 flex items-center gap-1 text-sm font-semibold text-foreground">
-        You staked
-        <CoinIcon />
-        <span className="tabular-nums">{aggregateStakeDollars}</span>
-        <span className="font-normal text-muted-foreground">
-          across {outcomesBackedCount}{" "}
-          {outcomesBackedCount === 1 ? "outcome" : "outcomes"}
-        </span>
-      </p>
-
-      {/* Per-outcome if-wins payout rows. Compact: outcome label on
-          the left, payout pill + signed net on the right. */}
-      <ul className="mt-2 space-y-1.5 border-t border-border/40 pt-2">
-        {event.outcomes.map((o) => {
-          const userBet = betByOutcomeId.get(o.id);
-          const stakeCents = userBet?.amount_cents ?? 0;
-          const pool = poolByOutcomeId.get(o.id) ?? 0;
-          // Recompute via the shared helper so the math matches the
-          // odds chips (post-rake distributable / outcome pool).
-          // Returns null when the pool is empty — which is correct
-          // for "if this loser hypothetically won, nothing in the
-          // distributable side flows here yet".
-          const odds = minimumsMet ? liveOddsFor(pool, totalPoolCents) : null;
-          const payoutCents =
-            stakeCents > 0 && odds ? Math.floor(stakeCents * odds) : 0;
-          const netCents = payoutCents - aggregateStakeCents;
-
-          // Show "—" placeholders pre-minimums so we don't contradict
-          // the rest of the BetPanel's "odds hidden" signal.
-          const payoutDollars = minimumsMet
-            ? (payoutCents / 100).toFixed(2)
-            : null;
-          const netDollars = minimumsMet
-            ? Math.abs(netCents / 100).toFixed(2)
-            : null;
-          const netSign = netCents > 0 ? "+" : netCents < 0 ? "−" : "";
-          const netTone =
-            netCents > 0
-              ? "text-success"
-              : netCents < 0
-                ? "text-destructive"
-                : "text-muted-foreground";
-
-          return (
-            <li
-              key={o.id}
-              className="flex items-center justify-between gap-2 text-xs"
-            >
-              <span className="truncate text-muted-foreground">
-                If <span className="text-foreground">{o.label}</span> wins
-              </span>
-              <span className="flex flex-shrink-0 items-center gap-2 tabular-nums">
-                <span className="inline-flex items-center gap-0.5 font-semibold text-foreground">
-                  {payoutDollars == null ? (
-                    <span className="text-muted-foreground">—</span>
-                  ) : (
-                    <>
-                      <CoinIcon />
-                      {payoutDollars}
-                    </>
-                  )}
-                </span>
-                <span className={cn("font-medium", netTone)}>
-                  {netDollars == null
-                    ? ""
-                    : `(net ${netSign}${netDollars})`}
-                </span>
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-
-      <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
-        Live odds keep moving — final payouts are set at settlement.
-      </p>
-    </div>
   );
 }
 
