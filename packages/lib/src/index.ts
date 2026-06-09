@@ -3,6 +3,7 @@ export { oddsPillClasses, oddsRange } from "./odds";
 export {
   MIN_BET_CENTS,
   MAX_BET_CENTS,
+  MAX_ROUND_STAKE_CENTS,
   MAX_ODDS_CAP,
   RAKE_BPS,
   RAKE_PLATFORM_BPS,

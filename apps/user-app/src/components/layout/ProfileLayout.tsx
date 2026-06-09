@@ -91,13 +91,16 @@ export function ProfileLayout() {
        */}
       <div className="mx-auto grid gap-4 lg:max-w-[960px] lg:grid-cols-[260px_1fr] lg:gap-4">
         {/* ----- Left column (desktop sidebar / mobile tab strip) -----
-            On desktop the column is sticky and takes the full
-            visible viewport height (minus the h-12 topnav above).
-            `flex-col justify-center` then centres the avatar +
-            balance + nav block vertically in that height, so as the
-            right-column content scrolls, the sidebar stays parked
-            in the middle of the page. */}
-        <aside className="lg:sticky lg:top-12 lg:flex lg:h-[calc(100dvh-48px)] lg:flex-col lg:justify-center">
+            On desktop the column is sticky and pinned IMMEDIATELY at
+            its natural starting position (48px topnav + 18px
+            PageContainer top-pad = 66px from viewport top). Pinning
+            at top-12 (48px) the way we used to meant the aside
+            visibly drifted up 18px during the first bit of scroll
+            before sticky engaged — the operator wanted it to never
+            move at all. The height calc uses the same 66px offset
+            so the sidebar fills exactly the visible viewport from
+            its sticky position to the bottom edge. */}
+        <aside className="lg:sticky lg:top-[66px] lg:flex lg:h-[calc(100dvh-66px)] lg:flex-col">
           {/* Avatar + display name (centered, stacked) + balance card.
               Desktop only — mobile already shows the avatar in
               MobileTopBar. No surrounding card around the avatar /

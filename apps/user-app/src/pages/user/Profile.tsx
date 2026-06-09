@@ -1,12 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { Camera, KeyRound, LogOut, Mail } from "lucide-react";
+import {
+  BadgeCheck,
+  CalendarDays,
+  Camera,
+  Flag,
+  KeyRound,
+  ListChecks,
+  LogOut,
+  Mail,
+  ShieldAlert,
+  Target,
+  Trophy,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { CoinAmount, CoinIcon } from "@/components/ui/CoinAmount";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
+import { useMyBets } from "@/hooks/useMyBets";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
@@ -15,6 +29,15 @@ import {
   AVATAR_MAX_BYTES,
   AVATAR_ALLOWED_MIME,
 } from "@/services/profileService";
+import {
+  DAILY_CAP_CENTS,
+  MAX_BET_CENTS,
+  MAX_ROUND_STAKE_CENTS,
+} from "@liverush/lib";
+// Tier-1 badge artwork lives in src/assets/icons. `?url` hands Vite
+// a stable URL we can drop straight into <img src=> — same pattern
+// the Rewards page uses for rs-icon.svg.
+import tier1BadgeUrl from "@/assets/icons/tier-1-badge.png?url";
 
 export default function Profile() {
   const { user, profile, refreshProfile, signOut } = useAuth();
@@ -85,6 +108,15 @@ export default function Profile() {
         <p className="mt-1 text-sm text-muted-foreground sm:text-base">
           Manage how you appear on LiveRush.
         </p>
+
+        {/* TierLimits sits first — the tier hero (badge, XP bar,
+            betting limits) is the most "what am I right now" piece
+            of context the user wants on landing, so the gradient
+            block leads the page. AccountSummary (joined / verified /
+            lifetime stats) follows directly beneath as the
+            "how I got here" companion. */}
+        <TierLimits />
+        <AccountSummary />
 
         {/* Photo upload card */}
         <div className="mt-6 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
@@ -235,6 +267,415 @@ export default function Profile() {
           </Button>
         </div>
     </div>
+  );
+}
+
+/**
+ * Static-for-now tier definition. All viewers start at Tier 1; a
+ * future migration will introduce promotion criteria (e.g. lifetime
+ * stake, win rate, active-days) plus per-tier limit overrides. Today
+ * Tier 1 mirrors the platform-wide constants in @liverush/lib /
+ * get_betting_constants() — so the limits shown here always match
+ * what `place_bet` actually enforces. When tiered limits arrive,
+ * `getViewerTier()` becomes data-driven and TIERS gains additional
+ * entries; the component contract stays unchanged.
+ */
+const TIERS = {
+  1: {
+    label: "Tier 1",
+    maxBetCents: MAX_BET_CENTS,
+    maxRoundStakeCents: MAX_ROUND_STAKE_CENTS,
+    dailyCapCents: DAILY_CAP_CENTS,
+    description: "Starter tier. Stay active to unlock higher tiers.",
+    /** Badge artwork shown in the TierLimits header. */
+    badgeUrl: tier1BadgeUrl,
+    /** Marketing copy below the tier name in the header. */
+    nextRewardCopy: "Keep playing to unlock even better rewards!",
+    /** Faked XP for now — no XP system landed yet, but the header
+     *  has a progress bar so the design reads as "in-progress, not
+     *  flat". When the XP system arrives, swap these to data-driven
+     *  values returned by a `get_viewer_xp(user_id)` RPC; the
+     *  component contract stays the same. */
+    xpCurrent: 320,
+    xpNextThreshold: 1000,
+  },
+} as const;
+
+type TierId = keyof typeof TIERS;
+
+function getViewerTier(): TierId {
+  // No promotion logic yet — every signed-in viewer is Tier 1.
+  return 1;
+}
+
+const joinedFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+/**
+ * Lifetime-activity + verification + tier limits block. Renders at
+ * the top of the Profile page above the photo card. Pure read-only
+ * — pulls `user` / `profile` from AuthContext, lifetime bet stats
+ * from `useMyBets` (the same cached query MyBets / DesktopTopNav
+ * use, so no extra fetch), and the tier limits from the static
+ * TIERS map above.
+ *
+ * Stat semantics:
+ *   • Events bet on  — distinct event_ids the viewer has ever bet on
+ *     (any status, including refunded — the bet was placed).
+ *   • Events won     — distinct event_ids where AT LEAST one of the
+ *     viewer's bets settled as 'won'.
+ *   • Total staked   — sum of every bet's amount_cents (lifetime).
+ *     Includes losses and refunds because the money WAS at risk
+ *     when the bet was placed.
+ *   • Total won      — sum of payout_cents on bets in 'won' status.
+ *     The gross payout, not net of stake.
+ */
+function AccountSummary() {
+  const { user, profile } = useAuth();
+  const { data: bets } = useMyBets();
+
+  // Derive lifetime stats once. `bets` is React-Query-cached, so the
+  // useMemo dependency keeps this cheap on every Profile re-render.
+  const stats = useMemo(() => {
+    const eventsBetOn = new Set<string>();
+    const eventsWon = new Set<string>();
+    let totalStakedCents = 0;
+    let totalWonCents = 0;
+    for (const b of bets ?? []) {
+      if (b.event_id) eventsBetOn.add(b.event_id);
+      totalStakedCents += b.amount_cents ?? 0;
+      if (b.status === "won") {
+        if (b.event_id) eventsWon.add(b.event_id);
+        totalWonCents += b.payout_cents ?? 0;
+      }
+    }
+    return {
+      eventsBetOnCount: eventsBetOn.size,
+      eventsWonCount: eventsWon.size,
+      totalStakedCents,
+      totalWonCents,
+    };
+  }, [bets]);
+
+  const tier = TIERS[getViewerTier()];
+  // `user.created_at` is the Supabase-auth account-creation
+  // timestamp. profile.created_at would also work but we prefer
+  // the auth-side stamp so we don't depend on the profile row
+  // trigger having run yet. Defensive ?? in case the auth user
+  // somehow loads without it (shouldn't, but harmless).
+  const joinedAt = user?.created_at ? new Date(user.created_at) : null;
+  const joinedLabel = joinedAt ? joinedFormatter.format(joinedAt) : "—";
+  // Supabase auth: email_confirmed_at is non-null once the user
+  // clicked the confirmation link. Also accept profile.viewer_activated_at
+  // as a fallback signal for users who confirmed via legacy flows
+  // (the activate_viewer RPC stamps it independently).
+  const isVerified =
+    !!user?.email_confirmed_at || !!profile?.viewer_activated_at;
+
+  return (
+    <section className="mt-6 rounded-2xl border border-border/40 bg-card p-6 shadow-sm">
+      {/* Title only — matches the other Profile section headers
+          (`Profile photo`, `Display name`, `Account`,
+          `Notifications`) for consistency. The standalone TIER
+          chip + the description subheader that used to sit here
+          were dropped per operator feedback — the tier hero card
+          above this one already carries that context. */}
+      <h2 className="font-heading text-base font-semibold">Your activity</h2>
+
+      {/* Account row — joined date + verification chip. Two-up on
+          desktop, stacked on phones. No internal divider; the dl
+          rhythm + stat-row icons give the section enough structure
+          without a hairline rule. */}
+      <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+        <SummaryRow
+          icon={CalendarDays}
+          label="Joined"
+          value={joinedLabel}
+        />
+        <SummaryRow
+          icon={isVerified ? BadgeCheck : ShieldAlert}
+          label="Email"
+          value={isVerified ? "Verified" : "Not verified"}
+          valueClassName={
+            isVerified ? "text-success" : "text-muted-foreground"
+          }
+        />
+      </dl>
+
+      {/* Activity stats — 2×2 grid on desktop, 1-col on phones. */}
+      <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+        <SummaryRow
+          icon={ListChecks}
+          label="Events bet on"
+          value={stats.eventsBetOnCount.toString()}
+        />
+        <SummaryRow
+          icon={Trophy}
+          label="Events won"
+          value={stats.eventsWonCount.toString()}
+        />
+        <SummaryRow
+          label="Total staked"
+          coinValue={stats.totalStakedCents}
+        />
+        <SummaryRow
+          label="Total won"
+          coinValue={stats.totalWonCents}
+          valueClassName="text-success"
+        />
+      </dl>
+
+    </section>
+  );
+}
+
+/**
+ * Standalone "Tier N betting limits" card. Sits as a sibling card
+ * to AccountSummary so the activity stats (joined / verified /
+ * lifetime numbers) and the policy values read as two separate
+ * concerns instead of a single wide block — operator-requested
+ * layout from the dev-feedback pass.
+ *
+ * Values mirror MAX_BET_CENTS / MAX_ROUND_STAKE_CENTS /
+ * DAILY_CAP_CENTS in @liverush/lib (single source of truth shared
+ * with get_betting_constants() + place_bet). Future tiers swap the
+ * TIERS map entry; the component stays.
+ */
+function TierLimits() {
+  const tier = TIERS[getViewerTier()];
+  // Pre-compute the XP progress percent. Math.min keeps the bar at
+  // 100% even if a future XP overshoots the threshold while we wait
+  // for the tier-promote job to run. Clamping to 100 also stops a
+  // bad value from rendering a bar wider than its container.
+  const xpPercent = Math.min(
+    100,
+    Math.round((tier.xpCurrent / tier.xpNextThreshold) * 100),
+  );
+  return (
+    <section className="mt-5 overflow-hidden rounded-2xl border border-border/40 bg-card shadow-sm">
+      {/* Hero header — vertical brand gradient (purple → deep blue)
+          per the design spec. Badge artwork on the left, "Current
+          tier" + tier label + reward teaser in the middle. The XP
+          progress bar sits in the third column on desktop (`lg:`+)
+          alongside the text, and falls back to a full-width row
+          below the badge/text on mobile so the badge can keep its
+          generous size and the text column doesn't collapse. */}
+      <div className="relative bg-gradient-to-b from-[#6525FF] to-[#0124C7] px-6 py-6 text-white">
+        <div className="flex items-center gap-4 sm:gap-5">
+          <img
+            src={tier.badgeUrl}
+            alt={`${tier.label} badge`}
+            // Lock HEIGHT only, `w-auto` so the artwork's natural
+            // aspect ratio is mostly preserved (the badge is portrait
+            // — medallion on top with a ribbon hanging below). A
+            // light `scale-y-95` deliberately squeezes 5% vertically
+            // per design feedback — the ribbon reads too tall at the
+            // native ratio and the medallion needs to anchor closer
+            // to the text column's baseline.
+            style={{ transform: "scaleY(0.95)" }}
+            className="h-20 w-auto flex-shrink-0 drop-shadow-[0_4px_12px_rgba(0,0,0,0.35)] sm:h-28"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/70">
+              Current tier
+            </p>
+            <h3 className="mt-0.5 font-heading text-2xl font-extrabold uppercase tracking-wide sm:text-3xl">
+              {tier.label}
+            </h3>
+            <p className="mt-1.5 text-xs leading-snug text-white/80 sm:text-sm">
+              {tier.nextRewardCopy}
+            </p>
+          </div>
+
+          {/* Desktop XP bar — sits to the right of the text column.
+              `lg:w-44` (~176px) gives the bar room to read as a
+              progress indicator without elbowing the title.
+              `flex-shrink-0` keeps it from collapsing when the text
+              column is wide. Hidden below `lg`; the mobile copy
+              below the row picks it up. */}
+          <div className="hidden flex-shrink-0 lg:block lg:w-44">
+            <XpProgress
+              current={tier.xpCurrent}
+              threshold={tier.xpNextThreshold}
+              percent={xpPercent}
+              tierLabel={tier.label}
+            />
+          </div>
+        </div>
+
+        {/* Mobile XP bar — full-width row below the badge/text. The
+            duplicated JSX is acceptable because Tailwind `hidden` /
+            `lg:hidden` collapses each variant to display:none on the
+            opposite breakpoint, so only one copy is in the
+            accessibility tree at any time. */}
+        <div className="mt-5 lg:hidden">
+          <XpProgress
+            current={tier.xpCurrent}
+            threshold={tier.xpNextThreshold}
+            percent={xpPercent}
+            tierLabel={tier.label}
+          />
+        </div>
+      </div>
+
+      {/* Limit list — neutral card surface so the gradient hero
+          stays the visual centerpiece. Header matches the
+          `Profile photo` / `Display name` / `Account` cards below
+          for visual consistency. */}
+      <div className="p-6">
+        <h2 className="font-heading text-base font-semibold">
+          {tier.label} betting limits
+        </h2>
+        <ul className="mt-3 space-y-1">
+          <LimitRow
+            icon={Target}
+            label="Max per outcome"
+            cents={tier.maxBetCents}
+          />
+          <LimitRow
+            icon={Flag}
+            label="Max per event (or round, multi-round)"
+            cents={tier.maxRoundStakeCents}
+          />
+          <LimitRow
+            icon={CalendarDays}
+            label="Max per day"
+            cents={tier.dailyCapCents}
+          />
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * One row inside the AccountSummary stat grids. Either renders a
+ * plain text value (`value`) or a coin amount (`coinValue` —
+ * passed in cents). Keeps the visual rhythm consistent across the
+ * three stat blocks.
+ */
+function SummaryRow({
+  icon: Icon,
+  label,
+  value,
+  coinValue,
+  valueClassName,
+}: {
+  icon?: typeof Trophy;
+  label: string;
+  value?: string;
+  coinValue?: number;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      {Icon ? (
+        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Icon className="h-4 w-4" />
+        </span>
+      ) : (
+        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+          <CoinIcon className="h-4 w-4" />
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </dt>
+        <dd
+          className={cn(
+            "mt-0.5 font-heading text-sm font-bold tabular-nums text-foreground",
+            valueClassName,
+          )}
+        >
+          {/* For coin-value rows we render the bare formatted
+              number (no inline coin glyph). The circular CoinIcon
+              avatar on the left of the row already carries the
+              "this is coins" signal — using <CoinAmount> here would
+              paint a second, smaller coin glyph immediately before
+              the digits, which read as a duplicate icon next to
+              the avatar. */}
+          {coinValue !== undefined
+            ? (coinValue / 100).toFixed(2)
+            : value}
+        </dd>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "320 / 1000 XP" counter on top of an accent-gradient progress
+ * bar. Lives inside the TierLimits hero header — used twice (once
+ * for desktop placement to the right of the text column, once for
+ * mobile placement on its own row below the badge/text), so the
+ * markup is factored out to avoid drift between the two surfaces.
+ *
+ * The accent gradient (#FFDD49 → #FFBE3B) is the same one
+ * BrushButton's "accent" variant uses, so the brand-yellow signals
+ * the same "earn / progress" affordance the Place-bet CTA does.
+ */
+function XpProgress({
+  current,
+  threshold,
+  percent,
+  tierLabel,
+}: {
+  current: number;
+  threshold: number;
+  percent: number;
+  tierLabel: string;
+}) {
+  return (
+    <>
+      <p className="text-sm font-semibold tabular-nums text-white">
+        {current} / {threshold} <span className="text-white/70">XP</span>
+      </p>
+      <div
+        className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/15"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={threshold}
+        aria-valuenow={current}
+        aria-label={`${tierLabel} XP progress`}
+      >
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-[#FFDD49] to-[#FFBE3B] shadow-[0_0_8px_rgba(255,221,73,0.6)] transition-[width] duration-500"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </>
+  );
+}
+
+/** Row in the Tier-limits block — icon + label on the left, coin
+ *  amount with glyph on the right. Icons get a primary-tinted
+ *  background to match the visual language of SummaryRow's avatar
+ *  circles. */
+function LimitRow({
+  icon: Icon,
+  label,
+  cents,
+}: {
+  icon: typeof Target;
+  label: string;
+  cents: number;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3 py-1">
+      <span className="flex min-w-0 items-center gap-2.5 text-sm text-muted-foreground">
+        <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <span className="truncate">{label}</span>
+      </span>
+      <span className="inline-flex flex-shrink-0 items-center gap-1 font-heading font-bold tabular-nums text-foreground">
+        <CoinAmount cents={cents} fractionDigits={0} />
+      </span>
+    </li>
   );
 }
 
