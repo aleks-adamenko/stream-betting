@@ -41,9 +41,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNotificationsToast } from "@/contexts/NotificationsContext";
 import { ChatPanel } from "@/components/event/ChatPanel";
 import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
-import { placeBet } from "@/services/betsService";
+import { placeBet, type BetWithContext } from "@/services/betsService";
 import { betsKeys, useMyBets } from "@/hooks/useMyBets";
-import { useLiveOdds } from "@/hooks/useLiveOdds";
+import { useLiveOdds, type LiveOddsSnapshot } from "@/hooks/useLiveOdds";
 import { useEventProgress, type EventProgress } from "@/hooks/useEventProgress";
 import { useEventRoundsSummary } from "@/hooks/useEventRoundsSummary";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
@@ -158,10 +158,10 @@ export default function EventDetails() {
             // round's bets settle to won/lost/refunded), we want the
             // viewer's bet list to refresh too so My Bets / the "Your
             // bet" panel show the new status without a manual reload.
-            // The BetPanel's existingBet lookup already filters by
-            // round_index === currentRound so it flips back to "Place
-            // a bet" the moment the event row arrives; this just keeps
-            // the underlying bet rows accurate.
+            // The BetPanel's myEventBets filter is keyed on
+            // round_index === currentRound so each outcome becomes
+            // clickable again the moment the new event row arrives;
+            // this just keeps the underlying bet rows accurate.
             void queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
           },
         )
@@ -791,6 +791,33 @@ function FullscreenBetOverlay({
   const [submitting, setSubmitting] = useState(false);
   const [dragY, setDragY] = useState(0);
 
+  // Multi-outcome: same lookup pattern the BetPanel uses so the
+  // overlay's outcome chips also disable per-outcome instead of
+  // globally after the first bet. Lets the viewer place follow-up
+  // bets on other outcomes without dismissing the fullscreen view.
+  const { data: myBets } = useMyBets();
+  const myEventBets = useMemo(
+    () =>
+      (myBets ?? []).filter(
+        (b) =>
+          b.event_id === event.id &&
+          b.round_index === event.currentRound &&
+          (b.status === "open" ||
+            b.status === "placed" ||
+            b.status === "won_pending_payout" ||
+            b.status === "won"),
+      ),
+    [myBets, event.id, event.currentRound],
+  );
+  const betsByOutcomeId = useMemo(
+    () => new Map(myEventBets.map((b) => [b.outcome_id, b] as const)),
+    [myEventBets],
+  );
+  const aggregateStakeCents = useMemo(
+    () => myEventBets.reduce((acc, b) => acc + b.amount_cents, 0),
+    [myEventBets],
+  );
+
   // Live pari-mutuel odds — every bet on this event re-flows the
   // pools, the realtime channel re-fetches, and the displayed odds
   // shift instantly.
@@ -818,8 +845,27 @@ function FullscreenBetOverlay({
     ? (payoutPreview(Math.round(stakeNum * 100), selectedOdds) / 100).toFixed(2)
     : "0.00";
   const stakeExceeds = !!user && stakeNum > balanceDollars;
-  const canPlace = !!selected && stakeNum > 0 && !stakeExceeds && !submitting;
+  // Multi-outcome: bar Place when the selected outcome is already
+  // backed (server would raise `already_bet_outcome` anyway — this
+  // is the front-line gate so the click can't fire).
+  const selectedAlreadyBet = !!selected && betsByOutcomeId.has(selected.id);
+  const canPlace =
+    !!selected &&
+    stakeNum > 0 &&
+    !stakeExceeds &&
+    !submitting &&
+    !selectedAlreadyBet;
   const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
+
+  // Once the viewer places a bet, jump the selection to the next
+  // outcome they haven't backed yet (so the form is ready for the
+  // next click without the user having to manually re-select).
+  // If all outcomes are now covered, clear selection.
+  useEffect(() => {
+    if (selected && !betsByOutcomeId.has(selected.id)) return;
+    const next = event.outcomes.find((o) => !betsByOutcomeId.has(o.id));
+    setSelected(next ?? null);
+  }, [betsByOutcomeId, event.outcomes, selected]);
 
   // Drag-down to close — listen at window level so iframe taps still work.
   // Below the 8px deadzone the finger movement is treated as a tap; beyond
@@ -912,15 +958,16 @@ function FullscreenBetOverlay({
     try {
       await placeBet(event.id, selected.id, Math.round(stakeNum * 100));
       await refreshProfile();
-      queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
-      toast.success(
-        `Bet placed: $${stakeNum.toFixed(2)} on "${selected.label}"`,
-        {
-          description: `Potential payout $${potentialPayout}.`,
-        },
-      );
-      onClose();
-    } catch (err) {
+      // Await the refetch (don't fire-and-forget) so the next render
+      // sees the new bet in `myEventBets` BEFORE the submitting lock
+      // releases — otherwise a fast second click re-targets the same
+      // outcome and the server raises `already_bet_outcome`.
+      await queryClient.refetchQueries({ queryKey: betsKeys.mine() });
+      // Multi-outcome: don't close the overlay on success. The
+      // viewer might want to add another bet on a different outcome,
+      // and the bet_placed Realtime toast (NotificationsProvider)
+      // already covers the success feedback. They can dismiss
+      // manually via the X close button when they're done.
       // PostgrestError carries .message via duck-typing (extends
       // Error in supabase-js, but the `instanceof Error` check
       // sometimes fails when the error came from a different realm
@@ -998,38 +1045,80 @@ function FullscreenBetOverlay({
           be enjoyed unobstructed and the centred mute button stays reachable. */}
       {user ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
+          {/* Multi-outcome position summary — single tight line so it
+              doesn't elbow the bet form below. The full per-outcome
+              if-wins breakdown lives on the BetPanel summary (side
+              rail) where there's room for a table. Here we just
+              show the aggregate. */}
+          {myEventBets.length > 0 && (
+            <div className="pointer-events-auto mb-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white/90 backdrop-blur">
+              <span>Staked</span>
+              <CoinIcon />
+              <span className="font-semibold tabular-nums">
+                {(aggregateStakeCents / 100).toFixed(2)}
+              </span>
+              <span className="text-white/70">
+                across {myEventBets.length}{" "}
+                {myEventBets.length === 1 ? "outcome" : "outcomes"} —
+                payouts settle at end
+              </span>
+            </div>
+          )}
           <div className="flex items-end justify-between gap-3">
             {/* Left: outcome column directly above the stake row */}
             <div className="pointer-events-auto space-y-2">
               <div className="flex flex-col items-start gap-1.5">
                 {event.outcomes.map((o) => {
+                  const userBet = betsByOutcomeId.get(o.id);
+                  const hasBetThisOutcome = !!userBet;
                   const active = selected?.id === o.id;
                   const odds = oddsFor(o);
+                  // Outcomes the viewer already backed render as a
+                  // static pill ("Your bet $X") — they can't be
+                  // re-targeted (server-side `already_bet_outcome`
+                  // guard + this UI suppression). Clicks fall through
+                  // to a no-op so the surrounding gradient still
+                  // captures taps cleanly.
                   return (
                     <button
                       key={o.id}
                       type="button"
-                      onClick={() => setSelected(o)}
+                      onClick={() => {
+                        if (hasBetThisOutcome) return;
+                        setSelected(o);
+                      }}
+                      disabled={hasBetThisOutcome}
                       className={cn(
                         "flex items-center justify-between gap-2 rounded-full bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition-colors",
-                        active && "bg-primary text-primary-foreground ring-2 ring-primary",
+                        active &&
+                          !hasBetThisOutcome &&
+                          "bg-primary text-primary-foreground ring-2 ring-primary",
+                        hasBetThisOutcome &&
+                          "bg-primary/20 text-white ring-1 ring-primary/60",
                       )}
                     >
                       <span className="max-w-[150px] truncate text-left">
                         {o.label}
                       </span>
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
-                          active
-                            ? "bg-white text-primary"
-                            : odds == null
-                              ? "bg-white/15 text-white/80"
-                              : oddsPillClasses(odds, oddsMin, oddsMax),
-                        )}
-                      >
-                        {odds == null ? "—" : `${odds.toFixed(2)}×`}
-                      </span>
+                      {hasBetThisOutcome && userBet ? (
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-white/95 px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums text-primary">
+                          <CoinIcon />
+                          {(userBet.amount_cents / 100).toFixed(2)}
+                        </span>
+                      ) : (
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
+                            active
+                              ? "bg-white text-primary"
+                              : odds == null
+                                ? "bg-white/15 text-white/80"
+                                : oddsPillClasses(odds, oddsMin, oddsMax),
+                          )}
+                        >
+                          {odds == null ? "—" : `${odds.toFixed(2)}×`}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1228,23 +1317,39 @@ function BetPanel({ event }: { event: StreamEvent }) {
     progress.minimumsMet ? (liveOddsById.get(outcome.id) ?? null) : null;
   const displayOddsList = event.outcomes.map((o) => oddsFor(o) ?? 1);
 
-  // One bet per (user, event, round). The DB enforces uniqueness on
-  // (user_id, event_id, round_index); the UI mirrors that filter so
-  // the moment the streamer advances rounds (events.current_round
-  // increments via Realtime → React Query invalidates → event re-
-  // fetches), the previous round's settled bet drops out of this
-  // lookup and the panel flips back to "Place a bet" for the new
-  // round without any manual reload. Single-round events keep
-  // current_round = 1 forever, so the behaviour is identical.
+  // Multi-outcome betting: a viewer can hold one bet per OUTCOME per
+  // (event, round). The DB constraint
+  // `bets_user_event_round_outcome_unique` enforces this; the UI
+  // mirrors the filter so the moment the streamer advances rounds
+  // (events.current_round increments via Realtime → React Query
+  // invalidates → event re-fetches), the previous round's settled
+  // bets drop out and every outcome becomes clickable again for the
+  // new round. Single-round events keep current_round = 1 forever,
+  // so the behaviour is identical for them.
   const { data: myBets } = useMyBets();
-  const existingBet = myBets?.find(
-    (b) =>
-      b.event_id === event.id &&
-      b.round_index === event.currentRound &&
-      (b.status === "open" ||
-        b.status === "placed" ||
-        b.status === "won_pending_payout" ||
-        b.status === "won"),
+  const myEventBets = useMemo(
+    () =>
+      (myBets ?? []).filter(
+        (b) =>
+          b.event_id === event.id &&
+          b.round_index === event.currentRound &&
+          (b.status === "open" ||
+            b.status === "placed" ||
+            b.status === "won_pending_payout" ||
+            b.status === "won"),
+      ),
+    [myBets, event.id, event.currentRound],
+  );
+  // Map for O(1) "does the user already have a bet on this outcome"
+  // lookups inside the per-outcome render loop.
+  const betsByOutcomeId = useMemo(
+    () =>
+      new Map(myEventBets.map((b) => [b.outcome_id, b] as const)),
+    [myEventBets],
+  );
+  const aggregateStakeCents = useMemo(
+    () => myEventBets.reduce((acc, b) => acc + b.amount_cents, 0),
+    [myEventBets],
   );
 
   const balanceDollars = (profile?.balance_cents ?? 0) / 100;
@@ -1321,13 +1426,14 @@ function BetPanel({ event }: { event: StreamEvent }) {
     }
   }
 
-  // After placing a bet the panel keeps the same shape — outcomes
-  // list at top, dynamic odds still ticking via the Realtime
-  // subscription — but the bottom half flips from "stake + Place bet"
-  // to a "Your bet" position summary. This way the bettor can watch
-  // the pari-mutuel pool move in real time without losing context
-  // about what they backed.
-  const hasBet = !!existingBet;
+  // Header title flip — only switch to "Your bets" once the viewer
+  // has covered every outcome (there is literally no further bet
+  // they can place this round). Until then "Place a bet" stays
+  // accurate even after partial coverage. Single-outcome rebets are
+  // blocked at the DB level + the UI hides the stake chips on the
+  // outcomes the user already backed.
+  const hasBetEveryOutcome =
+    myEventBets.length > 0 && myEventBets.length === event.outcomes.length;
 
   return (
     <section className="card-elevated overflow-hidden">
@@ -1341,7 +1447,7 @@ function BetPanel({ event }: { event: StreamEvent }) {
         <div className="flex items-center gap-2">
           <Trophy className="h-4 w-4 fill-[#FED448] text-[#FED448]" />
           <h2 className="font-heading text-sm font-bold uppercase tracking-wide">
-            {hasBet ? "Your bet" : "Place a bet"}
+            {hasBetEveryOutcome ? "Your bets" : "Place a bet"}
           </h2>
         </div>
         <button
@@ -1376,23 +1482,25 @@ function BetPanel({ event }: { event: StreamEvent }) {
           see odds only; outcomes aren't clickable for them. */}
       <ul className="space-y-2">
         {event.outcomes.map((o) => {
-          const isUserPick = hasBet && existingBet?.outcome_id === o.id;
-          const isSelected = !hasBet && selected?.id === o.id;
-          const active = hasBet ? isUserPick : isSelected;
+          // Multi-outcome: each row is its own "have I bet THIS one?"
+          // decision. The trophy + tinted background that used to fire
+          // off a global `hasBet` now scopes to the single row.
+          const userBet = betsByOutcomeId.get(o.id);
+          const hasBetThisOutcome = !!userBet;
+          const isSelected = !hasBetThisOutcome && selected?.id === o.id;
+          const active = hasBetThisOutcome || isSelected;
           const odds = oddsFor(o);
-          const userStakeDollars = isUserPick && existingBet
-            ? (existingBet.amount_cents / 100).toFixed(2)
+          const userStakeDollars = userBet
+            ? (userBet.amount_cents / 100).toFixed(2)
             : null;
-          // Row is clickable ONLY for signed-in users with no existing
-          // bet on this event. The disabled state for signed-out and
-          // post-bet viewers is purely visual — no onClick attached
-          // means the row reads as a static info pill.
-          // `isCreator` blocks the streamer from clicking their own
-          // outcomes (server-side place_bet rejects with 42501 anyway;
-          // disabling here avoids surfacing a click target that's
-          // guaranteed to fail). The inline caption below the
-          // outcome list explains.
-          const rowClickable = !!user && !hasBet && !submitting && !isCreator;
+          // Row is clickable ONLY for signed-in users who haven't yet
+          // bet on THIS outcome. They can still bet on the others, so
+          // disabling per-row (instead of globally on "has placed any
+          // bet") is the multi-outcome update. Streamer self-bet
+          // block (server rejects with 42501) is still suppressed up
+          // front via `isCreator`.
+          const rowClickable =
+            !!user && !hasBetThisOutcome && !submitting && !isCreator;
           return (
             <li key={o.id}>
               <div
@@ -1425,19 +1533,21 @@ function BetPanel({ event }: { event: StreamEvent }) {
                 )}
               >
                 <span className="flex items-center gap-2 truncate text-sm font-medium text-foreground">
-                  {isUserPick && (
+                  {hasBetThisOutcome && (
                     <Trophy className="h-3.5 w-3.5 flex-shrink-0 fill-primary text-primary" />
                   )}
                   <span className="truncate">{o.label}</span>
                 </span>
                 <span className="ml-3 flex flex-shrink-0 items-center gap-2">
                   {/* Three states for the right-side slot:
-                      1. User-pick (hasBet): show their stake + odds.
-                      2. Selected outcome (!hasBet & signed-in): show
-                         stake chips that place the bet on click.
-                      3. Default: just the odds (or "Open" placeholder
+                      1. User already bet THIS outcome: show their
+                         stake pill + the live odds chip.
+                      2. Selected outcome (!hasBetThisOutcome & signed
+                         in): show stake chips that place the bet on
+                         click.
+                      3. Default: just the odds (or "—" placeholder
                          until minimums settle). */}
-                  {isUserPick && userStakeDollars && (
+                  {hasBetThisOutcome && userStakeDollars && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold leading-none tabular-nums text-primary">
                       Your bet <CoinIcon /> {userStakeDollars}
                     </span>
@@ -1531,16 +1641,23 @@ function BetPanel({ event }: { event: StreamEvent }) {
         </div>
       )}
 
-      {/* Post-bet footer — the picked outcome row above already shows
-          the stake; this caption is just an honest reminder that the
-          pool will keep moving. (No "View in My Bets" button — the
-          existing bet panel above already names the outcome + stake,
-          and My Bets is one tap away from the bottom nav.) */}
-      {hasBet && existingBet && (
-        <p className="mt-4 text-center text-[11px] text-muted-foreground">
-          One bet per event. Live odds keep moving — final payout is set
-          at settlement.
-        </p>
+      {/* Multi-outcome position summary — replaces the old single-
+          line "One bet per event" caption. Only renders when the
+          viewer has at least one bet on the CURRENT round.
+          Surfaces the aggregate stake, per-outcome if-wins payout
+          (via the same `liveOddsFor` helper that drives the panel's
+          live odds chips), and the net P/L for each outcome — so
+          "cover every outcome with equal stakes" reads as a
+          guaranteed loss on every row, making the rake cost
+          obvious before the viewer reaches that state. */}
+      {myEventBets.length > 0 && (
+        <YourPositionSummary
+          event={event}
+          myEventBets={myEventBets}
+          aggregateStakeCents={aggregateStakeCents}
+          liveOddsSnapshot={liveOddsData}
+          minimumsMet={progress.minimumsMet}
+        />
       )}
 
       {/* Subscriber count line stays visible while the event is live
@@ -1552,6 +1669,153 @@ function BetPanel({ event }: { event: StreamEvent }) {
       </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Multi-outcome position summary rendered below the BetPanel
+ * outcomes list whenever the signed-in viewer has at least one
+ * placed bet on the current round.
+ *
+ * Surfaces three pieces of information the per-outcome row alone
+ * can't carry:
+ *   • Aggregate stake — coins committed across all outcomes
+ *     this round, so the viewer can sanity-check against their
+ *     remaining balance before adding more.
+ *   • Per-outcome if-wins payout — `stake × live_odds` for each
+ *     outcome the viewer DID bet, `0` for the ones they didn't.
+ *     Uses the same pool snapshot the panel's odds chips read
+ *     from, so a tick on `event_outcomes.pool_cents` re-flows
+ *     both surfaces in sync.
+ *   • Net (payout − aggregate stake) — green when positive, red
+ *     when negative, muted when zero. "Cover every outcome with
+ *     even stakes" produces a negative net on every row → the
+ *     rake loss becomes obvious before the viewer commits to it.
+ *
+ * The block intentionally hides numeric payouts (renders "—")
+ * until `progress.minimumsMet` is true. Pre-minimums the live
+ * odds are deliberately suppressed across the rest of the
+ * BetPanel (since the event might still refund), so showing
+ * confident payout numbers here would contradict that signal.
+ */
+function YourPositionSummary({
+  event,
+  myEventBets,
+  aggregateStakeCents,
+  liveOddsSnapshot,
+  minimumsMet,
+}: {
+  event: StreamEvent;
+  myEventBets: BetWithContext[];
+  aggregateStakeCents: number;
+  liveOddsSnapshot: LiveOddsSnapshot;
+  minimumsMet: boolean;
+}) {
+  // Build a (outcome_id → bet) map so the per-outcome loop is O(1).
+  const betByOutcomeId = useMemo(
+    () => new Map(myEventBets.map((b) => [b.outcome_id, b] as const)),
+    [myEventBets],
+  );
+  // Build (outcome_id → pool_cents) so we can recompute per-outcome
+  // live_odds via the shared helper, instead of relying on the
+  // server-side rounded value alone. Keeps the math identical to
+  // the rest of the betting surfaces.
+  const poolByOutcomeId = useMemo(
+    () =>
+      new Map(
+        liveOddsSnapshot.outcomes.map(
+          (o) => [o.outcome_id, o.pool_cents] as const,
+        ),
+      ),
+    [liveOddsSnapshot.outcomes],
+  );
+  const totalPoolCents = liveOddsSnapshot.totalPoolCents;
+
+  const aggregateStakeDollars = (aggregateStakeCents / 100).toFixed(2);
+  const outcomesBackedCount = myEventBets.length;
+
+  return (
+    <div className="mt-3 rounded-xl border border-primary/25 bg-primary/[0.04] p-3">
+      <p className="font-heading text-xs font-semibold leading-none text-foreground">
+        Your position
+      </p>
+      <p className="mt-1.5 flex items-center gap-1 text-sm font-semibold text-foreground">
+        You staked
+        <CoinIcon />
+        <span className="tabular-nums">{aggregateStakeDollars}</span>
+        <span className="font-normal text-muted-foreground">
+          across {outcomesBackedCount}{" "}
+          {outcomesBackedCount === 1 ? "outcome" : "outcomes"}
+        </span>
+      </p>
+
+      {/* Per-outcome if-wins payout rows. Compact: outcome label on
+          the left, payout pill + signed net on the right. */}
+      <ul className="mt-2 space-y-1.5 border-t border-border/40 pt-2">
+        {event.outcomes.map((o) => {
+          const userBet = betByOutcomeId.get(o.id);
+          const stakeCents = userBet?.amount_cents ?? 0;
+          const pool = poolByOutcomeId.get(o.id) ?? 0;
+          // Recompute via the shared helper so the math matches the
+          // odds chips (post-rake distributable / outcome pool).
+          // Returns null when the pool is empty — which is correct
+          // for "if this loser hypothetically won, nothing in the
+          // distributable side flows here yet".
+          const odds = minimumsMet ? liveOddsFor(pool, totalPoolCents) : null;
+          const payoutCents =
+            stakeCents > 0 && odds ? Math.floor(stakeCents * odds) : 0;
+          const netCents = payoutCents - aggregateStakeCents;
+
+          // Show "—" placeholders pre-minimums so we don't contradict
+          // the rest of the BetPanel's "odds hidden" signal.
+          const payoutDollars = minimumsMet
+            ? (payoutCents / 100).toFixed(2)
+            : null;
+          const netDollars = minimumsMet
+            ? Math.abs(netCents / 100).toFixed(2)
+            : null;
+          const netSign = netCents > 0 ? "+" : netCents < 0 ? "−" : "";
+          const netTone =
+            netCents > 0
+              ? "text-success"
+              : netCents < 0
+                ? "text-destructive"
+                : "text-muted-foreground";
+
+          return (
+            <li
+              key={o.id}
+              className="flex items-center justify-between gap-2 text-xs"
+            >
+              <span className="truncate text-muted-foreground">
+                If <span className="text-foreground">{o.label}</span> wins
+              </span>
+              <span className="flex flex-shrink-0 items-center gap-2 tabular-nums">
+                <span className="inline-flex items-center gap-0.5 font-semibold text-foreground">
+                  {payoutDollars == null ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : (
+                    <>
+                      <CoinIcon />
+                      {payoutDollars}
+                    </>
+                  )}
+                </span>
+                <span className={cn("font-medium", netTone)}>
+                  {netDollars == null
+                    ? ""
+                    : `(net ${netSign}${netDollars})`}
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
+        Live odds keep moving — final payouts are set at settlement.
+      </p>
+    </div>
   );
 }
 
