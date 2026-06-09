@@ -13,8 +13,18 @@
  */
 
 // ---- Stake limits --------------------------------------------------------
-export const MIN_BET_CENTS = 100; // $1
-export const MAX_BET_CENTS = 1_000; // $10 — single-event ceiling
+export const MIN_BET_CENTS = 100; // $1 — per-bet floor
+// Per-OUTCOME ceiling: a single bet on a single outcome can't exceed
+// $10. A viewer covering N outcomes can still spread up to N × $10
+// of intent across them, gated by MAX_ROUND_STAKE_CENTS below.
+export const MAX_BET_CENTS = 1_000; // $10 — per-outcome ceiling
+// Aggregate per-round ceiling: sum of the user's bets across all
+// outcomes in a single round (= single-round event in the
+// single-round case). $30 allows full coverage at $7.50/outcome on a
+// 4-outcome event, or any 3-outcome split at $10 each. Each new
+// round resets the cap. Enforced inside place_bet alongside the
+// per-bet MAX_BET check.
+export const MAX_ROUND_STAKE_CENTS = 3_000; // $30 — aggregate per round
 
 // ---- Odds + rake --------------------------------------------------------
 /** Hard cap on the effective payout multiple per winner. */
