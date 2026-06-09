@@ -725,12 +725,32 @@ export default function LiveStream() {
   // a notification to the streamer explaining what happened. A
   // ref guard makes this one-shot per page-load so the effect
   // doesn't loop while the finish_event RPC is in flight.
+  //
+  // The `progress.totalPoolCents > 0` gate is what protects against
+  // the Realtime-race that fired the watchdog the moment a streamer
+  // clicked Final round / Next round on a healthy round: those RPCs
+  // settle the current round + advance current_round + zero the
+  // per-outcome pools in one transaction, and the per-table Realtime
+  // streams can land out of order on the client. If progress (now
+  // scoped to the new current_round) refetches BEFORE the events row
+  // refetches, you get a moment with:
+  //   • cached event: still round 1, is_final_round=false, window
+  //     expired → bettingClosed=true
+  //   • fresh progress: scoped to round 2, no bets yet →
+  //     minimumsMet=false
+  // Without the pool check the watchdog would fire here even though
+  // there's literally nothing to refund (pool_cents was zeroed by
+  // the advance). A `total_pool_cents > 0` requirement is the right
+  // distinguisher: in the legitimate "expired round 1 with one
+  // bettor" case the pool still carries the under-threshold bets,
+  // while in the transition case the pool reads 0.
   const autoEndRoundFiredRef = useRef(false);
   const shouldAutoEndRound =
     event?.round_format === "multi" &&
     !event.is_final_round &&
     bettingClosed &&
-    !minimumsMet;
+    !minimumsMet &&
+    progress.totalPoolCents > 0;
 
   useEffect(() => {
     if (!shouldAutoEndRound) return;
