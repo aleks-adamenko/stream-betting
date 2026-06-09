@@ -50,3 +50,34 @@
 .winner-sparkle {
   animation: sparkle-twinkle 2.6s ease-in-out infinite;
 }
+
+/* --- Flame flicker animation ----------------------------------------
+ * Used by the Home tier widget's "N day streak" header so the
+ * flame reads as alive instead of a static icon. Slight scale +
+ * rotation jitter pivoted at the base of the flame to mimic real
+ * fire movement. */
+@keyframes flame-flicker {
+  0%, 100% {
+    transform: scale(1) rotate(-2deg);
+    opacity: 1;
+  }
+  25% {
+    transform: scale(1.1) rotate(1deg);
+    opacity: 0.92;
+  }
+  50% {
+    transform: scale(0.96) rotate(2deg);
+    opacity: 1;
+  }
+  75% {
+    transform: scale(1.05) rotate(-1deg);
+    opacity: 0.95;
+  }
+}
+
+.flame-flicker {
+  animation: flame-flicker 1.6s ease-in-out infinite;
+  /* Pivot near the base so the wiggle reads like a flame rooted
+   * at its source, not a free-floating shape. */
+  transform-origin: 50% 80%;
+}

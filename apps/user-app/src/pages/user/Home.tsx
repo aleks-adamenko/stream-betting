@@ -18,6 +18,7 @@ import {
 } from "@/components/stream/SocialVideoEmbed";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { TierHeroCard } from "@/components/tier/TierHeroCard";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEvents } from "@/hooks/useEvents";
 import { useEventProgress } from "@/hooks/useEventProgress";
@@ -70,6 +71,10 @@ function SectionedHome({
   events: StreamEvent[] | undefined;
   isLoading: boolean;
 }) {
+  // Signed-in viewers get the tier panel alongside the "no live"
+  // banner; anonymous viewers see the banner full-width so we don't
+  // gate a marketing surface behind auth state.
+  const { user } = useAuth();
   const { featured, live, upcoming, past, topCreators } = useMemo(() => {
     if (!events) {
       return {
@@ -137,11 +142,20 @@ function SectionedHome({
         <FeaturedLiveSection event={featured} />
       )}
 
-      {/* No live streams right now — render a branded cover hero in the
-          slot the FeaturedLiveSection would otherwise occupy. Two
-          aspect ratios baked into the source files: 1200×630 social-card
-          for phones, 1920×418 letterbox for desktop. */}
-      {!isLoading && !featured && (
+      {/* No live streams right now — render a branded cover hero in
+          the slot the FeaturedLiveSection would otherwise occupy.
+          Two aspect ratios in the source files: 1200×630 social-card
+          for phones, 1920×418 letterbox for desktop.
+          For SIGNED-IN viewers on desktop we shrink the banner to
+          3/4 width and drop the Tier 1 hero card in the right 1/4
+          (= one event-card width in the lg/xl grids), so the page
+          surfaces "here's where you are in the rewards loop" the
+          moment they arrive. Anonymous viewers see the banner
+          full-width since the tier card is a gated affordance. */}
+      {!isLoading && !featured && user && (
+        <NoLiveSignedInHero />
+      )}
+      {!isLoading && !featured && !user && (
         <NoLiveCover />
       )}
 
@@ -212,6 +226,44 @@ function NoLiveCover() {
         alt=""
         className="hidden h-auto w-full lg:block"
       />
+    </div>
+  );
+}
+
+/**
+ * Signed-in variant of the "no live streams" hero. Splits the slot
+ * into two columns on desktop:
+ *
+ *   • Left (banner): scales to 3/4 of the row at xl+ (= 3 event-card
+ *     widths in the xl 4-col grid), 2/3 at lg (= 2 cards in the
+ *     3-col grid). The banner image is responsive (h-auto w-full)
+ *     so it shrinks proportionally to fit.
+ *   • Right (tier card): a self-contained TierHeroCard in compact
+ *     mode (XP bar stacks below the badge/text — the desktop XP-on-
+ *     the-right layout from Profile wouldn't fit in a card this
+ *     narrow). The grid's default `items-stretch` makes its height
+ *     match the banner's, so the two cards visually balance.
+ *
+ * Mobile (< lg): stack — the banner on top, the tier card below.
+ * The banner uses its phone variant (1200×630, near-square) so the
+ * stack reads cleanly without the wide letterbox cropping awkwardly.
+ */
+function NoLiveSignedInHero() {
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr] xl:grid-cols-[3fr_1fr]">
+      <div className="block w-full overflow-hidden rounded-2xl border border-border/30 bg-card shadow-lg">
+        <img
+          src={noLiveCoverMobile}
+          alt=""
+          className="block h-full w-full object-cover lg:hidden"
+        />
+        <img
+          src={noLiveCoverDesktop}
+          alt=""
+          className="hidden h-full w-full object-cover lg:block"
+        />
+      </div>
+      <TierHeroCard compact />
     </div>
   );
 }

@@ -29,15 +29,17 @@ import {
   AVATAR_MAX_BYTES,
   AVATAR_ALLOWED_MIME,
 } from "@/services/profileService";
+// Tier system + hero card live in a shared component so both
+// Profile and Home read the same TIERS data + render the same
+// gradient hero block. TierHeroContent is the inner gradient
+// (badge + XP + dots) sans card chrome — used here inside the
+// larger TierLimits card; TierHeroCard wraps it in its own card
+// for standalone use (e.g., the Home "no live streams" panel).
 import {
-  DAILY_CAP_CENTS,
-  MAX_BET_CENTS,
-  MAX_ROUND_STAKE_CENTS,
-} from "@liverush/lib";
-// Tier-1 badge artwork lives in src/assets/icons. `?url` hands Vite
-// a stable URL we can drop straight into <img src=> — same pattern
-// the Rewards page uses for rs-icon.svg.
-import tier1BadgeUrl from "@/assets/icons/tier-1-badge.png?url";
+  TIERS,
+  TierHeroContent,
+  getViewerTier,
+} from "@/components/tier/TierHeroCard";
 
 export default function Profile() {
   const { user, profile, refreshProfile, signOut } = useAuth();
@@ -270,44 +272,6 @@ export default function Profile() {
   );
 }
 
-/**
- * Static-for-now tier definition. All viewers start at Tier 1; a
- * future migration will introduce promotion criteria (e.g. lifetime
- * stake, win rate, active-days) plus per-tier limit overrides. Today
- * Tier 1 mirrors the platform-wide constants in @liverush/lib /
- * get_betting_constants() — so the limits shown here always match
- * what `place_bet` actually enforces. When tiered limits arrive,
- * `getViewerTier()` becomes data-driven and TIERS gains additional
- * entries; the component contract stays unchanged.
- */
-const TIERS = {
-  1: {
-    label: "Tier 1",
-    maxBetCents: MAX_BET_CENTS,
-    maxRoundStakeCents: MAX_ROUND_STAKE_CENTS,
-    dailyCapCents: DAILY_CAP_CENTS,
-    description: "Starter tier. Stay active to unlock higher tiers.",
-    /** Badge artwork shown in the TierLimits header. */
-    badgeUrl: tier1BadgeUrl,
-    /** Marketing copy below the tier name in the header. */
-    nextRewardCopy: "Keep playing to unlock even better rewards!",
-    /** Faked XP for now — no XP system landed yet, but the header
-     *  has a progress bar so the design reads as "in-progress, not
-     *  flat". When the XP system arrives, swap these to data-driven
-     *  values returned by a `get_viewer_xp(user_id)` RPC; the
-     *  component contract stays the same. */
-    xpCurrent: 320,
-    xpNextThreshold: 1000,
-  },
-} as const;
-
-type TierId = keyof typeof TIERS;
-
-function getViewerTier(): TierId {
-  // No promotion logic yet — every signed-in viewer is Tier 1.
-  return 1;
-}
-
 const joinedFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
   day: "numeric",
@@ -448,82 +412,11 @@ function AccountSummary() {
  */
 function TierLimits() {
   const tier = TIERS[getViewerTier()];
-  // Pre-compute the XP progress percent. Math.min keeps the bar at
-  // 100% even if a future XP overshoots the threshold while we wait
-  // for the tier-promote job to run. Clamping to 100 also stops a
-  // bad value from rendering a bar wider than its container.
-  const xpPercent = Math.min(
-    100,
-    Math.round((tier.xpCurrent / tier.xpNextThreshold) * 100),
-  );
   return (
     <section className="mt-5 overflow-hidden rounded-2xl border border-border/40 bg-card shadow-sm">
-      {/* Hero header — vertical brand gradient (purple → deep blue)
-          per the design spec. Badge artwork on the left, "Current
-          tier" + tier label + reward teaser in the middle. The XP
-          progress bar sits in the third column on desktop (`lg:`+)
-          alongside the text, and falls back to a full-width row
-          below the badge/text on mobile so the badge can keep its
-          generous size and the text column doesn't collapse. */}
-      <div className="relative bg-gradient-to-b from-[#6525FF] to-[#0124C7] px-6 py-6 text-white">
-        <div className="flex items-center gap-4 sm:gap-5">
-          <img
-            src={tier.badgeUrl}
-            alt={`${tier.label} badge`}
-            // Lock HEIGHT only, `w-auto` so the artwork's natural
-            // aspect ratio is mostly preserved (the badge is portrait
-            // — medallion on top with a ribbon hanging below). A
-            // light `scale-y-95` deliberately squeezes 5% vertically
-            // per design feedback — the ribbon reads too tall at the
-            // native ratio and the medallion needs to anchor closer
-            // to the text column's baseline.
-            style={{ transform: "scaleY(0.95)" }}
-            className="h-20 w-auto flex-shrink-0 drop-shadow-[0_4px_12px_rgba(0,0,0,0.35)] sm:h-28"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/70">
-              Current tier
-            </p>
-            <h3 className="mt-0.5 font-heading text-2xl font-extrabold uppercase tracking-wide sm:text-3xl">
-              {tier.label}
-            </h3>
-            <p className="mt-1.5 text-xs leading-snug text-white/80 sm:text-sm">
-              {tier.nextRewardCopy}
-            </p>
-          </div>
-
-          {/* Desktop XP bar — sits to the right of the text column.
-              `lg:w-44` (~176px) gives the bar room to read as a
-              progress indicator without elbowing the title.
-              `flex-shrink-0` keeps it from collapsing when the text
-              column is wide. Hidden below `lg`; the mobile copy
-              below the row picks it up. */}
-          <div className="hidden flex-shrink-0 lg:block lg:w-44">
-            <XpProgress
-              current={tier.xpCurrent}
-              threshold={tier.xpNextThreshold}
-              percent={xpPercent}
-              tierLabel={tier.label}
-              currentTierId={getViewerTier()}
-            />
-          </div>
-        </div>
-
-        {/* Mobile XP bar — full-width row below the badge/text. The
-            duplicated JSX is acceptable because Tailwind `hidden` /
-            `lg:hidden` collapses each variant to display:none on the
-            opposite breakpoint, so only one copy is in the
-            accessibility tree at any time. */}
-        <div className="mt-5 lg:hidden">
-          <XpProgress
-            current={tier.xpCurrent}
-            threshold={tier.xpNextThreshold}
-            percent={xpPercent}
-            tierLabel={tier.label}
-            currentTierId={getViewerTier()}
-          />
-        </div>
-      </div>
+      {/* Hero header — gradient block lives in the shared
+          TierHeroContent so it's identical on Profile and Home. */}
+      <TierHeroContent />
 
       {/* Limit list — neutral card surface so the gradient hero
           stays the visual centerpiece. Header matches the
@@ -608,174 +501,6 @@ function SummaryRow({
         </dd>
       </div>
     </div>
-  );
-}
-
-/**
- * Tier 1/2/3 dots a viewer sees below the XP progress bar. The
- * three visible dots represent the next steps in the progression
- * ladder, with the track behind them fading to transparent on the
- * right so the viewer reads "there are more tiers past what's
- * shown here" without us having to enumerate every future tier
- * label. Today we just hardcode three slots — when the real tier
- * system ships, this becomes data-driven from the TIERS map.
- */
-const TIER_TIMELINE = [
-  { id: 1, label: "Tier 1" },
-  { id: 2, label: "Tier 2" },
-  { id: 3, label: "Tier 3" },
-];
-
-function TierTimeline({ currentTierId }: { currentTierId: number }) {
-  return (
-    // mt-4 puts a clearer breathing gap between the XP bar and the
-    // timeline (the previous pt-1 read as crowded). The relative
-    // positioning anchors the absolutely-positioned track line below.
-    <div className="relative mt-4">
-      {/* Horizontal track. The dots cluster in the first 70% of the
-          row; the gradient stays solid (white at 28% opacity) over
-          that span and then fades to transparent over the right 30%
-          to hint at unseen future tiers. `top-1/2 -translate-y-1/2`
-          centers the 1px line on the vertical midpoint of the dot
-          row (the dot row is the only thing in this absolute layer's
-          coordinate space — the labels live in a sibling block
-          below). */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-3 h-px -translate-y-1/2"
-        style={{
-          background:
-            "linear-gradient(to right, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.28) 70%, transparent 100%)",
-        }}
-      />
-
-      {/* Dot strip — three dots `justify-between` across 70% of the
-          row, so Tier 1 sits at the left edge, Tier 3 at 70% and
-          Tier 2 evenly between, leaving the right 30% to the
-          fading track. Each dot uses an opaque background so the
-          track line is hidden where they sit, rather than bleeding
-          through the centre. */}
-      <div
-        className="relative flex justify-between"
-        style={{ width: "70%" }}
-      >
-        {TIER_TIMELINE.map((t) => {
-          const isActive = t.id === currentTierId;
-          return (
-            <div
-              key={t.id}
-              className="flex flex-col items-center"
-            >
-              {/* Active dot styling went through three previous
-                  iterations — `bg-[#FFDD49]` Tailwind class, inline
-                  `style={backgroundColor: ...}`, and `bg-accent`
-                  design-token class — none of which painted yellow
-                  on the mobile bundle (the desktop bundle was fine).
-                  Best guess: a stray rule somewhere in a base layer
-                  is overriding the background with higher
-                  specificity. The bulletproof escape hatch is to
-                  set the rule via the DOM `style.setProperty(...,
-                  "important")` API in a ref callback — that flag
-                  beats any CSS-side specificity. Inactive dots use
-                  the brand notification-badge blue #2A1FCF
-                  (already in ProfileLayout / DesktopTopNav) so they
-                  sit comfortably against the header's purple →
-                  deep-blue gradient instead of looking near-black
-                  like the previous #0E1849. <div> (not <span>)
-                  sidesteps any inline-element rendering quirks on
-                  iOS Safari. */}
-              {/* Active dot: brand-accent yellow with an outer glow.
-                  Inactive dot: brand notification-badge blue
-                  (#2A1FCF, also used by ProfileLayout / DesktopTopNav)
-                  with a thin white-ish border so it reads against
-                  the header's purple → deep-blue gradient.
-                  Backgrounds use inline style purely so the values
-                  can't be lost to a JIT pass on arbitrary-value
-                  Tailwind classes. <div> (not <span>) for clean
-                  block-level rendering across mobile browsers. */}
-              <div
-                style={
-                  isActive
-                    ? {
-                        backgroundColor: "#FFDD49",
-                        color: "#1B1F4E",
-                        boxShadow:
-                          "0 0 10px rgba(255,221,73,0.55)",
-                      }
-                    : {
-                        backgroundColor: "#2A1FCF",
-                        border: "1px solid rgba(255,255,255,0.35)",
-                        color: "rgba(255,255,255,0.7)",
-                      }
-                }
-                // h-6 w-6 = 24px. The track line uses top-3 +
-                // -translate-y-1/2, which lands exactly on the
-                // dot's vertical centre.
-                className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
-              >
-                {t.id}
-              </div>
-              <span
-                className={cn(
-                  "mt-1.5 text-[10px] font-medium",
-                  isActive ? "text-white" : "text-white/60",
-                )}
-              >
-                {t.label}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/**
- * "320 / 1000 XP" counter on top of an accent-gradient progress
- * bar, then a TIER 1/2/3 progression timeline beneath it. Lives
- * inside the TierLimits hero header — used twice (once for desktop
- * placement to the right of the text column, once for mobile
- * placement on its own row below the badge/text), so the markup is
- * factored out to avoid drift between the two surfaces.
- *
- * The accent gradient (#FFDD49 → #FFBE3B) is the same one
- * BrushButton's "accent" variant uses, so the brand-yellow signals
- * the same "earn / progress" affordance the Place-bet CTA does.
- */
-function XpProgress({
-  current,
-  threshold,
-  percent,
-  tierLabel,
-  currentTierId,
-}: {
-  current: number;
-  threshold: number;
-  percent: number;
-  tierLabel: string;
-  currentTierId: number;
-}) {
-  return (
-    <>
-      <p className="text-sm font-semibold tabular-nums text-white">
-        {current} / {threshold} <span className="text-white/70">XP</span>
-      </p>
-      <div
-        className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/15"
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={threshold}
-        aria-valuenow={current}
-        aria-label={`${tierLabel} XP progress`}
-      >
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-[#FFDD49] to-[#FFBE3B] shadow-[0_0_8px_rgba(255,221,73,0.6)] transition-[width] duration-500"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-      <TierTimeline currentTierId={currentTierId} />
-    </>
   );
 }
 
