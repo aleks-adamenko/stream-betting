@@ -56,6 +56,48 @@ function coinText(cents: number): string {
   return `🪙 ${formatCoinValue(cents)}`;
 }
 
+/** Render a scheduled-at timestamp using the RECIPIENT's IANA timezone
+ *  (captured in `profiles.timezone` by the user-app on sign-in). The
+ *  edge functions render the template ONCE PER RECIPIENT and pass
+ *  that recipient's `profiles.timezone` here so a Berlin viewer sees
+ *  "1:00 PM CEST" while a Kyiv viewer sees "2:00 PM EEST" for the
+ *  same UTC instant. When the column is null (viewer hasn't visited
+ *  the user-app since the migration that added the column) we fall
+ *  back to UTC + tag with the abbreviation.
+ *
+ *  Used by both renderNewScheduled and renderEventRescheduled so the
+ *  "Starts X" / "Was X → Now Y" labels stay byte-identical across
+ *  the two emails for the same event + same recipient. */
+function formatScheduledLabel(iso: string, ianaTimezone: string | null): string {
+  const tz =
+    ianaTimezone && ianaTimezone.trim().length > 0 ? ianaTimezone : "UTC";
+  try {
+    return new Date(iso).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: tz,
+      timeZoneName: "short",
+    });
+  } catch {
+    // Bad / unknown IANA name (extremely rare — browsers ship IANA
+    // db updates yearly). Retry with UTC so we still ship a usable
+    // label instead of crashing the email render. The plain-text
+    // fallback also catches this on stale Deno builds.
+    return new Date(iso).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+      timeZoneName: "short",
+    });
+  }
+}
+
 /** Map machine-readable cancel reasons (cancel_event sets these) to
  *  short viewer-readable explanations for the refund email body. */
 function cancelReasonLabel(reason: string | null): string {
@@ -227,24 +269,22 @@ Manage notifications: ${unsubscribeUrl()}`;
 
 /** 3) New scheduled event from a creator the viewer follows. */
 export function renderNewScheduled(
-  ctx: EventCtx & { scheduledAt: string /* ISO */ },
+  ctx: EventCtx & {
+    scheduledAt: string /* ISO */;
+    /** Recipient's IANA timezone (profiles.timezone). The edge
+     *  function calls this template once per recipient with their
+     *  own value so the time label adapts to each reader's
+     *  wall-clock. Null falls back to UTC. */
+    timeZone: string | null;
+  },
 ): RenderedEmail {
-  // IMPORTANT: Supabase Edge Functions run in UTC. `toLocaleString`
-  // with no `timeZone` option silently formats in the runtime's TZ
-  // (UTC), so an event scheduled at 13:00 UTC+3 (stored as 10:00Z)
-  // rendered as "10:00 AM" with no suffix — recipients read it as
-  // local time and showed up three hours early. Force UTC + emit
-  // the abbreviation so the time is unambiguous; recipients in
-  // different zones can convert reliably.
-  const dateLabel = new Date(ctx.scheduledAt).toLocaleString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-    timeZoneName: "short",
-  });
+  // Format in the RECIPIENT'S timezone so each viewer reads the time
+  // in their own wall-clock (e.g. Ukraine creator picks 2 PM → Kyiv
+  // recipient reads "2:00 PM EEST", Warsaw recipient reads "1:00 PM
+  // CEST", UTC recipient reads "11:00 AM UTC"). The abbreviated TZ
+  // name (`timeZoneName: "short"`) is still included so a recipient
+  // who hasn't set their TZ yet (null → UTC fallback) can convert.
+  const dateLabel = formatScheduledLabel(ctx.scheduledAt, ctx.timeZone);
   const subject = `📅 ${ctx.creatorName} scheduled: ${ctx.eventTitle}`;
   const text = `${ctx.creatorName} just scheduled a new event: "${ctx.eventTitle}".
 Starts ${dateLabel}.
@@ -285,24 +325,19 @@ export function renderEventRescheduled(
   ctx: EventCtx & {
     scheduledAt: string /* ISO */;
     previousScheduledAt: string | null /* ISO or null */;
+    /** Recipient's IANA timezone (profiles.timezone). Rendered
+     *  per-recipient — see formatScheduledLabel for the fallback. */
+    timeZone: string | null;
   },
 ): RenderedEmail {
-  // Same UTC-forced formatter as renderNewScheduled — Edge Functions
-  // run in UTC, and the time-zone abbreviation removes ambiguity for
-  // recipients in other zones.
-  const fmt = (iso: string) =>
-    new Date(iso).toLocaleString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      timeZone: "UTC",
-      timeZoneName: "short",
-    });
-  const newLabel = fmt(ctx.scheduledAt);
+  // Both labels render in the RECIPIENT's timezone so each viewer
+  // reads the before/after comparison in their own wall-clock —
+  // e.g. Warsaw recipient sees "Was 1:00 PM → Now 4:00 PM CEST"
+  // while a UK recipient sees "Was 12:00 PM → Now 3:00 PM BST" for
+  // the same underlying UTC shift.
+  const newLabel = formatScheduledLabel(ctx.scheduledAt, ctx.timeZone);
   const previousLabel = ctx.previousScheduledAt
-    ? fmt(ctx.previousScheduledAt)
+    ? formatScheduledLabel(ctx.previousScheduledAt, ctx.timeZone)
     : null;
 
   const subject = `📅 Time changed: ${ctx.eventTitle} now starts ${newLabel}`;

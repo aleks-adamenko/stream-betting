@@ -132,12 +132,16 @@ Deno.serve(async (req) => {
 
     const userIds = Array.from(userIdSet);
 
-    // Filter out email opt-outs. They still get the in-app
-    // notification (the toggle is email-only).
+    // Fetch profile rows for everyone in the audience — we need both
+    // `notifications_enabled` (opt-out filter for email) AND
+    // `timezone` (per-recipient render below).
     const { data: profiles } = await db
       .from("profiles")
-      .select("id, notifications_enabled")
+      .select("id, notifications_enabled, timezone")
       .in("id", userIds);
+    const profileById = new Map(
+      (profiles ?? []).map((p) => [p.id, p] as const),
+    );
     const optedOut = new Set(
       (profiles ?? [])
         .filter((p) => p.notifications_enabled === false)
@@ -158,30 +162,38 @@ Deno.serve(async (req) => {
         x !== null && !optedOut.has(x.user_id),
     );
 
-    // Render template once, then batch-send in chunks of 100.
+    // Render per-recipient — each viewer reads the time in their
+    // OWN wall-clock based on profiles.timezone (falls back to UTC
+    // when null). The before/after comparison gets re-evaluated for
+    // each recipient's TZ so a Warsaw recipient sees "Was 1 PM →
+    // Now 4 PM CEST" while a Kyiv recipient sees "Was 2 PM → Now
+    // 5 PM EEST" for the same underlying UTC shift.
     const creator = Array.isArray(event.creator) ? event.creator[0] : event.creator;
     const creatorName = creator?.display_name ?? "A LiveRush creator";
-    const tmpl = renderEventRescheduled({
-      eventTitle: event.title,
-      eventId: event.id,
-      coverUrl: event.cover_url,
-      creatorName,
-      scheduledAt: event.scheduled_at,
-      previousScheduledAt,
-    });
 
     let sent = 0;
     let batchIndex = 0;
     for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
       const slice = recipients.slice(i, i + BATCH_SIZE);
-      const payload = slice.map((r) => ({
-        from: FROM,
-        to: r.email,
-        subject: tmpl.subject,
-        html: tmpl.html,
-        text: tmpl.text,
-        headers: unsubscribeHeaders(`${APP_URL}/profile?notifications=off`),
-      }));
+      const payload = slice.map((r) => {
+        const tmpl = renderEventRescheduled({
+          eventTitle: event.title,
+          eventId: event.id,
+          coverUrl: event.cover_url,
+          creatorName,
+          scheduledAt: event.scheduled_at,
+          previousScheduledAt,
+          timeZone: profileById.get(r.user_id)?.timezone ?? null,
+        });
+        return {
+          from: FROM,
+          to: r.email,
+          subject: tmpl.subject,
+          html: tmpl.html,
+          text: tmpl.text,
+          headers: unsubscribeHeaders(`${APP_URL}/profile?notifications=off`),
+        };
+      });
       const { error: batchErr } = await resend.batch.send(payload, {
         // The scheduled_at value participates in the idempotency key so
         // two *different* reschedules in the same hour each get their

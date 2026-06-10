@@ -282,6 +282,14 @@ export interface Database {
           // emails. Gated by the global flag — when the global is off,
           // this flag has no effect (we don't send any emails anyway).
           notifications_enabled_payouts: boolean;
+          // IANA timezone (e.g. "Europe/Warsaw") captured at session
+          // open by the user-app via the `set_user_timezone` RPC
+          // (20260610_000005). Read by the schedule / reschedule
+          // edge functions to render time labels in each recipient's
+          // wall-clock. Null on viewers who haven't loaded the
+          // user-app since the migration — edge functions fall
+          // back to UTC.
+          timezone: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -294,6 +302,7 @@ export interface Database {
           withdrawable_cents?: number;
           notifications_enabled?: boolean;
           notifications_enabled_payouts?: boolean;
+          timezone?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -656,6 +665,13 @@ export interface Database {
       };
       update_profile_avatar_url: {
         Args: { p_avatar_url: string | null };
+        Returns: void;
+      };
+      // 20260610_000005 — viewer-callable setter that stamps the
+      // recipient's IANA timezone on profiles.timezone so the
+      // schedule / reschedule emails render each viewer's wall-clock.
+      set_user_timezone: {
+        Args: { p_timezone: string | null };
         Returns: void;
       };
       // Rebuilt by 20260604_000001_ledger_rebuild.sql — takes coins +

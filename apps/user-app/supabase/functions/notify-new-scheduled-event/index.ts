@@ -87,13 +87,18 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, recipients: 0 });
     }
 
-    // Filter out users who've opted out of emails. They still get the
-    // in-app notification — that's part of why the toggle is
-    // email-only.
+    // Fetch profile rows for everyone in the audience — we need both
+    // `notifications_enabled` (opt-out filter for email) AND
+    // `timezone` (per-recipient render below). Single SELECT IN
+    // covers both. The map lets us look both up by user_id in O(1)
+    // while iterating the email batch.
     const { data: profiles } = await db
       .from("profiles")
-      .select("id, notifications_enabled")
+      .select("id, notifications_enabled, timezone")
       .in("id", userIds);
+    const profileById = new Map(
+      (profiles ?? []).map((p) => [p.id, p] as const),
+    );
     const optedOut = new Set(
       (profiles ?? [])
         .filter((p) => p.notifications_enabled === false)
@@ -114,26 +119,35 @@ Deno.serve(async (req) => {
 
     const creator = Array.isArray(event.creator) ? event.creator[0] : event.creator;
     const creatorName = creator?.display_name ?? "A LiveRush creator";
-    const tmpl = renderNewScheduled({
-      eventTitle: event.title,
-      eventId: event.id,
-      coverUrl: event.cover_url,
-      creatorName,
-      scheduledAt: event.scheduled_at,
-    });
 
+    // Render the template ONCE PER RECIPIENT using their own
+    // `profiles.timezone` so the "Starts X" label adapts to each
+    // reader's wall-clock. Recipients without a stored timezone
+    // (never opened the user-app since the migration that added the
+    // column) fall through to UTC via formatScheduledLabel's
+    // null-handling.
     let sent = 0;
     let batchIndex = 0;
     for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
       const slice = recipients.slice(i, i + BATCH_SIZE);
-      const payload = slice.map((r) => ({
-        from: FROM,
-        to: r.email,
-        subject: tmpl.subject,
-        html: tmpl.html,
-        text: tmpl.text,
-        headers: unsubscribeHeaders(`${APP_URL}/profile?notifications=off`),
-      }));
+      const payload = slice.map((r) => {
+        const tmpl = renderNewScheduled({
+          eventTitle: event.title,
+          eventId: event.id,
+          coverUrl: event.cover_url,
+          creatorName,
+          scheduledAt: event.scheduled_at,
+          timeZone: profileById.get(r.user_id)?.timezone ?? null,
+        });
+        return {
+          from: FROM,
+          to: r.email,
+          subject: tmpl.subject,
+          html: tmpl.html,
+          text: tmpl.text,
+          headers: unsubscribeHeaders(`${APP_URL}/profile?notifications=off`),
+        };
+      });
       const { error: batchErr } = await resend.batch.send(payload, {
         idempotencyKey: `${eventId}:scheduled:${batchIndex}`,
       });

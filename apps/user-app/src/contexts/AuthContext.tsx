@@ -85,6 +85,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setProfile(profileRow);
+
+    // Stamp the viewer's IANA timezone if it's missing or has drifted
+    // (e.g. they're travelling). Read by notify-new-scheduled-event /
+    // notify-event-rescheduled to render time labels in the recipient's
+    // wall-clock instead of UTC. Fire-and-forget: render shouldn't
+    // block on this, and the next session will retry if anything went
+    // wrong. Guarded by a no-op when the browser doesn't surface
+    // resolvedOptions().timeZone (very old engines).
+    try {
+      const browserTz =
+        Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+      if (browserTz && profileRow.timezone !== browserTz) {
+        void supabase
+          .rpc("set_user_timezone", { p_timezone: browserTz })
+          .then(({ error }) => {
+            if (error) console.warn("set_user_timezone failed", error);
+          });
+      }
+    } catch (e) {
+      console.warn("timezone stamp skipped", e);
+    }
   }, []);
 
   useEffect(() => {
