@@ -36,3 +36,6 @@ verify_jwt = false
 
 [functions.notify-event-cancelled]
 verify_jwt = false
+
+[functions.notify-event-rescheduled]
+verify_jwt = false

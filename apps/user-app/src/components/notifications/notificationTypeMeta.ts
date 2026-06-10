@@ -1,6 +1,8 @@
 import {
+  AlertCircle,
   Ban,
   Bell,
+  CalendarClock,
   Coins,
   Heart,
   PhoneOff,
@@ -13,6 +15,18 @@ import {
 } from "lucide-react";
 
 import type { NotificationType } from "@/services/notificationsService";
+
+/**
+ * Toast type domain — `NotificationType` (sourced from the DB enum
+ * via generated types) PLUS purely client-side toast keys that have
+ * no backing row in `public.notifications`. The toast layer accepts
+ * either; the DB realtime channel only ever produces NotificationType.
+ *
+ * Add a new client-only key here when an interactive UX path needs
+ * the same custom-card chrome as DB-driven toasts but doesn't
+ * justify a DB enum migration (e.g. transient validation errors).
+ */
+export type ToastType = NotificationType | "bet_limit";
 
 /**
  * Single source of truth for the icon + colour styling of every
@@ -41,7 +55,7 @@ export interface NotificationTypeMeta {
   iconFilled?: boolean;
 }
 
-export const TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
+export const TYPE_META: Record<ToastType, NotificationTypeMeta> = {
   welcome: {
     icon: Star,
     iconClassName: "bg-primary/10 text-primary",
@@ -58,6 +72,17 @@ export const TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
     iconClassName: "bg-muted text-muted-foreground",
   },
   event_starting: { icon: Radio, iconClassName: "bg-primary/10 text-primary" },
+  // 20260610_000004_event_reschedule_notifications.sql — inserted by
+  // the notify-event-rescheduled edge function for every subscriber +
+  // follower when a creator edits scheduled_at on an already-
+  // announced event. CalendarClock icon + primary tint (not destructive
+  // — a reschedule is informational, not an error). Tap on the toast
+  // navigates to the event page so the viewer can see the new time
+  // alongside everything else.
+  event_rescheduled: {
+    icon: CalendarClock,
+    iconClassName: "bg-primary/10 text-primary",
+  },
   // Ephemeral — only fires as a toast. The notifications page
   // filters this type out so a "Stream ended" line doesn't crowd
   // the persistent feed (bet_won / bet_lost / bet_refunded already
@@ -76,6 +101,18 @@ export const TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
   rake_credited: { icon: Coins, iconClassName: "bg-success/15 text-success" },
   payout_rejected: {
     icon: Ban,
+    iconClassName: "bg-destructive/15 text-destructive",
+  },
+  // Client-only — fires from EventDetails when place_bet rejects on
+  // a stake-limit guard (per-outcome cap, per-round cap, daily cap,
+  // already-bet-this-outcome, insufficient balance, window closed).
+  // Routed via pushLocalToast so it adopts the standard custom-card
+  // chrome (avatar circle + title + body + X close) instead of
+  // Sonner's red bare-bones error toast that the raw server message
+  // used to land in. Destructive tint matches the "you can't do
+  // this" connotation.
+  bet_limit: {
+    icon: AlertCircle,
     iconClassName: "bg-destructive/15 text-destructive",
   },
 };

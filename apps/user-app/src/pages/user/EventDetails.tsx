@@ -39,6 +39,7 @@ import { useEventSubscription } from "@/hooks/useEventSubscription";
 import { useEventViewers } from "@/hooks/useEventViewers";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNotificationsToast } from "@/contexts/NotificationsContext";
+import { parseBetError } from "@/lib/betError";
 import { ChatPanel } from "@/components/event/ChatPanel";
 import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
 import { placeBet } from "@/services/betsService";
@@ -46,6 +47,7 @@ import { betsKeys, useMyBets } from "@/hooks/useMyBets";
 import { useLiveOdds } from "@/hooks/useLiveOdds";
 import { useEventProgress, type EventProgress } from "@/hooks/useEventProgress";
 import { useEventRoundsSummary } from "@/hooks/useEventRoundsSummary";
+import { useEventChat } from "@/hooks/useEventChat";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { oddsPillClasses, oddsRange } from "@/lib/odds";
@@ -781,41 +783,14 @@ function FullscreenBetOverlay({
   muted: boolean;
   onMutedChange: (next: boolean) => void;
 }) {
-  const { user, profile, refreshProfile } = useAuth();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<BetOutcome | null>(
-    event.outcomes[0] ?? null,
-  );
-  const [stake, setStake] = useState<string>("10");
-  const [submitting, setSubmitting] = useState(false);
+  const { user } = useAuth();
   const [dragY, setDragY] = useState(0);
 
-  // Multi-outcome: same lookup pattern the BetPanel uses so the
-  // overlay's outcome chips also disable per-outcome instead of
-  // globally after the first bet. Lets the viewer place follow-up
-  // bets on other outcomes without dismissing the fullscreen view.
-  const { data: myBets } = useMyBets();
-  const myEventBets = useMemo(
-    () =>
-      (myBets ?? []).filter(
-        (b) =>
-          b.event_id === event.id &&
-          b.round_index === event.currentRound &&
-          (b.status === "open" ||
-            b.status === "placed" ||
-            b.status === "won_pending_payout" ||
-            b.status === "won"),
-      ),
-    [myBets, event.id, event.currentRound],
-  );
-  const betsByOutcomeId = useMemo(
-    () => new Map(myEventBets.map((b) => [b.outcome_id, b] as const)),
-    [myEventBets],
-  );
   // Live pari-mutuel odds — every bet on this event re-flows the
   // pools, the realtime channel re-fetches, and the displayed odds
-  // shift instantly.
+  // shift instantly. Used by the outcome list at bottom-left, which
+  // is now display-only (no chip / payout / place-a-bet flow inside
+  // fullscreen — viewers exit to the side panel to bet).
   const { data: liveOddsData } = useLiveOdds(event.id);
   const { data: progress } = useEventProgress(event.id);
   const liveOddsById = new Map(
@@ -829,38 +804,6 @@ function FullscreenBetOverlay({
   //      that are guaranteed to refund.
   const oddsFor = (outcome: BetOutcome) =>
     progress.minimumsMet ? (liveOddsById.get(outcome.id) ?? null) : null;
-  // The fallback `1` here is for `oddsPillClasses` color math only —
-  // never rendered as a number in the UI.
-  const displayOddsList = event.outcomes.map((o) => oddsFor(o) ?? 1);
-
-  const balanceDollars = (profile?.balance_cents ?? 0) / 100;
-  const stakeNum = Math.max(0, Number(stake) || 0);
-  const selectedOdds = selected ? oddsFor(selected) : null;
-  const potentialPayout = selected
-    ? (payoutPreview(Math.round(stakeNum * 100), selectedOdds) / 100).toFixed(2)
-    : "0.00";
-  const stakeExceeds = !!user && stakeNum > balanceDollars;
-  // Multi-outcome: bar Place when the selected outcome is already
-  // backed (server would raise `already_bet_outcome` anyway — this
-  // is the front-line gate so the click can't fire).
-  const selectedAlreadyBet = !!selected && betsByOutcomeId.has(selected.id);
-  const canPlace =
-    !!selected &&
-    stakeNum > 0 &&
-    !stakeExceeds &&
-    !submitting &&
-    !selectedAlreadyBet;
-  const { min: oddsMin, max: oddsMax } = oddsRange(displayOddsList);
-
-  // Once the viewer places a bet, jump the selection to the next
-  // outcome they haven't backed yet (so the form is ready for the
-  // next click without the user having to manually re-select).
-  // If all outcomes are now covered, clear selection.
-  useEffect(() => {
-    if (selected && !betsByOutcomeId.has(selected.id)) return;
-    const next = event.outcomes.find((o) => !betsByOutcomeId.has(o.id));
-    setSelected(next ?? null);
-  }, [betsByOutcomeId, event.outcomes, selected]);
 
   // Drag-down to close — listen at window level so iframe taps still work.
   // Below the 8px deadzone the finger movement is treated as a tap; beyond
@@ -941,48 +884,6 @@ function FullscreenBetOverlay({
     }
   }, [dragY, containerRef]);
 
-  async function handlePlace() {
-    if (!user) {
-      navigate(
-        `/auth/sign-in?next=${encodeURIComponent(`/event/${event.id}`)}`,
-      );
-      return;
-    }
-    if (!canPlace || !selected) return;
-    setSubmitting(true);
-    try {
-      await placeBet(event.id, selected.id, Math.round(stakeNum * 100));
-      await refreshProfile();
-      // Await the refetch (don't fire-and-forget) so the next render
-      // sees the new bet in `myEventBets` BEFORE the submitting lock
-      // releases — otherwise a fast second click re-targets the same
-      // outcome and the server raises `already_bet_outcome`.
-      await queryClient.refetchQueries({ queryKey: betsKeys.mine() });
-      // Multi-outcome: don't close the overlay on success. The
-      // viewer might want to add another bet on a different outcome,
-      // and the bet_placed Realtime toast (NotificationsProvider)
-      // already covers the success feedback. They can dismiss
-      // manually via the X close button when they're done.
-      // PostgrestError carries .message via duck-typing (extends
-      // Error in supabase-js, but the `instanceof Error` check
-      // sometimes fails when the error came from a different realm
-      // — e.g. a Resend error bubbled up from an inner promise).
-      // Read .message defensively so the user sees the actual
-      // server-side reason ("Streamers cannot bet on their own
-      // event", "already_bet", insufficient balance, etc.) instead
-      // of the generic fallback.
-      const message =
-        (err &&
-          typeof err === "object" &&
-          "message" in err &&
-          typeof (err as { message?: unknown }).message === "string" &&
-          (err as { message: string }).message) ||
-        "Failed to place bet";
-      toast.error(message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
@@ -1035,144 +936,108 @@ function FullscreenBetOverlay({
         )}
       </button>
 
-      {/* Bottom controls — only when authenticated. Anonymous users see a single
-          Sign in to bet CTA pinned to the bottom-right corner so the video can
-          be enjoyed unobstructed and the centred mute button stays reachable. */}
-      {user ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
-          <div className="flex items-end justify-between gap-3">
-            {/* Left: outcome column directly above the stake row */}
-            <div className="pointer-events-auto space-y-2">
-              <div className="flex flex-col items-start gap-1.5">
-                {event.outcomes.map((o) => {
-                  const userBet = betsByOutcomeId.get(o.id);
-                  const hasBetThisOutcome = !!userBet;
-                  const active = selected?.id === o.id;
-                  const odds = oddsFor(o);
-                  // Outcomes the viewer already backed render as a
-                  // static pill ("Your bet $X") — they can't be
-                  // re-targeted (server-side `already_bet_outcome`
-                  // guard + this UI suppression). Clicks fall through
-                  // to a no-op so the surrounding gradient still
-                  // captures taps cleanly.
-                  return (
-                    <button
-                      key={o.id}
-                      type="button"
-                      onClick={() => {
-                        if (hasBetThisOutcome) return;
-                        setSelected(o);
-                      }}
-                      disabled={hasBetThisOutcome}
-                      className={cn(
-                        "flex items-center justify-between gap-2 rounded-full bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur transition-colors",
-                        active &&
-                          !hasBetThisOutcome &&
-                          "bg-primary text-primary-foreground ring-2 ring-primary",
-                        hasBetThisOutcome &&
-                          "bg-primary/20 text-white ring-1 ring-primary/60",
-                      )}
-                    >
-                      <span className="max-w-[150px] truncate text-left">
-                        {o.label}
-                      </span>
-                      {hasBetThisOutcome && userBet ? (
-                        <span className="inline-flex items-center gap-0.5 rounded-full bg-white/95 px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums text-primary">
-                          <CoinIcon />
-                          {(userBet.amount_cents / 100).toFixed(2)}
-                        </span>
-                      ) : (
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
-                            active
-                              ? "bg-white text-primary"
-                              : odds == null
-                                ? "bg-white/15 text-white/80"
-                                : oddsPillClasses(odds, oddsMin, oddsMax),
-                          )}
-                        >
-                          {odds == null ? "—" : `${odds.toFixed(2)}×`}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {STAKE_CHIPS.map((amount) => {
-                  const active = stakeNum === amount;
-                  return (
-                    <button
-                      key={amount}
-                      type="button"
-                      onClick={() => setStake(String(amount))}
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-md bg-black/45 px-3 py-1.5 text-xs font-bold leading-none text-white backdrop-blur transition-colors",
-                        active && "bg-primary text-primary-foreground ring-2 ring-primary",
-                      )}
-                    >
-                      <CoinIcon />
-                      {amount}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+      {/* Bottom overlay strip — a soft gradient anchors both the
+          outcomes list (bottom-left) and the floating chat
+          (bottom-right) so they stay legible over arbitrary video
+          contents. No betting controls live here anymore: the
+          fullscreen view is read-only for outcomes + chat; viewers
+          who want to place a bet exit fullscreen and use the side
+          panel (the X is one tap away in the top-right). */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-4 pt-12">
+        <div className="flex items-end justify-between gap-3">
+          {/* Left: outcomes list — display-only, no chips / container.
+              Just the outcome label + live odds (or "—" before the
+              event clears its settle minimums) styled to mirror the
+              normal BetPanel outcome rows. Drop shadows + the gradient
+              above carry legibility over the video. */}
+          <ul className="pointer-events-none flex flex-col items-start gap-1 text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.85)]">
+            {event.outcomes.map((o) => {
+              const odds = oddsFor(o);
+              return (
+                <li
+                  key={o.id}
+                  className="flex max-w-[60vw] items-center gap-2 text-sm font-semibold"
+                >
+                  <span className="truncate">{o.label}</span>
+                  <span className="font-heading text-sm font-extrabold tabular-nums text-white/90">
+                    {odds == null ? "—" : `${odds.toFixed(2)}×`}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
 
-            {/* Right: potential payout + Place a bet */}
-            <div className="pointer-events-auto flex flex-shrink-0 flex-col items-end gap-2">
-              <div className="text-right">
-                <p className="text-[10px] font-medium uppercase tracking-wider text-white/70">
-                  Potential payout
-                </p>
-                <p className="font-heading text-2xl font-extrabold leading-none tabular-nums text-white drop-shadow">
-                  {progress.minimumsMet ? (
-                    <CoinAmount value={Number(potentialPayout)} />
-                  ) : (
-                    "—"
-                  )}
-                </p>
-                <p className="mt-0.5 text-[9px] leading-tight text-white/60">
-                  {progress.minimumsMet
-                    ? "Indicative — final at settlement"
-                    : "Shown after minimums clear"}
-                </p>
-              </div>
-              <BrushButton
-                variant="accent"
-                size="default"
-                onClick={handlePlace}
-                disabled={!canPlace}
-                className="px-6"
-              >
-                {submitting
-                  ? "Placing…"
-                  : stakeExceeds
-                    ? "Insufficient"
-                    : "Place a bet"}
-              </BrushButton>
-            </div>
-          </div>
+          {/* Right: floating chat — recent messages stacked at the
+              bottom-right, fading upward via a mask gradient so older
+              lines dim and disappear without abrupt cut-off. Reads
+              live from the same `useEventChat` channel the ChatPanel
+              uses, so anything typed elsewhere on the page also
+              appears here. */}
+          <FullscreenChatStream eventId={event.id} />
         </div>
-      ) : (
-        // Anonymous viewers: a single Sign-in CTA pinned to the
-        // bottom-right corner. No bottom gradient bar — leaves the
-        // bottom-centre clear for the mute button and the rest of
-        // the frame unobstructed for the stream.
-        <div className="pointer-events-none absolute bottom-4 right-4">
-          <BrushButton
-            variant="accent"
-            size="default"
-            onClick={handlePlace}
-            className="pointer-events-auto px-6"
-          >
-            Sign in to bet
-          </BrushButton>
-        </div>
-      )}
+      </div>
     </div>
   );
+}
+
+/**
+ * Compact Twitch-style chat strip rendered at the bottom-right of
+ * the fullscreen overlay. Subscribes to the same `useEventChat`
+ * channel the side ChatPanel uses, slices the last N messages,
+ * and renders them stacked with a top-fade mask so old lines
+ * disappear smoothly as new ones arrive.
+ *
+ * Intentionally read-only — there's no composer here. The composer
+ * is the side ChatPanel; this strip is for ambient visibility
+ * while the video fills the screen.
+ */
+function FullscreenChatStream({ eventId }: { eventId: string }) {
+  const { messages } = useEventChat(eventId);
+  const recent = messages.slice(-6);
+  if (recent.length === 0) return null;
+  return (
+    <div
+      className="pointer-events-none flex max-h-44 w-[44vw] max-w-[280px] flex-col justify-end gap-1 overflow-hidden text-right"
+      style={{
+        // Top fade so older messages dim out rather than getting
+        // hard-clipped against the gradient edge.
+        WebkitMaskImage:
+          "linear-gradient(to bottom, transparent 0%, black 35%, black 100%)",
+        maskImage:
+          "linear-gradient(to bottom, transparent 0%, black 35%, black 100%)",
+      }}
+    >
+      {recent.map((m) => (
+        <p
+          key={m.id}
+          className="truncate text-xs font-medium leading-snug text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]"
+        >
+          <span
+            className="font-heading font-semibold"
+            style={{ color: usernameHue(eventId, m.user_id) }}
+          >
+            {m.display_name}
+          </span>
+          <span className="text-white/95">: {m.body}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// Cheap deterministic hue mapper for chat usernames in the
+// fullscreen strip — mirrors the (event_id, user_id) hashing in
+// ChatPanel's usernameColor() so a viewer's name stays the same
+// colour across both surfaces. Kept inline here (instead of
+// importing from ChatPanel) so this file's chat snippet doesn't
+// pull the whole ChatPanel module on every fullscreen entry.
+function usernameHue(eventId: string, userId: string): string {
+  let h = 0;
+  const s = `${eventId}:${userId}`;
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return `hsl(${(Math.abs(h) % 50) * (360 / 50)}, 65%, 65%)`;
 }
 
 function RulesBottomSheet({
@@ -1390,7 +1255,22 @@ function BetPanel({ event }: { event: StreamEvent }) {
           durationMs: 4000,
         });
       } else {
-        toast.error(message);
+        // Stake-limit / window / balance errors get the friendly
+        // red custom-card treatment via parseBetError. Everything
+        // else (Profile not found, Outcome not found, network
+        // glitches) keeps the bare Sonner red toast — those are
+        // catastrophic, not user-fixable.
+        const friendly = parseBetError(message);
+        if (friendly) {
+          pushLocalToast({
+            type: "bet_limit",
+            title: friendly.title,
+            body: friendly.body,
+            durationMs: 4000,
+          });
+        } else {
+          toast.error(message);
+        }
       }
     } finally {
       setSubmitting(false);

@@ -3,10 +3,10 @@ import { toast } from "sonner";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { NotificationType } from "@/services/notificationsService";
 import {
   DEFAULT_META,
   TYPE_META,
+  type ToastType,
 } from "./notificationTypeMeta";
 import { renderWithCoins } from "./renderWithCoins";
 
@@ -26,7 +26,7 @@ import { renderWithCoins } from "./renderWithCoins";
 
 interface NotificationToastCardProps {
   toastId: string | number;
-  type: NotificationType;
+  type: ToastType;
   title: string;
   body: string | null;
   eventId: string | null;
@@ -119,7 +119,19 @@ export function NotificationToastCard({
       <Link
         to={`/event/${eventId}`}
         onClick={() => toast.dismiss(toastId)}
-        className={cn(baseClasses, "transition-colors hover:bg-secondary/30")}
+        // Hover affordance is a ring + shadow lift rather than a
+        // background tint — `hover:bg-secondary/30` painted a
+        // 30%-alpha overlay on top of `bg-card`, which Tailwind's
+        // hover pseudo-class wins so the WHOLE toast went
+        // see-through on hover (visible bug — page content
+        // bleeds through the card body and the title). Brightening
+        // the existing primary ring + nudging the shadow keeps the
+        // tactile "clickable card" feedback without touching the
+        // background opacity.
+        className={cn(
+          baseClasses,
+          "transition-shadow hover:shadow-2xl hover:ring-primary/30",
+        )}
       >
         {inner}
       </Link>

@@ -538,7 +538,12 @@ export interface Database {
             // apps/user-app/src/contexts/NotificationsContext.tsx).
             | "bet_placed"
             | "event_finished"
-            | "round_starting";
+            | "round_starting"
+            // 20260610_000004_event_reschedule_notifications.sql —
+            // fires from the notify-event-rescheduled edge function
+            // when a creator edits scheduled_at on an already-
+            // announced event.
+            | "event_rescheduled";
           title: string;
           body: string | null;
           event_id: string | null;

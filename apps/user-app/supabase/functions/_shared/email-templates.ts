@@ -271,6 +271,73 @@ Manage notifications: ${unsubscribeUrl()}`;
   return { subject, html, text };
 }
 
+/** 3b) Event rescheduled — creator changed the start time of an
+ *  already-announced event. Sent to anyone subscribed to the event
+ *  OR following the creator (mirroring notify-event-live recipients).
+ *  Same visual frame as renderNewScheduled with a "RESCHEDULED" pill
+ *  + an explicit before/after comparison so recipients can spot
+ *  whether the new time still works for them.
+ *
+ *  `previousScheduledAt` is optional — the trigger sends it whenever
+ *  it's known, but the template degrades to a "new start time"
+ *  message if the value isn't available. */
+export function renderEventRescheduled(
+  ctx: EventCtx & {
+    scheduledAt: string /* ISO */;
+    previousScheduledAt: string | null /* ISO or null */;
+  },
+): RenderedEmail {
+  // Same UTC-forced formatter as renderNewScheduled — Edge Functions
+  // run in UTC, and the time-zone abbreviation removes ambiguity for
+  // recipients in other zones.
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+      timeZoneName: "short",
+    });
+  const newLabel = fmt(ctx.scheduledAt);
+  const previousLabel = ctx.previousScheduledAt
+    ? fmt(ctx.previousScheduledAt)
+    : null;
+
+  const subject = `📅 Time changed: ${ctx.eventTitle} now starts ${newLabel}`;
+  const text = `${ctx.creatorName} changed the start time of "${ctx.eventTitle}".
+
+${previousLabel ? `Was: ${previousLabel}\n` : ""}New start time: ${newLabel}
+
+View the event: ${eventUrl(ctx.eventId)}
+
+Manage notifications: ${unsubscribeUrl()}`;
+  const html = frame(
+    `${coverBlock(ctx.coverUrl)}
+    <div style="display:inline-block;padding:4px 10px;border-radius:999px;background:#F59E0B;color:#0e0f12;font-size:11px;font-weight:800;letter-spacing:0.6px;margin-bottom:12px;">RESCHEDULED</div>
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;line-height:1.25;">${escape(ctx.creatorName)} changed the start time</h1>
+    <p style="margin:0 0 6px;font-size:15px;line-height:1.5;color:#1f2937;">
+      <strong>${escape(ctx.eventTitle)}</strong>
+    </p>
+    ${
+      previousLabel
+        ? `<p style="margin:0 0 6px;font-size:14px;color:#6b7280;">Was: <s>${escape(previousLabel)}</s></p>`
+        : ""
+    }
+    <p style="margin:0 0 18px;font-size:15px;color:#1f2937;"><strong>Now starts ${escape(newLabel)}</strong></p>
+    ${ctaButton(eventUrl(ctx.eventId), "View the event")}
+    <p style="margin:18px 0 0;font-size:13px;color:#6b7280;line-height:1.5;">
+      We'll send another email the moment it goes live.
+    </p>
+    `,
+    {
+      preheader: `${ctx.creatorName} moved ${ctx.eventTitle} to ${newLabel}`,
+    },
+  );
+  return { subject, html, text };
+}
+
 // =========================================================================
 // Phase 2 — betting/settlement transactional templates
 // =========================================================================

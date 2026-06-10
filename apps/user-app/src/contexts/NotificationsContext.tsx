@@ -21,6 +21,7 @@ import {
   type NotificationType,
 } from "@/services/notificationsService";
 import { NotificationToastCard } from "@/components/notifications/NotificationToastCard";
+import type { ToastType } from "@/components/notifications/notificationTypeMeta";
 
 /**
  * Top-centre toast notification provider for the user-app.
@@ -51,7 +52,13 @@ interface NotificationsContextValue {
 }
 
 interface LocalToastInput {
-  type: NotificationType;
+  /**
+   * `ToastType` = DB `NotificationType` ∪ client-only keys
+   * (currently just "bet_limit"). The DB enum stays the source of
+   * truth for persistent rows; client-only keys cover transient
+   * UX paths that don't justify a migration.
+   */
+  type: ToastType;
   title: string;
   body?: string;
   eventId?: string | null;
@@ -113,6 +120,11 @@ const TYPE_BEHAVIOUR: Partial<Record<NotificationType, ToastBehaviour>> = {
   // itself already tells the story (round counter, live badge).
   event_starting: { durationMs: Infinity, clickable: true,  suppressOnEventPage: true },
   round_starting: { durationMs: Infinity, clickable: true,  suppressOnEventPage: true },
+  // Reschedule — sticky so the viewer can't miss the new time, and
+  // clickable so a tap navigates to the event page where the
+  // updated countdown lives. Suppressed when already on /event/<id>
+  // since the page header carries the new schedule directly.
+  event_rescheduled: { durationMs: Infinity, clickable: true,  suppressOnEventPage: true },
 
   // Ephemeral stream-ended — short auto-dismiss. NotificationsProvider
   // delays the push by 500ms below so it stacks visibly under a

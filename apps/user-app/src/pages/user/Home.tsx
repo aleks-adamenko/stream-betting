@@ -149,18 +149,19 @@ function SectionedHome({
     <PageContainer className="lg:pt-[18px]">
       {isLoading && <HomeSkeleton />}
 
+      {/* Top hero row — same 2-col silhouette in every state so the
+          right rail (sign-up prompt for anon, tier progress for
+          signed-in) is anchored in one place regardless of whether
+          there's a live event:
+            • live: FeaturedLiveSection takes the left, hero panel
+              the right.
+            • no live, signed-in: cover banner left, TierHeroCard right.
+            • no live, anon:      cover banner left, SignUpPromptCard right.
+          The grid template + gap match across all three branches so
+          the right column stays in the same column on desktop. */}
       {!isLoading && featured && (
-        <FeaturedLiveSection event={featured} />
+        <FeaturedHeroRow event={featured} signedIn={!!user} />
       )}
-
-      {/* No live streams right now — render a branded cover hero in
-          the slot the FeaturedLiveSection would otherwise occupy.
-          Both signed-in and anonymous viewers get the same 2-col
-          layout (banner left, gradient card right). The right
-          panel swaps based on auth state: signed-in viewers see
-          the tier-progress hero; anonymous viewers see a "Join
-          LiveRush" sign-up prompt with the same gradient + size as
-          the tier card. */}
       {!isLoading && !featured && user && <NoLiveSignedInHero />}
       {!isLoading && !featured && !user && <NoLiveAnonHero />}
 
@@ -540,6 +541,40 @@ function EventGrid({ events }: { events: StreamEvent[] }) {
 /* ---------- featured live section ---------- */
 
 /**
+ * Top-of-page hero row when a live event is featured. Mirrors the
+ * no-live grid shape — `lg:grid-cols-[2fr_1fr] xl:grid-cols-[3fr_1fr]`
+ * — so the right rail (TierHeroCard for signed-in viewers,
+ * SignUpPromptCard for anon) stays in the same column across all
+ * Home states. The FeaturedLiveSection drives the row height
+ * (`min-h-[440px]`); both right-rail cards use `h-full flex-col` so
+ * they stretch to match.
+ *
+ * The video-width tweak the operator wants ("video = 2 cards out of
+ * a 4-card row") lives INSIDE FeaturedLiveSection — its internal
+ * info column gets a `xl:w-[calc((100%-1rem)/3)]` override so the
+ * video pillar takes 2/3 of the 3fr left column at xl. That works
+ * out to 2 cards of page width with the EventGrid below.
+ */
+function FeaturedHeroRow({
+  event,
+  signedIn,
+}: {
+  event: StreamEvent;
+  signedIn: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr] xl:grid-cols-[3fr_1fr]">
+      <FeaturedLiveSection event={event} />
+      {signedIn ? (
+        <TierHeroCard compact className="h-full" />
+      ) : (
+        <SignUpPromptCard />
+      )}
+    </div>
+  );
+}
+
+/**
  * Featured-live hero on the Home page.
  *
  * Single rounded container that splits into two columns on desktop:
@@ -615,13 +650,19 @@ function FeaturedLiveSection({ event }: { event: StreamEvent }) {
         </div>
       </div>
 
-      {/* Info column — title / description / creator. The width is
-          `(parent − 16px) / 2`, which is exactly the span of two
-          EventCards plus the gap between them in the grid below. That
-          way the card edges align visually as the eye runs down the
-          page. mt-auto on the creator row pins it to the bottom of
-          the column when the description is short. */}
-      <div className="flex min-w-0 flex-col gap-3 p-5 sm:p-6 lg:w-[calc((100%-1rem)/2)] lg:flex-shrink-0">
+      {/* Info column — title / description / creator. Width shrinks
+          at xl so the video pillar on the left expands to two
+          EventCard widths of the row below it:
+            • lg (3-col card grid, outer hero row 2fr_1fr → left =
+              2 card widths): info = (parent − 16px) / 2, video =
+              1 card. Same balance the operator dialled in earlier.
+            • xl (4-col card grid, outer hero row 3fr_1fr → left =
+              3 card widths): info = (parent − 16px) / 3, video =
+              2 card widths. The 16px subtraction is the gap-4
+              between the two columns inside the FeaturedLiveSection.
+          mt-auto on the creator row pins it to the bottom of the
+          column when the description is short. */}
+      <div className="flex min-w-0 flex-col gap-3 p-5 sm:p-6 lg:w-[calc((100%-1rem)/2)] lg:flex-shrink-0 xl:w-[calc((100%-1rem)/3)]">
         {/* Title + description sizing matches EventCard below the
             featured hero — same `text-base font-semibold` for the
             title and `text-sm` for the description, so the typography
