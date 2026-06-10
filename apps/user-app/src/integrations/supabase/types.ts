@@ -101,6 +101,12 @@ export interface Database {
           // Phase 1 betting MVP columns. Set by start_event /
           // declare_winner / settle_event / cancel_event respectively.
           betting_window_minutes: number | null;
+          // 20260610_000006 — second-based betting window. Supersedes
+          // betting_window_minutes as the runtime source of truth
+          // (start_event / publish_event / advance_round /
+          // mark_final_round read this; the legacy minutes column is
+          // left in place for back-compat reads only). Range 10–1800.
+          betting_window_seconds: number | null;
           betting_opens_at: string | null;
           betting_closes_at: string | null;
           betting_window_closed_at: string | null;
@@ -636,7 +642,9 @@ export interface Database {
         Returns: Database["public"]["Tables"]["events"]["Row"];
       };
       set_event_betting_window: {
-        Args: { p_event_id: string; p_minutes: number };
+        // 20260610_000006 — minutes → seconds. Validates 10–1800,
+        // writes events.betting_window_seconds.
+        Args: { p_event_id: string; p_seconds: number };
         Returns: Database["public"]["Tables"]["events"]["Row"];
       };
       cancel_event: {
@@ -654,8 +662,9 @@ export interface Database {
           rake_streamer_bps: number;
           min_unique_bettors: number;
           min_outcomes_with_bets: number;
-          betting_window_min_min: number;
-          betting_window_min_max: number;
+          // 20260610_000006 — window bounds are now in seconds (10 / 1800).
+          betting_window_min_sec: number;
+          betting_window_max_sec: number;
           daily_cap_cents: number;
         }>;
       };

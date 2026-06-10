@@ -97,14 +97,27 @@ export default function LiveStream() {
   // dance — the flip button disables itself until the swap settles.
   const [flippingCamera, setFlippingCamera] = useState(false);
 
-  // Declare-winner modal — opens after betting_closes_at. Stores the
-  // outcome ids the creator has checked; supports multi-select for
-  // dead heat scenarios. `declareIntent` decides what runs AFTER
-  // the winner is declared:
-  //   - "end" (single-round default): declare + finish
-  //   - "next": declare + advance_round (multi-round only)
-  //   - "final": declare + mark_final_round (multi-round only)
-  type DeclareIntent = "end" | "next" | "final";
+  // Declare-winner / end-stream modal — opens from the toolbar. Stores
+  // the outcome ids the creator has checked (multi-select supports dead
+  // heats). `declareIntent` decides what runs after the modal confirms:
+  //   - "end": End stream. When the current round is settle-able
+  //     (window closed + minimums met) the modal prompts for a winner,
+  //     then settles + finishes (multi → finish_event settles the
+  //     current round; single → declare flips to pending_moderation).
+  //     When it's NOT settle-able (window open OR minimums unmet) the
+  //     modal explains the refund and finish_event refunds instead.
+  //   - "next":  declare winner → advance_round       (multi, minimums met)
+  //   - "final": declare winner → mark_final_round     (multi, minimums met)
+  //   - "next-refund":  no winner → advance_round      (multi, minimums unmet)
+  //   - "final-refund": no winner → mark_final_round   (multi, minimums unmet)
+  // The "*-refund" intents skip declare_winner — settle_round inside
+  // advance_round / mark_final_round auto-refunds an under-minimum round.
+  type DeclareIntent =
+    | "end"
+    | "next"
+    | "final"
+    | "next-refund"
+    | "final-refund";
   const [declareOpen, setDeclareOpen] = useState(false);
   const [declareIntent, setDeclareIntent] = useState<DeclareIntent>("end");
   const [selectedWinners, setSelectedWinners] = useState<Set<string>>(
@@ -657,10 +670,9 @@ export default function LiveStream() {
     }
   }, [phase, flippingCamera, facingMode, videoEnabled, audioEnabled]);
 
-  // Skip the confirm dialog when the call is initiated by the
-  // auto-end watchdog below (round minimums failed) — the system
-  // is the one ending the stream, not the streamer, so a prompt
-  // would be confusing.
+  // `skipConfirm` is set when the caller has already confirmed via the
+  // declare/end modal (so we don't stack a second native confirm on top
+  // of it). The bare top-bar path leaves it unset and shows the prompt.
   const handleEnd = async (opts?: { skipConfirm?: boolean }) => {
     if (
       !opts?.skipConfirm &&
@@ -716,55 +728,38 @@ export default function LiveStream() {
   // should say "Cancel stream" rather than "End stream" so the
   // streamer knows what they're agreeing to.
   const willCancel = !bettingClosed || !minimumsMet;
-  // Multi-round "auto-end watchdog" — when the current round's
-  // betting window has closed AND the round didn't reach minimums,
-  // declare_winner would just settle into a full refund and Next /
-  // Final round wouldn't make sense. Force-end the stream from the
-  // client side immediately (finish_event refunds the current
-  // round, prior settled rounds keep their payouts) and surface
-  // a notification to the streamer explaining what happened. A
-  // ref guard makes this one-shot per page-load so the effect
-  // doesn't loop while the finish_event RPC is in flight.
+  // A sub-minimum round no longer auto-ends the stream. The streamer
+  // stays in control: Next round / Final round sit on the toolbar
+  // (disabled only while the window is open), and an under-minimum
+  // round advances by refunding via settle_round when they choose to.
   //
-  // The `progress.totalPoolCents > 0` gate is what protects against
-  // the Realtime-race that fired the watchdog the moment a streamer
-  // clicked Final round / Next round on a healthy round: those RPCs
-  // settle the current round + advance current_round + zero the
-  // per-outcome pools in one transaction, and the per-table Realtime
-  // streams can land out of order on the client. If progress (now
-  // scoped to the new current_round) refetches BEFORE the events row
-  // refetches, you get a moment with:
-  //   • cached event: still round 1, is_final_round=false, window
-  //     expired → bettingClosed=true
-  //   • fresh progress: scoped to round 2, no bets yet →
-  //     minimumsMet=false
-  // Without the pool check the watchdog would fire here even though
-  // there's literally nothing to refund (pool_cents was zeroed by
-  // the advance). A `total_pool_cents > 0` requirement is the right
-  // distinguisher: in the legitimate "expired round 1 with one
-  // bettor" case the pool still carries the under-threshold bets,
-  // while in the transition case the pool reads 0.
-  const autoEndRoundFiredRef = useRef(false);
-  const shouldAutoEndRound =
-    event?.round_format === "multi" &&
-    !event.is_final_round &&
-    bettingClosed &&
-    !minimumsMet &&
-    progress.totalPoolCents > 0;
-
-  useEffect(() => {
-    if (!shouldAutoEndRound) return;
-    if (autoEndRoundFiredRef.current) return;
-    if (phase !== "live") return; // already ending / not yet live
-    autoEndRoundFiredRef.current = true;
-    const roundNum = event?.current_round ?? 1;
-    toast.warning(
-      `Round ${roundNum} didn't meet betting minimums — ending the stream and refunding bets in this round.`,
-      { duration: 5000 },
-    );
-    void handleEnd({ skipConfirm: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldAutoEndRound, phase, event?.current_round]);
+  // `declareRefundAdvance` is the modal flavour where the streamer is
+  // advancing past an under-minimum round (no winner pick — the round
+  // refunds and the next/final round opens). The current round number
+  // is surfaced for the modal copy.
+  const roundNum = event?.current_round ?? 1;
+  const declareRefundAdvance =
+    declareIntent === "next-refund" || declareIntent === "final-refund";
+  // Next / Final round are gated while any settlement RPC is in flight so
+  // a double-tap can't fire two advance_round calls.
+  const roundMutationPending =
+    declareWinnerMutation.isPending ||
+    advanceRoundMutation.isPending ||
+    markFinalRoundMutation.isPending;
+  const isMulti = event?.round_format === "multi";
+  // The declare/end modal has three shapes, keyed off the active intent:
+  //   • refund-advance (next-refund / final-refund) — no winner pick; the
+  //     under-minimum current round refunds and the next / final round
+  //     opens. Stream stays live.
+  //   • winner-pick (!willCancel — bettingClosed && minimumsMet) — declare
+  //     a winner, then settle + advance / settle + open final / settle +
+  //     end depending on intent.
+  //   • refund-end (willCancel && intent "end") — force-end: refund the
+  //     current round and close the stream. Prior rounds keep payouts.
+  const isWinnerPick = !willCancel;
+  const isRefundEnd = willCancel && !declareRefundAdvance;
+  const showPriorRoundList =
+    isRefundEnd && isMulti && (event?.current_round ?? 1) > 1;
   const outcomes = (event?.outcomes ?? [])
     .slice()
     .sort(
@@ -773,6 +768,32 @@ export default function LiveStream() {
     ) as Array<{ id: string; label: string; sort_order: number }>;
 
   const handleDeclareSubmit = async () => {
+    // Refund-advance: the round being left didn't meet minimums, so we
+    // skip declare_winner entirely. advance_round / mark_final_round
+    // call settle_round, which auto-refunds the under-minimum round and
+    // opens the next / final round. The stream stays live.
+    if (declareRefundAdvance) {
+      try {
+        if (declareIntent === "next-refund") {
+          await advanceRoundMutation.mutateAsync();
+          toast.success(`Round ${roundNum} refunded — next round opening`);
+        } else {
+          await markFinalRoundMutation.mutateAsync();
+          toast.success(`Round ${roundNum} refunded — final round opening`);
+        }
+        setDeclareOpen(false);
+        setSelectedWinners(new Set());
+      } catch (err) {
+        const message =
+          typeof err === "object" && err !== null && "message" in err
+            ? String((err as { message: unknown }).message)
+            : "Couldn't advance the round";
+        toast.error(message);
+      }
+      return;
+    }
+
+    // Every remaining intent declares a winner first.
     if (selectedWinners.size === 0) {
       toast.error("Pick at least one winning outcome");
       return;
@@ -780,44 +801,38 @@ export default function LiveStream() {
     try {
       await declareWinnerMutation.mutateAsync(Array.from(selectedWinners));
 
-      // Multi-round branches: declare + advance OR declare + mark
-      // final. The stream stays live in both cases; only End stream
-      // (separate button) closes the stream.
+      // Multi-round, staying live: declare + advance OR declare + mark
+      // final (mark_final_round advances AND opens a fresh window for
+      // the final round — see 20260608_000005).
       if (declareIntent === "next") {
         await advanceRoundMutation.mutateAsync();
-        toast.success(`Round ${event?.current_round ?? ""} settled — next round opening`);
+        toast.success(`Round ${roundNum} settled — next round opening`);
         setDeclareOpen(false);
         setSelectedWinners(new Set());
         return;
       }
       if (declareIntent === "final") {
-        // mark_final_round now advances the round AND opens a fresh
-        // betting window, so this opens the FINAL round for bets
-        // (instead of just flipping a flag and leaving the streamer
-        // with a closed betting window — the original bug). See
-        // 20260608_000005_multi_round_final_round_advance.sql.
         await markFinalRoundMutation.mutateAsync();
-        toast.success(
-          `Round ${event?.current_round ?? ""} settled — final round opening for bets`,
-        );
+        toast.success(`Round ${roundNum} settled — final round opening for bets`);
         setDeclareOpen(false);
         setSelectedWinners(new Set());
         return;
       }
-      if (declareIntent === "final-end") {
-        // The final round's betting window just closed and we
-        // declared winners for it above. Hand off to finish_event
-        // — its multi-round branch sees winning_outcome_ids set and
-        // runs settle_round under the hood (per the 20260608_000005
-        // migration), so this is the full declare → settle → finish
-        // chain in one click. handleEnd handles the navigate.
+
+      // declareIntent === "end" with a winner picked (settle-able).
+      if (event?.round_format === "multi") {
+        // finish_event sees winning_outcome_ids set and settles the
+        // current round under the hood (prior rounds keep their
+        // payouts), then flips status → finished. handleEnd navigates.
         setDeclareOpen(false);
         setSelectedWinners(new Set());
         await handleEnd({ skipConfirm: true });
         return;
       }
 
-      // Single-round default: declare + close out via end-stream.
+      // Single-round: declare_winner already flipped the event to
+      // pending_moderation; just stop the stream + bounce to the list.
+      // A LiveRush moderator releases payouts.
       await stopStream();
       toast.success("Stream ended — awaiting platform settlement");
       setDeclareOpen(false);
@@ -923,80 +938,59 @@ export default function LiveStream() {
           )}
         </div>
         {phase === "live" || phase === "ending" ? (
-          // Top-right toolbar — single-round vs multi-round divergence.
+          // Top-right toolbar — the streamer is always in control.
           //
-          // Single round: one button switching between "Cancel stream"
-          // (window still open OR minimums not met → refund everyone)
-          // and "End stream" (declare + finish).
+          // Multi-round, not yet final: Next round + Final round +
+          // End stream are ALL on screen. Next / Final are disabled
+          // while the betting window is open (declare_winner /
+          // settle_round would 22023 on the server until it closes);
+          // once it closes they open the declare-winner modal —
+          // picking a winner when minimums are met, or confirming a
+          // refund-and-advance when they aren't (settle_round refunds
+          // the under-minimum round and opens the next / final one).
           //
-          // Multi-round + not yet final round: Next round + Final
-          // round side-by-side. Both open the Declare Winner modal
-          // and, on confirm, advance OR mark-final.
-          //
-          // Multi-round + is_final_round: only End stream remains
-          // (Final-round settlement already done, viewer is past
-          // betting; finish_event closes the stream).
-          event?.round_format === "multi" ? (
-            event.is_final_round ? (
-              !bettingClosed ? (
-                // Final round, betting still open — the streamer
-                // can bail early (refund + end). Same Cancel-stream
-                // path as any other in-progress round.
-                <Button
-                  type="button"
-                  variant="accent"
-                  size="sm"
-                  onClick={() => {
-                    setDeclareIntent("end");
-                    setDeclareOpen(true);
-                  }}
-                  disabled={phase === "ending" || declareWinnerMutation.isPending}
-                  className="bg-destructive text-white hover:bg-destructive/90"
-                  style={{ backgroundImage: "none" }}
-                >
-                  {phase === "ending" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <PhoneOff className="h-4 w-4" />
-                      Cancel stream
-                    </>
-                  )}
-                </Button>
-              ) : (
-                // Final round, betting closed — the streamer picks
-                // winners and the same submit declares + ends the
-                // stream (finish_event settles the round on the way
-                // out via the 20260608_000005 migration). One click,
-                // one modal, end of event.
-                <Button
-                  type="button"
-                  variant="accent"
-                  size="sm"
-                  onClick={() => {
-                    setDeclareIntent("final-end");
-                    setDeclareOpen(true);
-                  }}
-                  disabled={phase === "ending" || declareWinnerMutation.isPending}
-                >
-                  {phase === "ending" || declareWinnerMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Trophy className="h-4 w-4" />
-                      Declare winner & end
-                    </>
-                  )}
-                </Button>
-              )
-            ) : !bettingClosed ? (
-              // Betting window still open for the current round —
-              // Next / Final round can't fire yet (declare_winner
-              // would 22023 on the server anyway). Surface Cancel
-              // stream instead so the streamer has a clean exit
-              // path while bets are still being taken; the modal
-              // routes to the refund-everyone branch since
-              // willCancel is true.
+          // Multi-round final round + single-round events: only End
+          // stream. The final round has no further Next/Final to
+          // offer. End stream is a force-end that always works — it
+          // settles a settle-able current round after a winner pick,
+          // or refunds an in-window / under-minimum round, leaving
+          // prior rounds' settlements untouched.
+          event?.round_format === "multi" && !event.is_final_round ? (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setDeclareIntent(minimumsMet ? "next" : "next-refund");
+                  setDeclareOpen(true);
+                }}
+                disabled={!bettingClosed || roundMutationPending}
+                title={
+                  !bettingClosed
+                    ? "Available once the betting window closes"
+                    : undefined
+                }
+              >
+                Next round
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setDeclareIntent(minimumsMet ? "final" : "final-refund");
+                  setDeclareOpen(true);
+                }}
+                disabled={!bettingClosed || roundMutationPending}
+                title={
+                  !bettingClosed
+                    ? "Available once the betting window closes"
+                    : undefined
+                }
+              >
+                Final round
+              </Button>
               <Button
                 type="button"
                 variant="accent"
@@ -1014,58 +1008,13 @@ export default function LiveStream() {
                 ) : (
                   <>
                     <PhoneOff className="h-4 w-4" />
-                    Cancel stream
+                    End stream
                   </>
                 )}
               </Button>
-            ) : shouldAutoEndRound ? (
-              // Round closed without hitting minimums. Next/Final
-              // round are nonsensical here (declare_winner would
-              // route into refund_round anyway). The auto-end
-              // watchdog above is already firing finish_event; we
-              // just show a non-interactive "Ending stream…"
-              // affordance so the streamer sees what's happening
-              // until the page navigates away.
-              <span className="inline-flex items-center gap-2 rounded-md bg-destructive/15 px-3 py-1.5 text-xs font-semibold text-destructive">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Ending stream…
-              </span>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setDeclareIntent("next");
-                    setDeclareOpen(true);
-                  }}
-                  disabled={
-                    declareWinnerMutation.isPending ||
-                    advanceRoundMutation.isPending
-                  }
-                >
-                  Next round
-                </Button>
-                <Button
-                  type="button"
-                  variant="accent"
-                  size="sm"
-                  onClick={() => {
-                    setDeclareIntent("final");
-                    setDeclareOpen(true);
-                  }}
-                  disabled={
-                    declareWinnerMutation.isPending ||
-                    markFinalRoundMutation.isPending
-                  }
-                >
-                  Final round
-                </Button>
-              </div>
-            )
+            </div>
           ) : (
-            // Single-round path — unchanged behaviour.
+            // Multi-round final round + single-round: only End stream.
             <Button
               type="button"
               variant="accent"
@@ -1083,7 +1032,7 @@ export default function LiveStream() {
               ) : (
                 <>
                   <PhoneOff className="h-4 w-4" />
-                  {willCancel ? "Cancel stream" : "End stream"}
+                  End stream
                 </>
               )}
             </Button>
@@ -1266,77 +1215,92 @@ export default function LiveStream() {
           surprised that round 1's pool didn't blow up when they
           cancelled mid-round 2. */}
       {(() => null)()}
-      {/* End-stream modal — single entry point regardless of whether
-          the betting window has closed. Four flavours of copy:
-            • Multi-round, currentRound > 1, willCancel=true →
-              per-round status list (settled vs refunded) + Cancel
-              stream. Only the current round refunds; prior rounds
-              already settled to payouts-pending-approval.
-            • willCancel=true (single-round OR multi-round on round 1)
-              → cancel + refund. Copy emphasises the refund.
-            • bettingClosed && minimums met → declare-winner picker.
-            • else (shouldn't really happen — willCancel covers it)
-              → vanilla end-stream copy. */}
+      {/* Declare / advance / end modal — single entry point for every
+          round-control action. Three shapes (see isWinnerPick /
+          declareRefundAdvance / isRefundEnd above):
+            • refund-advance — under-minimum current round refunds, next
+              / final round opens, stream stays live. No winner pick.
+            • winner-pick — declare winner, then settle + advance / open
+              final / end depending on intent.
+            • refund-end — force-end: refund the current round and close
+              the stream. Multi-round past round 1 shows the per-round
+              breakdown so the streamer sees prior rounds keep payouts. */}
       <Dialog open={declareOpen} onOpenChange={setDeclareOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {willCancel
-                ? "Cancel stream"
-                : "End stream & declare winner"}
+              {declareRefundAdvance
+                ? declareIntent === "final-refund"
+                  ? "Refund round & open final"
+                  : "Refund round & continue"
+                : isWinnerPick
+                  ? declareIntent === "next"
+                    ? "Declare winner — next round"
+                    : declareIntent === "final"
+                      ? "Declare winner — final round"
+                      : "End stream & declare winner"
+                  : "End stream"}
             </DialogTitle>
             <DialogDescription>
-              {willCancel
-                ? event?.round_format === "multi" &&
-                  (event?.current_round ?? 1) > 1
-                  ? "Rounds you've already settled keep their payouts (waiting on LiveRush settlement approval). Only the current in-progress round will refund — see the breakdown below."
-                  : bettingClosed
-                  ? "This event didn't reach the minimum bets needed to settle (participants, outcomes, or pool). Cancelling now refunds every bet in full and closes the stream."
-                  : "The betting window is still open. Cancelling now closes the stream and refunds every bet in full — no winner is declared."
-                : "Pick the outcome(s) that won. Multi-select supports dead heats. Once submitted, the event flips to Pending settlement and a LiveRush moderator releases payouts."}
+              {declareRefundAdvance
+                ? `Round ${roundNum} didn't reach the minimum bets to settle (participants, outcomes, or pool). These bets refund in full and ${
+                    declareIntent === "final-refund"
+                      ? "the final round opens for betting"
+                      : "the next round opens for betting"
+                  }. The stream stays live.`
+                : isWinnerPick
+                  ? declareIntent === "next"
+                    ? "Pick the outcome(s) that won this round. Multi-select supports dead heats. The round settles to payouts-pending-approval and the next round opens for betting."
+                    : declareIntent === "final"
+                      ? "Pick the outcome(s) that won this round. Multi-select supports dead heats. The round settles and the final round opens for betting."
+                      : isMulti
+                        ? "Pick the outcome(s) that won. Multi-select supports dead heats. The current round settles, prior rounds keep their payouts, and the stream ends."
+                        : "Pick the outcome(s) that won. Multi-select supports dead heats. Once submitted, the event flips to Pending settlement and a LiveRush moderator releases payouts."
+                  : showPriorRoundList
+                    ? "Rounds you've already settled keep their payouts (waiting on LiveRush settlement approval). Only the current in-progress round will refund — see the breakdown below."
+                    : bettingClosed
+                      ? "This round didn't reach the minimum bets needed to settle (participants, outcomes, or pool). Ending now refunds every bet in this round in full and closes the stream."
+                      : "The betting window is still open. Ending now closes the stream and refunds every bet in full — no winner is declared."}
             </DialogDescription>
           </DialogHeader>
 
-          {/* Per-round status list — only when there's > 1 round to
-              show (multi-round events past their first round). */}
-          {willCancel &&
-            event?.round_format === "multi" &&
-            (event?.current_round ?? 1) > 1 && (
-              <ul className="space-y-2 py-2">
-                {Array.from({ length: event.current_round ?? 1 }, (_, i) => {
-                  const roundNum = i + 1;
-                  const isCurrent = roundNum === event.current_round;
-                  return (
-                    <li
-                      key={roundNum}
-                      className={cn(
-                        "flex items-start gap-3 rounded-lg border p-3 text-sm",
-                        isCurrent
-                          ? "border-destructive/40 bg-destructive/[0.06]"
-                          : "border-emerald-500/30 bg-emerald-500/[0.06]",
-                      )}
-                    >
-                      {isCurrent ? (
-                        <PhoneOff className="mt-0.5 h-4 w-4 flex-shrink-0 text-destructive" />
-                      ) : (
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
-                      )}
-                      <div className="min-w-0">
-                        <div className="font-semibold">
-                          Round {roundNum}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {isCurrent
-                            ? "Bets in this round will refund in full."
-                            : "Settled — payouts pending LiveRush approval."}
-                        </div>
+          {/* Per-round status list — force-end of a multi-round event
+              past its first round. Prior rounds already settled; only
+              the current round refunds. */}
+          {showPriorRoundList && (
+            <ul className="space-y-2 py-2">
+              {Array.from({ length: event?.current_round ?? 1 }, (_, i) => {
+                const listRound = i + 1;
+                const isCurrent = listRound === event?.current_round;
+                return (
+                  <li
+                    key={listRound}
+                    className={cn(
+                      "flex items-start gap-3 rounded-lg border p-3 text-sm",
+                      isCurrent
+                        ? "border-destructive/40 bg-destructive/[0.06]"
+                        : "border-emerald-500/30 bg-emerald-500/[0.06]",
+                    )}
+                  >
+                    {isCurrent ? (
+                      <PhoneOff className="mt-0.5 h-4 w-4 flex-shrink-0 text-destructive" />
+                    ) : (
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-semibold">Round {listRound}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {isCurrent
+                          ? "Bets in this round will refund in full."
+                          : "Settled — payouts pending LiveRush approval."}
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          {!willCancel && (
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {isWinnerPick && (
             <ul className="space-y-2 py-2">
               {outcomes.map((o) => {
                 const active = selectedWinners.has(o.id);
@@ -1375,33 +1339,58 @@ export default function LiveStream() {
               type="button"
               variant="secondary"
               onClick={() => setDeclareOpen(false)}
-              disabled={declareWinnerMutation.isPending || phase === "ending"}
+              disabled={
+                declareWinnerMutation.isPending ||
+                roundMutationPending ||
+                phase === "ending"
+              }
             >
               Cancel
             </Button>
-            {!willCancel ? (
+            {declareRefundAdvance ? (
+              // Refund the under-minimum round and open the next / final
+              // round. No winner pick — handleDeclareSubmit calls
+              // advance_round / mark_final_round directly.
               <Button
                 type="button"
                 onClick={handleDeclareSubmit}
-                disabled={
-                  declareWinnerMutation.isPending || selectedWinners.size === 0
-                }
+                disabled={roundMutationPending}
               >
-                {declareWinnerMutation.isPending ? (
+                {roundMutationPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : declareIntent === "final-refund" ? (
+                  "Refund & open final round"
+                ) : (
+                  "Refund & open next round"
+                )}
+              </Button>
+            ) : isWinnerPick ? (
+              <Button
+                type="button"
+                onClick={handleDeclareSubmit}
+                disabled={roundMutationPending || selectedWinners.size === 0}
+              >
+                {roundMutationPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <>
                     <Trophy className="h-4 w-4" />
-                    End & submit results
+                    {declareIntent === "next"
+                      ? "Settle & open next round"
+                      : declareIntent === "final"
+                        ? "Settle & open final round"
+                        : "End & submit results"}
                   </>
                 )}
               </Button>
             ) : (
+              // refund-end: the modal already confirmed, so skip the
+              // native confirm inside handleEnd.
               <Button
                 type="button"
                 onClick={async () => {
                   setDeclareOpen(false);
-                  await handleEnd();
+                  await handleEnd({ skipConfirm: true });
                 }}
                 disabled={phase === "ending"}
                 // Same gradient-strip-but-keep-solid trick as the top
@@ -1411,7 +1400,7 @@ export default function LiveStream() {
                 style={{ backgroundImage: "none" }}
               >
                 <PhoneOff className="h-4 w-4" />
-                Cancel stream
+                End stream
               </Button>
             )}
           </div>

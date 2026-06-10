@@ -20,7 +20,14 @@ import {
 } from "lucide-react";
 
 import { Button, Input } from "@liverush/ui";
-import { cn, MIN_BET_CENTS, MAX_BET_CENTS } from "@liverush/lib";
+import {
+  cn,
+  MIN_BET_CENTS,
+  MAX_BET_CENTS,
+  BETTING_WINDOW_MIN_SEC,
+  BETTING_WINDOW_MAX_SEC,
+  BETTING_WINDOW_DEFAULT_SEC,
+} from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { LiveStreamTest } from "@/components/LiveStreamTest";
@@ -54,6 +61,46 @@ const COVER_ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"];
 // send a single sentinel value for every new studio event; existing rows
 // keep whatever category they were already saved with.
 const DEFAULT_CATEGORY = "General";
+
+// Betting window is stored in seconds (events.betting_window_seconds);
+// the editor exposes it as separate minutes + seconds inputs. These
+// helpers translate between the stored integer and the two fields,
+// clamping to the lib-defined [MIN, MAX] bounds (10s–1800s).
+function clampWindowSeconds(total: number): number {
+  return Math.min(
+    BETTING_WINDOW_MAX_SEC,
+    Math.max(BETTING_WINDOW_MIN_SEC, total),
+  );
+}
+
+function splitWindowSeconds(total: number): { min: string; sec: string } {
+  const clamped = clampWindowSeconds(total);
+  return { min: String(Math.floor(clamped / 60)), sec: String(clamped % 60) };
+}
+
+// Reads the effective window length (seconds) from a loaded event row,
+// tolerating the not-yet-regenerated types: betting_window_seconds is
+// absent from the generated Row type until the operator regenerates, so
+// it's typed optional here and we fall back to the legacy minutes column
+// (×60), then the lib default.
+function readWindowSeconds(row: {
+  betting_window_seconds?: number | null;
+  betting_window_minutes?: number | null;
+}): number {
+  const sec = row.betting_window_seconds;
+  if (
+    typeof sec === "number" &&
+    sec >= BETTING_WINDOW_MIN_SEC &&
+    sec <= BETTING_WINDOW_MAX_SEC
+  ) {
+    return sec;
+  }
+  const min = row.betting_window_minutes;
+  if (typeof min === "number" && Number.isFinite(min)) {
+    return clampWindowSeconds(Math.round(min * 60));
+  }
+  return BETTING_WINDOW_DEFAULT_SEC;
+}
 
 const BET_WINDOW_OPENS: Array<{ value: BetWindowOpens; label: string }> = [
   { value: "on_live", label: "When event goes live" },
@@ -221,11 +268,30 @@ export default function EventEditor() {
     useState<BetWindowOpens>("on_live");
   const [betWindowLocks, setBetWindowLocks] =
     useState<BetWindowLocks>("manual");
-  // Phase 1 betting MVP: pari-mutuel hard betting window in minutes
-  // (5-30). Replaces the legacy bet_window_locks dropdown for new
-  // events. The legacy column is still saved for back-compat reads,
-  // but the runtime uses betting_window_minutes via start_event.
-  const [bettingWindowMinutes, setBettingWindowMinutes] = useState<number>(10);
+  // Pari-mutuel hard betting window, now stored in SECONDS
+  // (events.betting_window_seconds; 10–1800). Surfaced as two inputs —
+  // minutes + seconds — backed by raw string state so the typist isn't
+  // fought mid-edit; the clamped integer is derived in
+  // `bettingWindowSeconds` below and used for save + dirty checks. The
+  // legacy betting_window_minutes column is no longer written.
+  const windowInit = splitWindowSeconds(BETTING_WINDOW_DEFAULT_SEC);
+  const [windowMinStr, setWindowMinStr] = useState<string>(windowInit.min);
+  const [windowSecStr, setWindowSecStr] = useState<string>(windowInit.sec);
+  const bettingWindowSeconds = useMemo(
+    () =>
+      clampWindowSeconds(
+        (Number.parseInt(windowMinStr, 10) || 0) * 60 +
+          (Number.parseInt(windowSecStr, 10) || 0),
+      ),
+    [windowMinStr, windowSecStr],
+  );
+  // Re-snap both fields to the clamped value on blur so a sub-10s or
+  // over-30m entry visibly corrects (e.g. "0 min 5 s" → "0 min 10 s").
+  const normalizeWindowInputs = () => {
+    const sp = splitWindowSeconds(bettingWindowSeconds);
+    setWindowMinStr(sp.min);
+    setWindowSecStr(sp.sec);
+  };
   // New events start with a sensible future scheduled time so Save
   // can unlock with only a typed title (the DB requires scheduled_at).
   // Existing events overwrite this in the load effect below.
@@ -275,6 +341,7 @@ export default function EventEditor() {
           min_bet_cents, max_bet_cents,
           bet_window_opens, bet_window_locks,
           betting_window_minutes,
+          betting_window_seconds,
           source_type, broadcast_delay_sec,
           outcomes:event_outcomes!event_outcomes_event_id_fkey (
             id, label, odds, sort_order
@@ -306,13 +373,9 @@ export default function EventEditor() {
     setVoidConditions(loaded.void_conditions ?? "");
     setBetWindowOpens(loaded.bet_window_opens ?? "on_live");
     setBetWindowLocks(loaded.bet_window_locks ?? "manual");
-    setBettingWindowMinutes(
-      typeof loaded.betting_window_minutes === "number" &&
-        loaded.betting_window_minutes >= 5 &&
-        loaded.betting_window_minutes <= 30
-        ? loaded.betting_window_minutes
-        : 10,
-    );
+    const loadedWindow = splitWindowSeconds(readWindowSeconds(loaded));
+    setWindowMinStr(loadedWindow.min);
+    setWindowSecStr(loadedWindow.sec);
     setScheduledAt(toLocalDateTimeInput(loaded.scheduled_at));
     // If the saved scheduled_at is meaningfully in the future, the
     // creator had previously asked us to schedule — keep the checkbox
@@ -522,8 +585,7 @@ export default function EventEditor() {
       return true;
     if (betWindowLocks !== (loaded.bet_window_locks ?? "manual"))
       return true;
-    if (bettingWindowMinutes !== (loaded.betting_window_minutes ?? 10))
-      return true;
+    if (bettingWindowSeconds !== readWindowSeconds(loaded)) return true;
     if (scheduledAt !== toLocalDateTimeInput(loaded.scheduled_at))
       return true;
     // Compare against the same coerced default we use when loading the
@@ -693,16 +755,18 @@ export default function EventEditor() {
       if (error) throw error;
     }
 
-    // Persist the new pari-mutuel betting window minutes via the
-    // dedicated set_event_betting_window RPC. (Kept separate from
-    // update_event so we don't bloat its already-wide signature.)
+    // Persist the pari-mutuel betting window (seconds) via the dedicated
+    // set_event_betting_window RPC. (Kept separate from update_event so
+    // we don't bloat its already-wide signature.) Cast to `never` because
+    // the renamed p_seconds param isn't in the generated types until the
+    // operator regenerates.
     if (savedId) {
       const { error: windowErr } = await supabase.rpc(
         "set_event_betting_window",
         {
           p_event_id: savedId,
-          p_minutes: bettingWindowMinutes,
-        },
+          p_seconds: bettingWindowSeconds,
+        } as never,
       );
       if (windowErr) throw windowErr;
     }
@@ -1401,32 +1465,47 @@ export default function EventEditor() {
               </select>
             </div>
             <div className="space-y-1">
-              <label
-                htmlFor="window-minutes"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                Window (minutes after live)
+              <label className="text-xs font-medium text-muted-foreground">
+                Betting window (after going live)
               </label>
-              <Input
-                id="window-minutes"
-                type="number"
-                min={5}
-                max={30}
-                step={1}
-                value={String(bettingWindowMinutes)}
-                onChange={(e) => {
-                  const next = parseInt(e.target.value, 10);
-                  if (Number.isFinite(next)) {
-                    setBettingWindowMinutes(
-                      Math.min(30, Math.max(5, next)),
-                    );
-                  }
-                }}
-                disabled={!editable}
-                className="h-10"
-              />
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <Input
+                    id="window-minutes"
+                    type="number"
+                    min={0}
+                    max={30}
+                    step={1}
+                    inputMode="numeric"
+                    aria-label="Betting window minutes"
+                    value={windowMinStr}
+                    onChange={(e) => setWindowMinStr(e.target.value)}
+                    onBlur={normalizeWindowInputs}
+                    disabled={!editable}
+                    className="h-10 w-20"
+                  />
+                  <span className="text-sm text-muted-foreground">min</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Input
+                    id="window-seconds"
+                    type="number"
+                    min={0}
+                    max={59}
+                    step={1}
+                    inputMode="numeric"
+                    aria-label="Betting window seconds"
+                    value={windowSecStr}
+                    onChange={(e) => setWindowSecStr(e.target.value)}
+                    onBlur={normalizeWindowInputs}
+                    disabled={!editable}
+                    className="h-10 w-20"
+                  />
+                  <span className="text-sm text-muted-foreground">sec</span>
+                </div>
+              </div>
               <p className="text-[11px] text-muted-foreground">
-                5–30 minutes. Default 10.
+                Minimum 10 seconds, maximum 30 minutes. Default 1 minute.
               </p>
             </div>
           </div>

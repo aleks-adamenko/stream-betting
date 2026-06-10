@@ -76,6 +76,7 @@ const EVENT_DETAIL_SELECT = `
   winning_outcome_ids,
   betting_closes_at,
   betting_window_minutes,
+  betting_window_seconds,
   archived_at,
   creator:creator_profiles!events_creator_id_fkey ( id, handle, display_name ),
   event_outcomes!event_outcomes_event_id_fkey ( pool_cents )
@@ -108,7 +109,30 @@ type EventDetail = EventListRow & {
   winning_outcome_ids: string[] | null;
   betting_closes_at: string | null;
   betting_window_minutes: number | null;
+  betting_window_seconds: number | null;
 };
+
+/**
+ * Render a betting-window length as a compact label. Prefers the
+ * authoritative seconds column; falls back to the legacy minutes column
+ * (×60) for rows saved before the seconds migration.
+ */
+function formatBettingWindow(
+  seconds: number | null | undefined,
+  legacyMinutes: number | null | undefined,
+): string {
+  const secs =
+    typeof seconds === "number"
+      ? seconds
+      : typeof legacyMinutes === "number"
+        ? legacyMinutes * 60
+        : null;
+  if (secs == null) return "—";
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
 
 /** Sum per-outcome pool_cents into the true total pool for an event. */
 function totalPoolCents(row: { event_outcomes: { pool_cents: number }[] | null }): number {
@@ -751,9 +775,10 @@ function EventDrawer({
                     <CoinAmount cents={cumulativeTotalCents} />
                   </DetailField>
                   <DetailField label="Betting window">
-                    {event.betting_window_minutes != null
-                      ? `${event.betting_window_minutes} min`
-                      : "—"}
+                    {formatBettingWindow(
+                      event.betting_window_seconds,
+                      event.betting_window_minutes,
+                    )}
                   </DetailField>
                   <DetailField label="Scheduled at">
                     {event.scheduled_at

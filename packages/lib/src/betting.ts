@@ -38,7 +38,7 @@ export const RAKE_STREAMER_BPS = 500;
 
 // ---- Cancellation guards ------------------------------------------------
 /** Minimum unique bettors before settle_event will create payouts. */
-export const MIN_UNIQUE_BETTORS = 3;
+export const MIN_UNIQUE_BETTORS = 2;
 /** Minimum distinct outcomes that received at least one bet. */
 export const MIN_OUTCOMES_WITH_BETS = 2;
 
@@ -46,12 +46,15 @@ export const MIN_OUTCOMES_WITH_BETS = 2;
 /**
  * MIN_POOL = max(MAX_BET × multiplier, num_outcomes × MIN_BET, floor)
  *
- * Without this, a single $10 bettor can settle a 3-outcome event and
+ * Without this, a single $10 bettor can settle a 2-outcome event and
  * walk away with $9 — losing $1 to the 10% rake on a one-bet pool. The
  * spec's MIN_POOL guard makes those events auto-cancel + refund instead.
+ *
+ * Effective minimum is $20: MAX_BET($10) × 2 = $20 is the binding term
+ * (it dominates num_outcomes × MIN_BET and ties the floor).
  */
-export const MIN_POOL_MAX_BET_MULTIPLIER = 3;
-export const MIN_POOL_FLOOR_CENTS = 3000; // $30
+export const MIN_POOL_MAX_BET_MULTIPLIER = 2;
+export const MIN_POOL_FLOOR_CENTS = 2000; // $20
 
 /** Per-spec MIN_POOL for the given event shape. */
 export function minPoolCents(numOutcomes: number): number {
@@ -71,9 +74,11 @@ export function minPoolCents(numOutcomes: number): number {
 export const STALE_RESULT_GRACE_MINUTES = 15;
 
 // ---- Betting window ----------------------------------------------------
-export const BETTING_WINDOW_MIN_MIN = 5;
-export const BETTING_WINDOW_MIN_MAX = 30;
-export const BETTING_WINDOW_DEFAULT_MIN = 10;
+// Window length is stored in SECONDS (events.betting_window_seconds).
+// Mirrors get_betting_constants().betting_window_{min,max}_sec.
+export const BETTING_WINDOW_MIN_SEC = 10; // 10s floor
+export const BETTING_WINDOW_MAX_SEC = 1800; // 30 min ceiling
+export const BETTING_WINDOW_DEFAULT_SEC = 60; // 1 min default
 
 // ---- KYC stub ----------------------------------------------------------
 /** Per-user daily bet sum cap (cents). Enforced by place_bet. */
