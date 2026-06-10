@@ -1,6 +1,6 @@
 import { Fragment, useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowRight, BadgeCheck, Users } from "lucide-react";
+import { ArrowRight, BadgeCheck, Users, Zap } from "lucide-react";
 
 import { EventCard } from "@/components/feed/EventCard";
 import { FeedArrows } from "@/components/feed/FeedArrows";
@@ -16,6 +16,7 @@ import {
   SocialVideoEmbed,
   resolveSocialEmbedUrl,
 } from "@/components/stream/SocialVideoEmbed";
+import { BrushBg } from "@/components/ui/BrushButton";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { TierHeroCard } from "@/components/tier/TierHeroCard";
@@ -29,6 +30,16 @@ import rewardsBannerMobile from "@/assets/rewards-banner-1.jpg";
 import rewardsBannerDesktop from "@/assets/rewards-banner-2.jpg";
 import noLiveCoverMobile from "@/assets/live-rush-cover-image-3.jpg";
 import noLiveCoverDesktop from "@/assets/live-rush-cover-image-2.jpg";
+// Custom illustrated bullet icons for the anon "Join LiveRush"
+// prompt. Each SVG is a self-contained 60×60 with its own circular
+// background, so we drop them in as <img> without wrapping in
+// another circle. `?url` hands Vite a stable URL.
+import welcomeIcon1 from "@/assets/icons/welcome-icon-1.svg?url";
+import welcomeIcon2 from "@/assets/icons/welcome-icon-2.svg?url";
+import welcomeIcon3 from "@/assets/icons/welcome-icon-3.svg?url";
+// Hero-row illustration on the SignUpPromptCard header — replaces
+// the previous Lucide Users avatar + Zap bolt combo.
+import welcomeIconTop from "@/assets/icons/welcome-icon-top.png?url";
 import type { Influencer, StreamEvent } from "@/domain/types";
 
 const TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
@@ -144,20 +155,14 @@ function SectionedHome({
 
       {/* No live streams right now — render a branded cover hero in
           the slot the FeaturedLiveSection would otherwise occupy.
-          Two aspect ratios in the source files: 1200×630 social-card
-          for phones, 1920×418 letterbox for desktop.
-          For SIGNED-IN viewers on desktop we shrink the banner to
-          3/4 width and drop the Tier 1 hero card in the right 1/4
-          (= one event-card width in the lg/xl grids), so the page
-          surfaces "here's where you are in the rewards loop" the
-          moment they arrive. Anonymous viewers see the banner
-          full-width since the tier card is a gated affordance. */}
-      {!isLoading && !featured && user && (
-        <NoLiveSignedInHero />
-      )}
-      {!isLoading && !featured && !user && (
-        <NoLiveCover />
-      )}
+          Both signed-in and anonymous viewers get the same 2-col
+          layout (banner left, gradient card right). The right
+          panel swaps based on auth state: signed-in viewers see
+          the tier-progress hero; anonymous viewers see a "Join
+          LiveRush" sign-up prompt with the same gradient + size as
+          the tier card. */}
+      {!isLoading && !featured && user && <NoLiveSignedInHero />}
+      {!isLoading && !featured && !user && <NoLiveAnonHero />}
 
       {!isLoading && live.length > 0 && (
         <Section
@@ -205,30 +210,168 @@ function SectionedHome({
 }
 
 /**
- * "Nothing live right now" hero — drops in where the live-stream
- * featured card would normally sit on the Home page. Same rounded
- * card visual language as the rest of the page (border, shadow).
- * Decorative only (no link) since there's no clear destination —
- * the sections below it (Upcoming / Discover more) carry the actual
- * navigation. Two source files: 1200×630 for phones, 1920×418
- * letterbox for desktop.
+ * Anonymous variant of the "no live streams" hero — mirrors the
+ * signed-in 2-col layout (banner left, right panel) so the page
+ * shape stays consistent across auth states. The right panel is a
+ * "Join LiveRush" sign-up prompt: same gradient chrome and
+ * dimensions as TierHeroCard, with sign-up CTA copy + benefit
+ * bullets + a brand-yellow CTA button routing to /auth/sign-up.
  */
-function NoLiveCover() {
+function NoLiveAnonHero() {
   return (
-    <div className="block w-full overflow-hidden rounded-2xl border border-border/30 bg-card shadow-lg">
-      <img
-        src={noLiveCoverMobile}
-        alt=""
-        className="block h-auto w-full lg:hidden"
-      />
-      <img
-        src={noLiveCoverDesktop}
-        alt=""
-        className="hidden h-auto w-full lg:block"
-      />
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr] xl:grid-cols-[3fr_1fr]">
+      <div className="block w-full overflow-hidden rounded-2xl border border-border/30 bg-card shadow-lg">
+        <img
+          src={noLiveCoverMobile}
+          alt=""
+          className="block h-full w-full object-cover lg:hidden"
+        />
+        <img
+          src={noLiveCoverDesktop}
+          alt=""
+          className="hidden h-full w-full object-cover lg:block"
+        />
+      </div>
+      <SignUpPromptCard />
     </div>
   );
 }
+
+/**
+ * Right-rail panel for anonymous viewers — visually matches
+ * TierHeroCard (same gradient, border, shadow, h-full stretch) so
+ * both auth states render the same "right column" silhouette.
+ * Content is a vertical sign-up pitch: header pitch + 3 benefit
+ * rows + a brand-yellow CTA at the bottom routing to /auth/sign-up.
+ */
+function SignUpPromptCard() {
+  return (
+    <section
+      className={cn(
+        "flex h-full flex-col overflow-hidden rounded-2xl border border-border/40 shadow-sm",
+        HOME_NO_LIVE_PANEL_MIN_H,
+      )}
+    >
+      {/* Hits the same `lg:min-h-[334px]` floor as the TierHeroCard
+          by using a consistent `gap-3` rhythm between every section
+          (header / subtitle / bullets / CTA) — every gap reads as
+          the same vertical step instead of one section being
+          cramped while another floats with a huge mt-auto gap. No
+          content is dropped; sizes stay close to comfortable
+          defaults. */}
+      <div className="flex h-full flex-col gap-3 bg-gradient-to-b from-[#6525FF] to-[#0124C7] px-6 py-5 text-white">
+        {/* Header — illustrated hero icon (welcome-icon-top.png) +
+            headline. The PNG already carries its own design /
+            chrome so we drop it in as a plain <img> without a
+            wrapping ring or background.
+            The 10% size bump uses `transform: scale(1.1)` so the
+            artwork grows visually while its layout box stays at
+            h-11 — that keeps the header row (and therefore the
+            whole card) at the same height the operator dialled in.
+            transform-origin centre-left so the bump pushes the
+            icon slightly past its right edge into the headline
+            gap (gap-3 = 12px) instead of nudging the medallion
+            into the card's left padding. */}
+        <div className="flex items-center gap-3">
+          <img
+            src={welcomeIconTop}
+            alt=""
+            aria-hidden
+            style={{
+              transform: "scale(1.1)",
+              transformOrigin: "left center",
+            }}
+            className="h-11 w-11 flex-shrink-0"
+          />
+          <h3 className="font-heading text-base font-extrabold uppercase leading-tight tracking-wide">
+            Join. Participate.{" "}
+            <span className="text-[#FFDD49]">Win.</span> Unlock more!
+          </h3>
+        </div>
+
+        <p className="text-xs leading-snug text-white/80">
+          Create your account and start your LiveRush journey today.
+        </p>
+
+        {/* Three benefit rows. Icons are the custom illustrated
+            welcome-icon-{1,2,3}.svg in src/assets/icons (60×60 with
+            built-in coloured circle backgrounds), so we render
+            them as plain <img> — each SVG carries its own chrome. */}
+        <ul className="space-y-1.5">
+          <BenefitRow iconSrc={welcomeIcon1} title="Join live challenges" />
+          <BenefitRow iconSrc={welcomeIcon2} title="Win big" />
+          <BenefitRow iconSrc={welcomeIcon3} title="Unlock more rewards" />
+        </ul>
+
+        {/* CTA group sits naturally below the bullets — the outer
+            `gap-3` keeps the header / subtitle / bullets / CTA
+            rhythm even instead of pinning the button to a hard
+            bottom with a yawning gap above.
+            The CTA reuses the shared <BrushBg> from BrushButton so
+            the brand-yellow gradient gets shaped into the
+            `sidebar-button-bg.svg` brush silhouette. BrushBg renders
+            its SVG with `preserveAspectRatio="none"` + absolute
+            inset-0, so the artwork stretches edge-to-edge with the
+            <Link>'s width — no letterboxing at wide container
+            widths. Geometry mirrors the BrushButton "lg" size
+            (`h-12 text-base`) so this CTA reads at the same weight
+            as the "Notify me when live" button on the EventDetails
+            right rail. */}
+        <div>
+          <Link
+            to="/auth/sign-up"
+            className="group relative inline-flex h-12 w-full items-center justify-center gap-2 text-base font-bold text-[hsl(227_47%_21%)] transition-transform hover:-translate-y-0.5"
+          >
+            <BrushBg variant="accent" />
+            <span className="relative inline-flex items-center gap-2">
+              <Zap className="h-4 w-4 fill-[#1B1F4E]" strokeWidth={2} />
+              Join LiveRush
+            </span>
+          </Link>
+          <p className="mt-1.5 text-center text-[11px] text-white/70">
+            It's free and only takes a minute!
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BenefitRow({
+  iconSrc,
+  title,
+}: {
+  iconSrc: string;
+  title: string;
+}) {
+  return (
+    <li className="flex items-center gap-2.5">
+      <img
+        src={iconSrc}
+        alt=""
+        aria-hidden
+        className="h-8 w-8 flex-shrink-0"
+      />
+      <p className="min-w-0 truncate font-heading text-xs font-bold uppercase tracking-wide text-white">
+        {title}
+      </p>
+    </li>
+  );
+}
+
+/**
+ * Shared min-height used by BOTH "no live" right-panel cards
+ * (TierHeroCard for signed-in viewers, SignUpPromptCard for anon).
+ * They live in separate grids so the usual `items-stretch` row
+ * equalisation doesn't apply across auth states; pinning the same
+ * min-h on both keeps the two variants visually consistent
+ * regardless of how much content each lays out.
+ * Tweak this single constant if the cards need to grow / shrink.
+ */
+// 352px / 384px (22rem / 24rem) was the previous floor; dropped 50px
+// on each per operator feedback — the cards were taller than they
+// needed to be for the content they carry.
+const HOME_NO_LIVE_PANEL_MIN_H = "min-h-[302px] lg:min-h-[334px]";
 
 /**
  * Signed-in variant of the "no live streams" hero. Splits the slot
@@ -263,7 +406,7 @@ function NoLiveSignedInHero() {
           className="hidden h-full w-full object-cover lg:block"
         />
       </div>
-      <TierHeroCard compact />
+      <TierHeroCard compact className={HOME_NO_LIVE_PANEL_MIN_H} />
     </div>
   );
 }

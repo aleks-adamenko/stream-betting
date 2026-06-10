@@ -420,9 +420,14 @@ export function TierHeroContent({
   // left of the bar.
   if (compact) {
     return (
+      // `flex h-full flex-col` lets the inner content spread via
+      // mt-auto on the streak block. Min-height is OWNED by the
+      // outer card (passed via `className` from the home page so
+      // both right-panel cards — tier hero AND anon sign-up — share
+      // the same `min-h-[X]` and end up visually identical).
       <div
         className={cn(
-          "relative bg-gradient-to-b from-[#6525FF] to-[#0124C7] px-6 py-6 text-white",
+          "relative flex h-full flex-col bg-gradient-to-b from-[#6525FF] to-[#0124C7] px-6 py-6 text-white",
           className,
         )}
       >
@@ -502,8 +507,14 @@ export function TierHeroContent({
             (achievement) → keep showing up (streak). */}
         <NextAchievement />
 
-        {/* Streak strip sits below the achievement block. */}
-        <StreakRow />
+        {/* Streak strip is pinned to the bottom via `mt-auto` so any
+            extra height the card inherits from the grid row (or
+            our min-h-[26rem] floor) lands BETWEEN the achievement
+            block and the streak — same balance the SignUpPromptCard
+            uses for its CTA. */}
+        <div className="mt-auto">
+          <StreakRow />
+        </div>
       </div>
     );
   }

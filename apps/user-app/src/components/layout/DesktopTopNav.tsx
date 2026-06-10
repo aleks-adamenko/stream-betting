@@ -266,11 +266,21 @@ function BalanceLink({ balanceCents }: { balanceCents: number }) {
 function SignedOutCTAs() {
   return (
     <div className="flex items-center gap-2">
+      {/* Both buttons bump to `text-sm` so their typography matches
+          the primary nav links (Home / Live now / Discover /
+          Following) which use the same size — `size="sm"` on the
+          base Button maps to `text-xs` which reads smaller than the
+          rest of the nav row. Sign up uses the Button's `accent`
+          variant (defined in packages/ui/src/button.tsx) which
+          ships the brand-yellow gradient #FFDD49 → #FFBE3B + a
+          dark-navy text colour out of the box — no need to layer
+          ad-hoc classes that would fight the default variant's
+          blue `gradient-primary` background. */}
       <Button
         asChild
         variant="outline"
         size="sm"
-        className="border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white"
+        className="border-white/40 bg-transparent text-sm font-bold text-white hover:bg-white/10 hover:text-white"
       >
         <Link to="/auth/sign-in">
           <LogIn className="h-4 w-4" />
@@ -279,9 +289,9 @@ function SignedOutCTAs() {
       </Button>
       <Button
         asChild
+        variant="accent"
         size="sm"
-        className="text-[#1F2679] ring-0 hover:text-[#1F2679]"
-        style={{ backgroundColor: "#FEE53A", backgroundImage: "none" }}
+        className="text-sm font-bold"
       >
         <Link to="/auth/sign-up">
           <UserPlus className="h-4 w-4" />
