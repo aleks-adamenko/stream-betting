@@ -39,7 +39,7 @@ import {
   type EventProgress,
 } from "@/hooks/useEventProgress";
 import { useEventViewers } from "@/hooks/useEventViewers";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeEdgeFunction, supabase } from "@/integrations/supabase/client";
 import { WhipPublisher } from "@/lib/whip";
 
 /**
@@ -292,8 +292,8 @@ export default function LiveStream() {
       // row is cleaned up. The function calls finish_event internally
       // to flip status. Service-role can't, because finish_event reads
       // auth.uid().
-      const { error } = await supabase.functions.invoke("end-stream", {
-        body: { event_id: eventId },
+      const { error } = await invokeEdgeFunction("end-stream", {
+        event_id: eventId,
       });
       if (error) throw error;
     },

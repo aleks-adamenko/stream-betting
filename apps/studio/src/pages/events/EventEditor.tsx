@@ -29,7 +29,7 @@ import {
   BETTING_WINDOW_DEFAULT_SEC,
 } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeEdgeFunction, supabase } from "@/integrations/supabase/client";
 import { LiveStreamTest } from "@/components/LiveStreamTest";
 
 // =========================================================================
@@ -839,8 +839,8 @@ export default function EventEditor() {
       // Cloudflare live input + flip status via the `provision-stream`
       // Edge Function. Idempotent.
       const id = await runSave();
-      const { error } = await supabase.functions.invoke("provision-stream", {
-        body: { event_id: id },
+      const { error } = await invokeEdgeFunction("provision-stream", {
+        event_id: id,
       });
       if (error) throw error;
       return id;

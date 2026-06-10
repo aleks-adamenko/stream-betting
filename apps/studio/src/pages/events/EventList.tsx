@@ -22,7 +22,7 @@ import {
 import { Button } from "@liverush/ui";
 import { cn } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeEdgeFunction, supabase } from "@/integrations/supabase/client";
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
@@ -331,8 +331,8 @@ export default function EventList() {
       // live stream + the events row gets stamped with the playback
       // id. The function calls publish_event internally to flip
       // status. Idempotent on event_id.
-      const { error } = await supabase.functions.invoke("provision-stream", {
-        body: { event_id: eventId },
+      const { error } = await invokeEdgeFunction("provision-stream", {
+        event_id: eventId,
       });
       if (error) throw error;
       return eventId;
