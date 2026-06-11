@@ -793,13 +793,36 @@ export default function LiveStream() {
       return;
     }
 
-    // Every remaining intent declares a winner first.
-    if (selectedWinners.size === 0) {
+    // Every remaining intent declares the current round's winner first
+    // — UNLESS this round's winners were already stamped by an earlier
+    // attempt whose follow-up step (settle / advance / finish) failed.
+    // declare_winner is one-shot per round: re-calling it 22023s with
+    // "Round N already has declared winners". But advance_round /
+    // mark_final_round / finish_event all read the winners already on
+    // the row, so a retry only needs to skip the re-declare and run the
+    // follow-up. winning_outcome_ids is refetched after the first
+    // declare (declareWinnerMutation invalidates the event query), so it
+    // reflects the in-progress round's stamped winners by retry time.
+    const winnersAlreadyStamped =
+      (event?.winning_outcome_ids?.length ?? 0) > 0;
+    if (!winnersAlreadyStamped && selectedWinners.size === 0) {
       toast.error("Pick at least one winning outcome");
       return;
     }
     try {
-      await declareWinnerMutation.mutateAsync(Array.from(selectedWinners));
+      if (!winnersAlreadyStamped) {
+        try {
+          await declareWinnerMutation.mutateAsync(Array.from(selectedWinners));
+        } catch (err) {
+          // Tolerate the race where a concurrent declare (e.g. a double
+          // tap that slipped past the isPending-disabled button) already
+          // stamped this round's winners — treat "already has declared
+          // winners" as done and fall through to the follow-up step
+          // rather than dead-ending the streamer on a stuck round.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!/already has declared winners/i.test(msg)) throw err;
+        }
+      }
 
       // Multi-round, staying live: declare + advance OR declare + mark
       // final (mark_final_round advances AND opens a fresh window for
@@ -883,10 +906,16 @@ export default function LiveStream() {
       />
 
       {/* Top bar — End stream button only visible once we're live. */}
-      <header className="relative z-20 flex items-start justify-between px-4 py-4 sm:px-6">
-        <div className="flex flex-col items-start gap-2">
-          {/* Top row: Live + viewers + title chip. */}
-          <div className="flex items-center gap-2">
+      <header className="relative z-20 flex flex-col gap-2 px-4 py-4 sm:px-6">
+        {/* Top row: status chips (left) + round-control toolbar (right).
+            The toolbar is `shrink-0` and the chips `min-w-0 flex-wrap`, so
+            on narrow (mobile) viewports the chips wrap instead of being
+            pushed under the buttons. The betting countdown lives on its
+            OWN row below (not in this justify-between competition) so the
+            toolbar can never squeeze or cover it on mobile. */}
+        <div className="flex items-start justify-between gap-2">
+          {/* Live + viewers + title chip. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {phase === "live" && (
               <>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive px-3 py-1 text-xs font-bold uppercase tracking-wider">
@@ -906,37 +935,6 @@ export default function LiveStream() {
               {event?.title}
             </p>
           </div>
-          {/* Absolute betting countdown — same value all viewers see
-              in the user-app overlay. Gated on event.status === 'live'
-              rather than the local `phase` so a refresh-and-resume
-              cycle (status='live', phase momentarily 'idle' until
-              Resume camera fires) doesn't hide the timer the streamer
-              still needs to see. */}
-          {event?.status === "live" && event?.betting_closes_at && (
-            <div className="flex items-center gap-2">
-              {/* Round pill — multi-round events only. Same data the
-                  viewer sees, in compact-friendly sizing. */}
-              {event.round_format === "multi" && (
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider tabular-nums",
-                    event.is_final_round
-                      ? "bg-destructive text-destructive-foreground"
-                      : "bg-white/10 text-white ring-1 ring-white/20",
-                  )}
-                >
-                  {event.is_final_round
-                    ? "Final round"
-                    : `Round ${event.current_round ?? 1}`}
-                </span>
-              )}
-              <BettingCountdown
-                closesAt={event.betting_closes_at}
-                variant="compact"
-              />
-            </div>
-          )}
-        </div>
         {phase === "live" || phase === "ending" ? (
           // Top-right toolbar — the streamer is always in control.
           //
@@ -956,7 +954,7 @@ export default function LiveStream() {
           // or refunds an in-window / under-minimum round, leaving
           // prior rounds' settlements untouched.
           event?.round_format === "multi" && !event.is_final_round ? (
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <Button
                 type="button"
                 variant="secondary"
@@ -1024,7 +1022,7 @@ export default function LiveStream() {
                 setDeclareOpen(true);
               }}
               disabled={phase === "ending" || declareWinnerMutation.isPending}
-              className="bg-destructive text-white hover:bg-destructive/90"
+              className="shrink-0 bg-destructive text-white hover:bg-destructive/90"
               style={{ backgroundImage: "none" }}
             >
               {phase === "ending" ? (
@@ -1041,10 +1039,44 @@ export default function LiveStream() {
           <button
             type="button"
             onClick={() => navigate(`/events/${eventId}`)}
-            className="text-sm font-medium text-white/70 hover:text-white"
+            className="shrink-0 text-sm font-medium text-white/70 hover:text-white"
           >
             Back to event
           </button>
+        )}
+        </div>
+
+        {/* Betting countdown — its OWN full-width row, below the top row,
+            so the round-control toolbar can't squeeze it to zero or push
+            it under the buttons on narrow (mobile) viewports (the bug
+            this fixes). Same value all viewers see in the user-app
+            overlay. Gated on event.status === 'live' rather than the
+            local `phase` so a refresh-and-resume cycle (status='live',
+            phase momentarily 'idle' until Resume camera fires) doesn't
+            hide the timer the streamer still needs to see. */}
+        {event?.status === "live" && event?.betting_closes_at && (
+          <div className="flex items-center gap-2">
+            {/* Round pill — multi-round events only. Same data the
+                viewer sees, in compact-friendly sizing. */}
+            {event.round_format === "multi" && (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider tabular-nums",
+                  event.is_final_round
+                    ? "bg-destructive text-destructive-foreground"
+                    : "bg-white/10 text-white ring-1 ring-white/20",
+                )}
+              >
+                {event.is_final_round
+                  ? "Final round"
+                  : `Round ${event.current_round ?? 1}`}
+              </span>
+            )}
+            <BettingCountdown
+              closesAt={event.betting_closes_at}
+              variant="compact"
+            />
+          </div>
         )}
       </header>
 
