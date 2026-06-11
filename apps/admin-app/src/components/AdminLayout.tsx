@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
+  BadgeCheck,
   BarChart3,
   CalendarRange,
   LogOut,
@@ -27,7 +28,8 @@ type NavItem = {
 };
 
 const nav: NavItem[] = [
-  { to: "/users", label: "Users", icon: UsersIcon },
+  { to: "/viewers", label: "Viewers", icon: UsersIcon },
+  { to: "/creators", label: "Creators", icon: BadgeCheck },
   { to: "/events", label: "Events", icon: CalendarRange },
   { to: "/ledger", label: "Ledger", icon: ScrollText },
   { to: "/stats", label: "Stats", icon: BarChart3 },
@@ -39,7 +41,7 @@ const nav: NavItem[] = [
  * Admin shell. Same visual frame as the studio sidebar (blue→purple
  * gradient, dotted overlay, bolt watermark, brush-stroke selected-state
  * pill) so the LiveRush brand reads consistently across all three apps.
- * Wordmark caption flips to ADMIN; nav items are the five admin pages.
+ * Wordmark caption flips to ADMIN; nav items are the admin pages.
  * Bottom strip shows the signed-in admin's email + sign-out — no
  * creator-status badge or follower count (admins aren't creators).
  */

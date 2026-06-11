@@ -11,7 +11,8 @@ import ForgotPassword from "@/pages/auth/ForgotPassword";
 import ResetPassword from "@/pages/auth/ResetPassword";
 import AuthCallback from "@/pages/auth/AuthCallback";
 
-import Users from "@/pages/Users";
+import Viewers from "@/pages/Viewers";
+import Creators from "@/pages/Creators";
 import Events from "@/pages/Events";
 import Ledger from "@/pages/Ledger";
 import Settings from "@/pages/Settings";
@@ -38,7 +39,7 @@ export default function App() {
             <Route path="/auth/reset-password" element={<ResetPassword />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
 
-            {/* Authenticated admin shell. Default landing = /users. */}
+            {/* Authenticated admin shell. Default landing = /viewers. */}
             <Route
               element={
                 <ProtectedRoute>
@@ -46,8 +47,14 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              <Route path="/" element={<Navigate to="/users" replace />} />
-              <Route path="/users" element={<Users />} />
+              <Route path="/" element={<Navigate to="/viewers" replace />} />
+              <Route path="/viewers" element={<Viewers />} />
+              {/* Back-compat: old /users bookmarks → /viewers. */}
+              <Route
+                path="/users"
+                element={<Navigate to="/viewers" replace />}
+              />
+              <Route path="/creators" element={<Creators />} />
               <Route path="/events" element={<Events />} />
               <Route path="/ledger" element={<Ledger />} />
               <Route path="/stats" element={<Stats />} />
@@ -55,9 +62,9 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
             </Route>
 
-            {/* Catch-all → /users (signed-out users will bounce through
+            {/* Catch-all → /viewers (signed-out users will bounce through
                 ProtectedRoute to /auth/sign-in first). */}
-            <Route path="*" element={<Navigate to="/users" replace />} />
+            <Route path="*" element={<Navigate to="/viewers" replace />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

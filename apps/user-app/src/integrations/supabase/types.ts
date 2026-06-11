@@ -987,6 +987,11 @@ export interface Database {
           // integer in Postgres — narrower than bigint but plenty for
           // cent-denominated virtual balance ceilings.
           balance_cents: number;
+          // profiles.withdrawable_cents — the CREATOR's cashable rake
+          // pot (studio "Available to cash out"), distinct from the
+          // viewer balance_cents wallet. 0 for non-creators. The admin
+          // Creators table renders this; Viewers renders balance_cents.
+          creator_balance_cents: number;
           // auth.users.email_confirmed_at — null until user clicks
           // the confirmation link. Drives the viewer "Email pending"
           // / "Verified" badge.
@@ -995,6 +1000,14 @@ export interface Database {
           creator_status: "pending" | "verified" | "rejected" | null;
           creator_rejected_note: string | null;
           creator_moderated_at: string | null;
+          // profiles.timezone — IANA name, null when never set. Shown as
+          // '-' in the admin Creators table.
+          timezone: string | null;
+          // Per-creator event counts (added 20260611_000001): total events
+          // authored (events.creator_id), and the subset broadcast
+          // (status in 'live'/'finished'). 0 for non-creators.
+          streams_total: number;
+          streams_live: number;
           created_at: string;
         }>;
       };
