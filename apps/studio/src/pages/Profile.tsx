@@ -14,8 +14,6 @@ import {
 
 import { Button, CoinAmount } from "@liverush/ui";
 import {
-  MIN_PAYOUT_COINS,
-  RAKE_STREAMER_BPS,
   balanceCentsToCoins,
   balanceCentsToDollarCents,
   cn,
@@ -25,6 +23,7 @@ import {
 import { StudioPageTabs } from "@/components/StudioPageTabs";
 import { RequestPayoutModal } from "@/components/balance/RequestPayoutModal";
 import { useAuth } from "@/contexts/AuthContext";
+import { useBettingConfig } from "@/hooks/useBettingConfig";
 import { useStreamerBalance } from "@/hooks/useStreamerBalance";
 import { supabase } from "@/integrations/supabase/client";
 import { compactNumber } from "@/lib/balance";
@@ -76,6 +75,9 @@ export default function Profile() {
   const { creator, refreshCreator } = useAuth();
   const { data: followers } = useCreatorFollowerCount(creator?.id);
   const { data: balanceCents = 0 } = useStreamerBalance();
+  // LIVE global config — commission % + payout floor track the
+  // admin-editable values (fallback to lib defaults while loading).
+  const config = useBettingConfig();
   const [payoutOpen, setPayoutOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // social_links is a JSONB column on creator_profiles — narrow it
@@ -84,8 +86,8 @@ export default function Profile() {
 
   const coins = balanceCentsToCoins(balanceCents);
   const dollarEquivalent = balanceCentsToDollarCents(balanceCents);
-  const canRequestPayout = coins >= MIN_PAYOUT_COINS;
-  const coinsBelowMin = Math.max(0, MIN_PAYOUT_COINS - coins);
+  const canRequestPayout = coins >= config.minPayoutCoins;
+  const coinsBelowMin = Math.max(0, config.minPayoutCoins - coins);
 
   // Avatar upload flow — mirrors the user-app's Profile page: upload
   // to the `creator-assets` storage bucket, then call
@@ -253,13 +255,14 @@ export default function Profile() {
         />
         <StatCard
           label="Commission rate"
-          // Streamer's share of the rake. Sourced from the
-          // RAKE_STREAMER_BPS constant (same source the SQL settle_event
-          // RPC reads, so the displayed % can't drift from what the
-          // streamer actually gets credited). `creator_profiles.commission_pct`
-          // is dead display data from before the pari-mutuel rewrite —
-          // it still defaults to 10 in older rows.
-          value={`${(RAKE_STREAMER_BPS / 100).toFixed(2)}%`}
+          // Streamer's share of the rake. Sourced LIVE from the
+          // admin-editable config's rake_streamer_bps (same value the
+          // SQL settle_round RPC reads for new events, so the displayed
+          // % can't drift from what the streamer actually gets
+          // credited). `creator_profiles.commission_pct` is dead
+          // display data from before the pari-mutuel rewrite — it still
+          // defaults to 10 in older rows.
+          value={`${(config.rakeStreamerBps / 100).toFixed(2)}%`}
           hint="Your share of each event's settled pool."
         />
       </section>
@@ -290,7 +293,7 @@ export default function Profile() {
             <p className="mt-2 text-xs text-muted-foreground">
               {canRequestPayout
                 ? "Request a payout below. Pending admin approval."
-                : `Need ${coinsBelowMin.toLocaleString("en-US")} more coins to request payout (min ${MIN_PAYOUT_COINS.toLocaleString("en-US")}).`}
+                : `Need ${coinsBelowMin.toLocaleString("en-US")} more coins to request payout (min ${config.minPayoutCoins.toLocaleString("en-US")}).`}
             </p>
           </div>
           <Button
@@ -301,7 +304,7 @@ export default function Profile() {
             title={
               canRequestPayout
                 ? undefined
-                : `Available after ${MIN_PAYOUT_COINS.toLocaleString("en-US")} coins ($${(MIN_PAYOUT_COINS / 10).toFixed(0)}).`
+                : `Available after ${config.minPayoutCoins.toLocaleString("en-US")} coins ($${(config.minPayoutCoins / 10).toFixed(0)}).`
             }
           >
             <Banknote className="h-4 w-4" />

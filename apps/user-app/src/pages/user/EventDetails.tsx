@@ -45,18 +45,14 @@ import rewardsBannerImg from "@/assets/rewards-banner-1.jpg";
 import { placeBet } from "@/services/betsService";
 import { betsKeys, useMyBets } from "@/hooks/useMyBets";
 import { useLiveOdds } from "@/hooks/useLiveOdds";
+import { useEventConstants } from "@/hooks/useEventConstants";
 import { useEventProgress, type EventProgress } from "@/hooks/useEventProgress";
 import { useEventRoundsSummary } from "@/hooks/useEventRoundsSummary";
 import { useEventChat } from "@/hooks/useEventChat";
 import type { BetOutcome, StreamEvent } from "@/domain/types";
 import { cn } from "@/lib/utils";
 import { oddsPillClasses, oddsRange } from "@/lib/odds";
-import {
-  liveOddsFor,
-  payoutPreview,
-  MAX_BET_CENTS,
-  MIN_BET_CENTS,
-} from "@liverush/lib";
+import { liveOddsFor, payoutPreview } from "@liverush/lib";
 
 // Stake chips shown beneath the stake input. Capped to MAX_BET so a
 // viewer can't pick a chip that would fail the server-side validator.
@@ -1138,6 +1134,10 @@ function BetPanel({ event }: { event: StreamEvent }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { pushLocalToast } = useNotificationsToast();
+  // Event-scoped SNAPSHOT config so the stake-range guard matches the
+  // exact rules `place_bet` enforces for THIS event (a live event keeps
+  // its frozen constants even after admin edits the global config).
+  const config = useEventConstants(event.id);
 
   // For studio-published events, event.influencer.id is the
   // creator_profiles.id which equals auth.users.id. The streamer
@@ -1201,9 +1201,9 @@ function BetPanel({ event }: { event: StreamEvent }) {
     setSubmitting(true);
     try {
       const cents = stakeCoins * 100;
-      if (cents < MIN_BET_CENTS || cents > MAX_BET_CENTS) {
+      if (cents < config.minBetCents || cents > config.maxBetCents) {
         throw new Error(
-          `Stake must be between ${MIN_BET_CENTS / 100} and ${MAX_BET_CENTS / 100} coins.`,
+          `Stake must be between ${config.minBetCents / 100} and ${config.maxBetCents / 100} coins.`,
         );
       }
       await placeBet(event.id, outcome.id, cents);
@@ -1742,6 +1742,9 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
   const { data: roundsData } = useEventRoundsSummary(
     event.roundFormat === "multi" ? event.id : undefined,
   );
+  // Event-scoped SNAPSHOT config — per-round odds must use the rake this
+  // event was frozen with so the displayed payout matches settlement.
+  const config = useEventConstants(event.id);
   const isMultiRound = event.roundFormat === "multi";
   // Selected round for the switcher. Defaults to round 1 (user
   // explicitly asked for round 1 as the initial tab). Falls back to
@@ -1771,7 +1774,7 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
   const oddsById = new Map<string, number | null>();
   if (isMultiRound && selectedRoundSummary) {
     // Per-round odds: total pool from this round's outcome sums,
-    // distributable applies the standard rake (RAKE_BPS = 1000).
+    // distributable applies the event's SNAPSHOT rake.
     const total = selectedRoundSummary.outcomePools.reduce(
       (acc, p) => acc + p.pool_cents,
       0,
@@ -1780,7 +1783,7 @@ function FinishedPanel({ event }: { event: StreamEvent }) {
       selectedRoundSummary.outcomePools.map((p) => [p.outcome_id, p.pool_cents] as const),
     );
     for (const o of event.outcomes) {
-      oddsById.set(o.id, liveOddsFor(poolById.get(o.id) ?? 0, total));
+      oddsById.set(o.id, liveOddsFor(poolById.get(o.id) ?? 0, total, config.rakeBps));
     }
     // Suppress winner highlights entirely when the round was refunded
     // (settle_round short-circuited on minimums, no winner declared).

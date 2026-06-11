@@ -13,15 +13,19 @@ export {
   MIN_POOL_MAX_BET_MULTIPLIER,
   MIN_POOL_FLOOR_CENTS,
   minPoolCents,
+  minPoolCentsFor,
   STALE_RESULT_GRACE_MINUTES,
   BETTING_WINDOW_MIN_SEC,
   BETTING_WINDOW_MAX_SEC,
   BETTING_WINDOW_DEFAULT_SEC,
   DAILY_CAP_CENTS,
+  DEFAULT_BETTING_CONFIG,
+  bettingConfigFromRow,
   liveOddsFor,
   payoutPreview,
   formatCents,
 } from "./betting";
+export type { BettingConfig, BettingConfigRow } from "./betting";
 export {
   COIN_TO_BALANCE_CENTS,
   COIN_TO_DOLLAR_CENTS,

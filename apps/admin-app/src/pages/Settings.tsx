@@ -12,6 +12,7 @@ import {
   deleteCoinPack,
   type AdminCoinPack,
 } from "@/services/coinPacksService";
+import { BettingParamsPanel } from "@/components/BettingParamsPanel";
 
 /**
  * Admin Settings — coin-pack catalogue.
@@ -424,6 +425,8 @@ export default function Settings() {
           </div>
         </footer>
       </section>
+
+      <BettingParamsPanel />
     </div>
   );
 }

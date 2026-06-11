@@ -126,6 +126,12 @@ export interface Database {
           // refund emails to all bettors. The events_cancel_notify_dispatch
           // trigger guards on this so the fan-out can't double-fire.
           cancelled_notified_at: string | null;
+          // 20260611_000003 — frozen betting-constants snapshot. Stamped
+          // by start_event / publish_event on the first transition to
+          // live (coalesce, so it's frozen once) and read back by
+          // get_event_constants. Null = older / not-yet-started events
+          // that fall back to the live config.
+          betting_constants: Json | null;
         };
         Insert: Omit<Database["public"]["Tables"]["events"]["Row"], "created_at"> & {
           created_at?: string;
@@ -514,6 +520,37 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      // 20260611_000003 — singleton (id = 1) admin-editable betting
+      // parameters. RLS-locked: all access goes through the security-
+      // definer RPCs (get_betting_constants / get_event_constants read;
+      // get_betting_config / update_betting_config admin-gated).
+      betting_config: {
+        Row: {
+          id: number;
+          min_bet_cents: number;
+          max_bet_cents: number;
+          max_round_stake_cents: number;
+          max_odds_cap: number;
+          rake_bps: number;
+          rake_platform_bps: number;
+          rake_streamer_bps: number;
+          min_unique_bettors: number;
+          min_outcomes_with_bets: number;
+          betting_window_min_sec: number;
+          betting_window_max_sec: number;
+          betting_window_default_sec: number;
+          daily_cap_cents: number;
+          min_pool_max_bet_multiplier: number;
+          min_pool_floor_cents: number;
+          stale_result_grace_minutes: number;
+          min_payout_coins: number;
+          updated_at: string | null;
+          updated_by: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       user_bet_caps: {
         Row: {
           user_id: string;
@@ -651,21 +688,125 @@ export interface Database {
         Args: { p_event_id: string; p_reason?: string };
         Returns: Database["public"]["Tables"]["events"]["Row"];
       };
+      // 20260611_000003 — now table-backed (reads the admin-editable
+      // betting_config row) and returns the full constant set incl.
+      // betting_window_default_sec + min_payout_coins.
       get_betting_constants: {
         Args: Record<string, never>;
         Returns: Array<{
           min_bet_cents: number;
           max_bet_cents: number;
+          max_round_stake_cents: number;
           max_odds_cap: number;
           rake_bps: number;
           rake_platform_bps: number;
           rake_streamer_bps: number;
           min_unique_bettors: number;
           min_outcomes_with_bets: number;
-          // 20260610_000006 — window bounds are now in seconds (10 / 1800).
           betting_window_min_sec: number;
           betting_window_max_sec: number;
           daily_cap_cents: number;
+          min_pool_max_bet_multiplier: number;
+          min_pool_floor_cents: number;
+          stale_result_grace_minutes: number;
+          betting_window_default_sec: number;
+          min_payout_coins: number;
+        }>;
+      };
+      // 20260611_000003 — snapshot-or-live: returns the event's frozen
+      // betting_constants snapshot if present, else the live config.
+      // Same row shape as get_betting_constants.
+      get_event_constants: {
+        Args: { p_event_id: string };
+        Returns: Array<{
+          min_bet_cents: number;
+          max_bet_cents: number;
+          max_round_stake_cents: number;
+          max_odds_cap: number;
+          rake_bps: number;
+          rake_platform_bps: number;
+          rake_streamer_bps: number;
+          min_unique_bettors: number;
+          min_outcomes_with_bets: number;
+          betting_window_min_sec: number;
+          betting_window_max_sec: number;
+          daily_cap_cents: number;
+          min_pool_max_bet_multiplier: number;
+          min_pool_floor_cents: number;
+          stale_result_grace_minutes: number;
+          betting_window_default_sec: number;
+          min_payout_coins: number;
+        }>;
+      };
+      // 20260611_000003 — admin-gated read of the betting_config row,
+      // incl. audit columns. Same constant set + updated_at/updated_by.
+      get_betting_config: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          min_bet_cents: number;
+          max_bet_cents: number;
+          max_round_stake_cents: number;
+          max_odds_cap: number;
+          rake_bps: number;
+          rake_platform_bps: number;
+          rake_streamer_bps: number;
+          min_unique_bettors: number;
+          min_outcomes_with_bets: number;
+          betting_window_min_sec: number;
+          betting_window_max_sec: number;
+          daily_cap_cents: number;
+          min_pool_max_bet_multiplier: number;
+          min_pool_floor_cents: number;
+          stale_result_grace_minutes: number;
+          betting_window_default_sec: number;
+          min_payout_coins: number;
+          updated_at: string | null;
+          updated_by: string | null;
+        }>;
+      };
+      // 20260611_000003 — admin-gated write. Re-validates every cross-
+      // field guardrail (friendly 22023 errors) then updates the row;
+      // returns the saved row in the same shape as get_betting_config.
+      update_betting_config: {
+        Args: {
+          p_min_bet_cents: number;
+          p_max_bet_cents: number;
+          p_max_round_stake_cents: number;
+          p_min_unique_bettors: number;
+          p_min_outcomes_with_bets: number;
+          p_min_pool_max_bet_multiplier: number;
+          p_min_pool_floor_cents: number;
+          p_max_odds_cap: number;
+          p_rake_bps: number;
+          p_rake_platform_bps: number;
+          p_rake_streamer_bps: number;
+          p_betting_window_min_sec: number;
+          p_betting_window_max_sec: number;
+          p_betting_window_default_sec: number;
+          p_daily_cap_cents: number;
+          p_min_payout_coins: number;
+          p_stale_result_grace_minutes: number;
+        };
+        Returns: Array<{
+          min_bet_cents: number;
+          max_bet_cents: number;
+          max_round_stake_cents: number;
+          max_odds_cap: number;
+          rake_bps: number;
+          rake_platform_bps: number;
+          rake_streamer_bps: number;
+          min_unique_bettors: number;
+          min_outcomes_with_bets: number;
+          betting_window_min_sec: number;
+          betting_window_max_sec: number;
+          daily_cap_cents: number;
+          min_pool_max_bet_multiplier: number;
+          min_pool_floor_cents: number;
+          stale_result_grace_minutes: number;
+          betting_window_default_sec: number;
+          min_payout_coins: number;
+          updated_at: string | null;
+          updated_by: string | null;
         }>;
       };
       update_profile_display_name: {

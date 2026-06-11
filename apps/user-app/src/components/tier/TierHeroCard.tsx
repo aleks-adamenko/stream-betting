@@ -2,12 +2,6 @@ import { useId } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Flame, Gift, Lock } from "lucide-react";
 
-import {
-  DAILY_CAP_CENTS,
-  MAX_BET_CENTS,
-  MAX_ROUND_STAKE_CENTS,
-} from "@liverush/lib";
-
 import { cn } from "@/lib/utils";
 // Tier-1 badge artwork. `?url` hands Vite a stable URL we can drop
 // straight into <img src=> — same pattern Rewards uses for its
@@ -19,10 +13,11 @@ import tier1BadgeUrl from "@/assets/icons/tier-1-badge.png?url";
  *
  * Static-for-now: every signed-in viewer is Tier 1. A future
  * migration will introduce promotion criteria (e.g. lifetime stake,
- * win rate, active-days) plus per-tier limit overrides. Today Tier
- * 1's betting limits mirror the platform-wide constants in
- * @liverush/lib / get_betting_constants(), so the values shown to
- * viewers always match what `place_bet` actually enforces.
+ * win rate, active-days) plus per-tier limit overrides. The actual
+ * betting-limit NUMBERS rendered on the Profile limits card come LIVE
+ * from `useBettingConfig()` (the admin-editable global config), so
+ * the values shown to viewers always track what new events get; this
+ * map only owns tier identity + presentation (label, badge, copy).
  *
  * Lives here (not in the Profile page) because two surfaces now
  * read it — the Profile tier-hero + limits card, and the Home page
@@ -31,9 +26,6 @@ import tier1BadgeUrl from "@/assets/icons/tier-1-badge.png?url";
 export const TIERS = {
   1: {
     label: "Tier 1",
-    maxBetCents: MAX_BET_CENTS,
-    maxRoundStakeCents: MAX_ROUND_STAKE_CENTS,
-    dailyCapCents: DAILY_CAP_CENTS,
     description: "Starter tier. Stay active to unlock higher tiers.",
     /** Badge artwork shown in the hero header. */
     badgeUrl: tier1BadgeUrl,

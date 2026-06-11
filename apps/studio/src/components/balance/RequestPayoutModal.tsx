@@ -12,15 +12,12 @@ import {
   DialogContent,
   DialogTitle,
 } from "@liverush/ui";
-import {
-  MIN_PAYOUT_COINS,
-  coinsToDollarCents,
-  formatDollarCents,
-} from "@liverush/lib";
+import { coinsToDollarCents, formatDollarCents } from "@liverush/lib";
 
 import { requestPayout } from "@/services/payoutsService";
 import { streamerBalanceKeys } from "@/hooks/useStreamerBalance";
 import { studioPayoutsKeys } from "@/hooks/useStudioPayouts";
+import { useBettingConfig } from "@/hooks/useBettingConfig";
 import { useAuth } from "@/contexts/AuthContext";
 
 /**
@@ -28,7 +25,8 @@ import { useAuth } from "@/contexts/AuthContext";
  *
  * Defaults the request to the streamer's full available balance, with
  * a numeric input the streamer can dial down to any multiple of 100
- * coins ≥ 1,000 (the platform's MIN_PAYOUT_COINS floor). Submitting
+ * coins ≥ the live `min_payout_coins` floor (admin-editable global
+ * config; the same value `request_payout` enforces). Submitting
  * calls the `request_payout` RPC — see migration
  * `20260604_000001_ledger_rebuild.sql`. The RPC debits the user's
  * balance and writes a pending `payouts` row that the admin Wallet
@@ -60,23 +58,26 @@ export function RequestPayoutModal({
 }: RequestPayoutModalProps) {
   const queryClient = useQueryClient();
   const { user, creator } = useAuth();
+  // LIVE global config — payout floor tracks the admin-editable value
+  // (fallback to lib default while loading).
+  const { minPayoutCoins } = useBettingConfig();
   const availableCoins = Math.floor(balanceCents / 100);
 
   // Default to the full balance rounded down to the nearest 100 coins
   // so the displayed amount converts to a whole-dollar dollar figure.
-  // Min input value clamps to MIN_PAYOUT_COINS once the user types.
+  // Min input value clamps to minPayoutCoins once the user types.
   const defaultCoins = Math.max(
-    MIN_PAYOUT_COINS,
+    minPayoutCoins,
     Math.floor(availableCoins / 100) * 100,
   );
   const [coinsInput, setCoinsInput] = useState<string>(
-    availableCoins >= MIN_PAYOUT_COINS ? String(defaultCoins) : "",
+    availableCoins >= minPayoutCoins ? String(defaultCoins) : "",
   );
 
   const parsed = Number.parseInt(coinsInput, 10);
   const coins = Number.isFinite(parsed) ? parsed : 0;
   const isValid =
-    coins >= MIN_PAYOUT_COINS
+    coins >= minPayoutCoins
     && coins <= availableCoins
     && coins % 1 === 0;
   const cashCents = isValid ? coinsToDollarCents(coins) : 0;
@@ -112,7 +113,9 @@ export function RequestPayoutModal({
           <div>
             <DialogTitle>Request payout</DialogTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              Cash out collected coins. Min 1,000 coins ($100).
+              Cash out collected coins. Min{" "}
+              {coinFormatter.format(minPayoutCoins)} coins (
+              {formatDollarCents(coinsToDollarCents(minPayoutCoins))}).
             </p>
           </div>
           <DialogClose
@@ -152,7 +155,7 @@ export function RequestPayoutModal({
                 <input
                   type="number"
                   inputMode="numeric"
-                  min={MIN_PAYOUT_COINS}
+                  min={minPayoutCoins}
                   max={availableCoins}
                   step={100}
                   value={coinsInput}
@@ -177,10 +180,10 @@ export function RequestPayoutModal({
             </span>
           </div>
 
-          {coins > 0 && coins < MIN_PAYOUT_COINS ? (
+          {coins > 0 && coins < minPayoutCoins ? (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Minimum payout is {coinFormatter.format(MIN_PAYOUT_COINS)} coins
-              ({formatDollarCents(coinsToDollarCents(MIN_PAYOUT_COINS))}).
+              Minimum payout is {coinFormatter.format(minPayoutCoins)} coins
+              ({formatDollarCents(coinsToDollarCents(minPayoutCoins))}).
             </p>
           ) : null}
           {coins > availableCoins ? (

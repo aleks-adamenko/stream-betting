@@ -20,15 +20,9 @@ import {
 } from "lucide-react";
 
 import { Button, Input } from "@liverush/ui";
-import {
-  cn,
-  MIN_BET_CENTS,
-  MAX_BET_CENTS,
-  BETTING_WINDOW_MIN_SEC,
-  BETTING_WINDOW_MAX_SEC,
-  BETTING_WINDOW_DEFAULT_SEC,
-} from "@liverush/lib";
+import { cn } from "@liverush/lib";
 import { useAuth } from "@/contexts/AuthContext";
+import { useBettingConfig } from "@/hooks/useBettingConfig";
 import { invokeEdgeFunction, supabase } from "@/integrations/supabase/client";
 import { LiveStreamTest } from "@/components/LiveStreamTest";
 
@@ -65,16 +59,20 @@ const DEFAULT_CATEGORY = "General";
 // Betting window is stored in seconds (events.betting_window_seconds);
 // the editor exposes it as separate minutes + seconds inputs. These
 // helpers translate between the stored integer and the two fields,
-// clamping to the lib-defined [MIN, MAX] bounds (10s–1800s).
-function clampWindowSeconds(total: number): number {
-  return Math.min(
-    BETTING_WINDOW_MAX_SEC,
-    Math.max(BETTING_WINDOW_MIN_SEC, total),
-  );
+// clamping to the LIVE admin-config [min, max] bounds (the editor
+// reads `useBettingConfig()` and threads those bounds in, so a draft
+// snapshots the current rules at go-live).
+type WindowBounds = { minSec: number; maxSec: number; defaultSec: number };
+
+function clampWindowSeconds(total: number, b: WindowBounds): number {
+  return Math.min(b.maxSec, Math.max(b.minSec, total));
 }
 
-function splitWindowSeconds(total: number): { min: string; sec: string } {
-  const clamped = clampWindowSeconds(total);
+function splitWindowSeconds(
+  total: number,
+  b: WindowBounds,
+): { min: string; sec: string } {
+  const clamped = clampWindowSeconds(total, b);
   return { min: String(Math.floor(clamped / 60)), sec: String(clamped % 60) };
 }
 
@@ -82,24 +80,36 @@ function splitWindowSeconds(total: number): { min: string; sec: string } {
 // tolerating the not-yet-regenerated types: betting_window_seconds is
 // absent from the generated Row type until the operator regenerates, so
 // it's typed optional here and we fall back to the legacy minutes column
-// (×60), then the lib default.
-function readWindowSeconds(row: {
-  betting_window_seconds?: number | null;
-  betting_window_minutes?: number | null;
-}): number {
+// (×60), then the live default.
+function readWindowSeconds(
+  row: {
+    betting_window_seconds?: number | null;
+    betting_window_minutes?: number | null;
+  },
+  b: WindowBounds,
+): number {
   const sec = row.betting_window_seconds;
-  if (
-    typeof sec === "number" &&
-    sec >= BETTING_WINDOW_MIN_SEC &&
-    sec <= BETTING_WINDOW_MAX_SEC
-  ) {
+  if (typeof sec === "number" && sec >= b.minSec && sec <= b.maxSec) {
     return sec;
   }
   const min = row.betting_window_minutes;
   if (typeof min === "number" && Number.isFinite(min)) {
-    return clampWindowSeconds(Math.round(min * 60));
+    return clampWindowSeconds(Math.round(min * 60), b);
   }
-  return BETTING_WINDOW_DEFAULT_SEC;
+  return b.defaultSec;
+}
+
+// Human-readable window length for the editor's help line — "10
+// seconds" / "1 minute" / "2 min 30 s" depending on the value.
+function humanizeWindow(totalSec: number): string {
+  if (totalSec < 60) {
+    return `${totalSec} second${totalSec === 1 ? "" : "s"}`;
+  }
+  if (totalSec % 60 === 0) {
+    const m = totalSec / 60;
+    return `${m} minute${m === 1 ? "" : "s"}`;
+  }
+  return `${Math.floor(totalSec / 60)} min ${totalSec % 60} s`;
 }
 
 const BET_WINDOW_OPENS: Array<{ value: BetWindowOpens; label: string }> = [
@@ -197,8 +207,9 @@ function getDefaultScheduledAtIsoLocal(): string {
 }
 
 // centsToDollarsString / dollarsStringToCents helpers were only used
-// by the now-removed min/max bet inputs. The platform-fixed values
-// are written via MIN_BET_CENTS / MAX_BET_CENTS in the RPC payload.
+// by the now-removed min/max bet inputs. The stake-limit values are
+// written into the RPC payload from the LIVE admin config
+// (useBettingConfig: minBetCents / maxBetCents).
 
 // Supabase RPC errors are plain PostgrestError objects, not Error instances.
 // Pull the most useful text out either way.
@@ -248,6 +259,18 @@ export default function EventEditor() {
   const { user, creator } = useAuth();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // LIVE global config — stake limits + betting-window bounds the draft
+  // will be created with (it snapshots the live config at go-live).
+  // Falls back to the lib defaults while the query loads.
+  const config = useBettingConfig();
+  const windowBounds: WindowBounds = {
+    minSec: config.bettingWindowMinSec,
+    maxSec: config.bettingWindowMaxSec,
+    defaultSec: config.bettingWindowDefaultSec,
+  };
+  // True once the creator manually edits a window field, so the
+  // config-default re-seed effect (new events) backs off after a touch.
+  const windowTouchedRef = useRef(false);
 
   // ---- Form state ----
   const [title, setTitle] = useState("");
@@ -274,7 +297,10 @@ export default function EventEditor() {
   // fought mid-edit; the clamped integer is derived in
   // `bettingWindowSeconds` below and used for save + dirty checks. The
   // legacy betting_window_minutes column is no longer written.
-  const windowInit = splitWindowSeconds(BETTING_WINDOW_DEFAULT_SEC);
+  const windowInit = splitWindowSeconds(
+    config.bettingWindowDefaultSec,
+    windowBounds,
+  );
   const [windowMinStr, setWindowMinStr] = useState<string>(windowInit.min);
   const [windowSecStr, setWindowSecStr] = useState<string>(windowInit.sec);
   const bettingWindowSeconds = useMemo(
@@ -282,16 +308,35 @@ export default function EventEditor() {
       clampWindowSeconds(
         (Number.parseInt(windowMinStr, 10) || 0) * 60 +
           (Number.parseInt(windowSecStr, 10) || 0),
+        windowBounds,
       ),
-    [windowMinStr, windowSecStr],
+    // windowBounds is derived from config; depend on its primitive parts
+    // so the clamp re-runs when the admin config resolves / changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [windowMinStr, windowSecStr, windowBounds.minSec, windowBounds.maxSec],
   );
-  // Re-snap both fields to the clamped value on blur so a sub-10s or
-  // over-30m entry visibly corrects (e.g. "0 min 5 s" → "0 min 10 s").
+  // Re-snap both fields to the clamped value on blur so an under-min or
+  // over-max entry visibly corrects (e.g. "0 min 5 s" → "0 min 10 s").
   const normalizeWindowInputs = () => {
-    const sp = splitWindowSeconds(bettingWindowSeconds);
+    const sp = splitWindowSeconds(bettingWindowSeconds, windowBounds);
     setWindowMinStr(sp.min);
     setWindowSecStr(sp.sec);
   };
+  // New events: seed the window from the LIVE config default once the
+  // config query resolves (the useState seed above ran against the lib
+  // fallback on first render). Backs off once the creator types.
+  useEffect(() => {
+    if (!isNew || windowTouchedRef.current) return;
+    const sp = splitWindowSeconds(config.bettingWindowDefaultSec, windowBounds);
+    setWindowMinStr(sp.min);
+    setWindowSecStr(sp.sec);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isNew,
+    config.bettingWindowDefaultSec,
+    windowBounds.minSec,
+    windowBounds.maxSec,
+  ]);
   // New events start with a sensible future scheduled time so Save
   // can unlock with only a typed title (the DB requires scheduled_at).
   // Existing events overwrite this in the load effect below.
@@ -373,7 +418,10 @@ export default function EventEditor() {
     setVoidConditions(loaded.void_conditions ?? "");
     setBetWindowOpens(loaded.bet_window_opens ?? "on_live");
     setBetWindowLocks(loaded.bet_window_locks ?? "manual");
-    const loadedWindow = splitWindowSeconds(readWindowSeconds(loaded));
+    const loadedWindow = splitWindowSeconds(
+      readWindowSeconds(loaded, windowBounds),
+      windowBounds,
+    );
     setWindowMinStr(loadedWindow.min);
     setWindowSecStr(loadedWindow.sec);
     setScheduledAt(toLocalDateTimeInput(loaded.scheduled_at));
@@ -445,12 +493,13 @@ export default function EventEditor() {
     return dupes;
   }, [outcomeLabelsLower]);
 
-  // Bet limits used to be creator-tunable but are now platform
-  // constants — we still need cents values to write into the row on
+  // Bet limits used to be creator-tunable but are now platform-wide,
+  // admin-editable config. We still write cents values into the row on
   // save so EventList's completeness check + admin tools keep reading
-  // the same shape. They're hardcoded to the @liverush/lib globals.
-  const minCents = MIN_BET_CENTS;
-  const maxCents = MAX_BET_CENTS;
+  // the same shape; we source them LIVE so the persisted snapshot
+  // matches the rules the event will be created with.
+  const minCents = config.minBetCents;
+  const maxCents = config.maxBetCents;
 
   // Minimums needed to call create_event / update_event without the
   // DB rejecting the row. Save activates as soon as the creator has
@@ -487,8 +536,8 @@ export default function EventEditor() {
         passed: validOutcomes.length >= 2 && outcomeDuplicates.size === 0,
       },
       // Bet-limits compliance row deleted — stake range is platform-
-      // fixed (MIN_BET_CENTS / MAX_BET_CENTS from @liverush/lib), so
-      // it's not something the creator can fail.
+      // wide (the admin-editable config's min/max bet cents), so it's
+      // not something the creator can fail.
       {
         key: "stream",
         label: "Stream source configured",
@@ -585,7 +634,8 @@ export default function EventEditor() {
       return true;
     if (betWindowLocks !== (loaded.bet_window_locks ?? "manual"))
       return true;
-    if (bettingWindowSeconds !== readWindowSeconds(loaded)) return true;
+    if (bettingWindowSeconds !== readWindowSeconds(loaded, windowBounds))
+      return true;
     if (scheduledAt !== toLocalDateTimeInput(loaded.scheduled_at))
       return true;
     // Compare against the same coerced default we use when loading the
@@ -1474,12 +1524,15 @@ export default function EventEditor() {
                     id="window-minutes"
                     type="number"
                     min={0}
-                    max={30}
+                    max={Math.floor(windowBounds.maxSec / 60)}
                     step={1}
                     inputMode="numeric"
                     aria-label="Betting window minutes"
                     value={windowMinStr}
-                    onChange={(e) => setWindowMinStr(e.target.value)}
+                    onChange={(e) => {
+                      windowTouchedRef.current = true;
+                      setWindowMinStr(e.target.value);
+                    }}
                     onBlur={normalizeWindowInputs}
                     disabled={!editable}
                     className="h-10 w-20"
@@ -1496,7 +1549,10 @@ export default function EventEditor() {
                     inputMode="numeric"
                     aria-label="Betting window seconds"
                     value={windowSecStr}
-                    onChange={(e) => setWindowSecStr(e.target.value)}
+                    onChange={(e) => {
+                      windowTouchedRef.current = true;
+                      setWindowSecStr(e.target.value);
+                    }}
                     onBlur={normalizeWindowInputs}
                     disabled={!editable}
                     className="h-10 w-20"
@@ -1505,7 +1561,9 @@ export default function EventEditor() {
                 </div>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Minimum 10 seconds, maximum 30 minutes. Default 1 minute.
+                Minimum {humanizeWindow(windowBounds.minSec)}, maximum{" "}
+                {humanizeWindow(windowBounds.maxSec)}. Default{" "}
+                {humanizeWindow(config.bettingWindowDefaultSec)}.
               </p>
             </div>
           </div>

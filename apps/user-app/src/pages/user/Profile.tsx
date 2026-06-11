@@ -21,6 +21,7 @@ import { CoinAmount, CoinIcon } from "@/components/ui/CoinAmount";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMyBets } from "@/hooks/useMyBets";
+import { useBettingConfig } from "@/hooks/useBettingConfig";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
@@ -405,13 +406,15 @@ function AccountSummary() {
  * concerns instead of a single wide block — operator-requested
  * layout from the dev-feedback pass.
  *
- * Values mirror MAX_BET_CENTS / MAX_ROUND_STAKE_CENTS /
- * DAILY_CAP_CENTS in @liverush/lib (single source of truth shared
- * with get_betting_constants() + place_bet). Future tiers swap the
- * TIERS map entry; the component stays.
+ * Values come LIVE from `useBettingConfig()` (the admin-editable
+ * global config that new events will be created with), falling back
+ * to the @liverush/lib defaults while the query loads. Tier 1 mirrors
+ * the platform-wide limits; future tiers will layer per-tier overrides
+ * on top, at which point this reads `tier.*` again.
  */
 function TierLimits() {
   const tier = TIERS[getViewerTier()];
+  const config = useBettingConfig();
   return (
     <section className="mt-5 overflow-hidden rounded-2xl border border-border/40 bg-card shadow-sm">
       {/* Hero header — gradient block lives in the shared
@@ -430,17 +433,17 @@ function TierLimits() {
           <LimitRow
             icon={Target}
             label="Max per outcome"
-            cents={tier.maxBetCents}
+            cents={config.maxBetCents}
           />
           <LimitRow
             icon={Flag}
             label="Max per event (or round, multi-round)"
-            cents={tier.maxRoundStakeCents}
+            cents={config.maxRoundStakeCents}
           />
           <LimitRow
             icon={CalendarDays}
             label="Max per day"
-            cents={tier.dailyCapCents}
+            cents={config.dailyCapCents}
           />
         </ul>
       </div>
