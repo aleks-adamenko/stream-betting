@@ -5,11 +5,11 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,15 +20,20 @@ import {
   type NotificationRow,
   type NotificationType,
 } from "@/services/notificationsService";
-import { NotificationToastCard } from "@/components/notifications/NotificationToastCard";
+import {
+  NotificationStack,
+  type StackItem,
+} from "@/components/notifications/NotificationStack";
 import type { ToastType } from "@/components/notifications/notificationTypeMeta";
 
 /**
- * Top-centre toast notification provider for the user-app.
+ * Top-centre notification provider for the user-app.
  *
  * Single Realtime channel filtered by `user_id = auth.uid()` against
- * `public.notifications`. Every INSERT becomes a Sonner toast.
- * Behaviour per type lives in TYPE_BEHAVIOUR below.
+ * `public.notifications`. Every INSERT becomes a card in an on-screen
+ * stack (see <NotificationStack/>). Cards never auto-dismiss — the
+ * viewer closes the front card with its X (or by tapping into the
+ * event). Behaviour per type lives in TYPE_BEHAVIOUR below.
  *
  * Persistent rows (bet_placed / bet_won / bet_lost / bet_refunded /
  * welcome / new_follower / top_up) are visible on /notifications.
@@ -37,7 +42,7 @@ import type { ToastType } from "@/components/notifications/notificationTypeMeta"
  * realtime-fan them out — but the Notifications page filters them
  * via PAGE_HIDDEN_TYPES.
  *
- * Provider also exposes `pushLocalToast()` for client-only toasts
+ * Provider also exposes `pushLocalToast()` for client-only cards
  * (e.g. the streamer self-bet warning, which has no DB row).
  */
 
@@ -62,89 +67,74 @@ interface LocalToastInput {
   title: string;
   body?: string;
   eventId?: string | null;
-  /** Default 3000ms for local toasts; pass Infinity for sticky. */
+  /**
+   * @deprecated Cards no longer auto-dismiss — every card stays until
+   * the viewer closes it. Kept so existing call sites still compile;
+   * the value is ignored.
+   */
   durationMs?: number;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
 
 /**
- * Behaviour table — single source of truth for per-type duration +
- * route-suppression + clickability. Keep this terse; render details
- * live in NotificationToastCard.
+ * Behaviour table — single source of truth for per-type route-
+ * suppression + clickability. Cards no longer auto-dismiss (the X is
+ * the only escape), so there's no per-type duration anymore. Keep this
+ * terse; render details live in NotificationToastCard.
  */
 interface ToastBehaviour {
-  /** undefined → use Sonner's default; Infinity → sticky (no auto-dismiss). */
-  durationMs: number | undefined;
   /** When true, the entire card is a <Link> to /event/<id>. */
   clickable: boolean;
-  /** If true, suppress the toast when current pathname matches /event/<row.event_id>. */
+  /** If true, suppress the card when current pathname matches /event/<row.event_id>. */
   suppressOnEventPage: boolean;
 }
 
 const DEFAULT_BEHAVIOUR: ToastBehaviour = {
-  durationMs: 2000,
   clickable: false,
   suppressOnEventPage: false,
 };
 
-/**
- * Per-custom-toast override for Sonner's container styling.
- *
- * Belt-and-suspenders against a future global toastOptions config
- * regression. The user-app's global Sonner config in App.tsx no
- * longer applies `!border` / `!shadow-2xl` / `!rounded-2xl` to all
- * toasts (those were painting the stray white outline around custom
- * cards), so this override is defensive — if anyone adds them back,
- * the custom-card silhouette stays clean.
- *
- * The `!` prefix in Tailwind = !important, which beats any global
- * `!`-prefixed class via specificity tiebreak on rule order.
- */
-const TOAST_OVERRIDE_CLASSES = {
-  toast:
-    "!border-0 !bg-transparent !shadow-none !p-0 !rounded-none !w-auto",
-} as const;
+// Cap the on-screen stack so an inattentive viewer can't pile up an
+// unbounded deck of never-dismissed cards. Pushing past this drops the
+// oldest queued card; persistent types still live on /notifications.
+const MAX_STACK = 8;
 
 const TYPE_BEHAVIOUR: Partial<Record<NotificationType, ToastBehaviour>> = {
-  // Persistent + auto-dismiss after 2s. Clickable so the viewer can
-  // jump into the event page if they tap the card.
-  bet_placed:   { durationMs: 2000, clickable: true,  suppressOnEventPage: false },
-  bet_won:      { durationMs: 2000, clickable: true,  suppressOnEventPage: false },
-  bet_lost:     { durationMs: 2000, clickable: true,  suppressOnEventPage: false },
-  bet_refunded: { durationMs: 2000, clickable: true,  suppressOnEventPage: false },
+  // Bet-result cards are clickable so the viewer can jump into the
+  // event page if they tap the card.
+  bet_placed:   { clickable: true,  suppressOnEventPage: false },
+  bet_won:      { clickable: true,  suppressOnEventPage: false },
+  bet_lost:     { clickable: true,  suppressOnEventPage: false },
+  bet_refunded: { clickable: true,  suppressOnEventPage: false },
 
-  // Ephemeral lifecycle — sticky (no auto-dismiss). User has to
-  // click the card (to navigate) or the X to dismiss. Suppressed
-  // when the user is already on the event page since the page
-  // itself already tells the story (round counter, live badge).
-  event_starting: { durationMs: Infinity, clickable: true,  suppressOnEventPage: true },
-  round_starting: { durationMs: Infinity, clickable: true,  suppressOnEventPage: true },
-  // Reschedule — sticky so the viewer can't miss the new time, and
-  // clickable so a tap navigates to the event page where the
-  // updated countdown lives. Suppressed when already on /event/<id>
-  // since the page header carries the new schedule directly.
-  event_rescheduled: { durationMs: Infinity, clickable: true,  suppressOnEventPage: true },
+  // Lifecycle cards — clickable to navigate. Suppressed when the user
+  // is already on the event page since the page itself already tells
+  // the story (round counter, live badge).
+  event_starting: { clickable: true,  suppressOnEventPage: true },
+  round_starting: { clickable: true,  suppressOnEventPage: true },
+  // Reschedule — clickable so a tap navigates to the event page where
+  // the updated countdown lives. Suppressed when already on
+  // /event/<id> since the page header carries the new schedule.
+  event_rescheduled: { clickable: true,  suppressOnEventPage: true },
 
-  // Ephemeral stream-ended — short auto-dismiss. NotificationsProvider
-  // delays the push by 500ms below so it stacks visibly under a
-  // simultaneous bet-result toast for the same event.
-  event_finished: { durationMs: 2000, clickable: false, suppressOnEventPage: false },
+  // Stream-ended — NotificationsProvider delays the push by 500ms below
+  // so it stacks visibly above a simultaneous bet-result card for the
+  // same event.
+  event_finished: { clickable: false, suppressOnEventPage: false },
 
-  // Welcome — sticky. Inserted by handle_email_confirmed (user_app
-  // signups) and activate_viewer (studio-first signups) at the
-  // moment the 100-coin starter actually lands on the balance.
-  // The toast stays until the viewer dismisses; the dismiss
-  // handler (passed to NotificationToastCard via onDismiss below)
-  // marks the row as read so it doesn't re-fire on the next page
-  // load. Replay-on-mount in the effect below ensures the toast
-  // appears even when the row was INSERTed before the realtime
-  // channel opened (the typical magic-link flow).
-  welcome:         { durationMs: Infinity, clickable: false, suppressOnEventPage: false },
-  new_follower:    { durationMs: 3000, clickable: false, suppressOnEventPage: false },
-  top_up:          { durationMs: 3000, clickable: false, suppressOnEventPage: false },
-  rake_credited:   { durationMs: 3000, clickable: false, suppressOnEventPage: false },
-  payout_rejected: { durationMs: 5000, clickable: false, suppressOnEventPage: false },
+  // Welcome — inserted by handle_email_confirmed (user_app signups) and
+  // activate_viewer (studio-first signups) at the moment the 100-coin
+  // starter actually lands on the balance. The dismiss handler (passed
+  // to NotificationStack via onDismiss below) marks the row read so it
+  // doesn't re-fire on the next page load. Replay-on-mount in the
+  // effect below ensures the card appears even when the row was
+  // INSERTed before the realtime channel opened (magic-link flow).
+  welcome:         { clickable: false, suppressOnEventPage: false },
+  new_follower:    { clickable: false, suppressOnEventPage: false },
+  top_up:          { clickable: false, suppressOnEventPage: false },
+  rake_credited:   { clickable: false, suppressOnEventPage: false },
+  payout_rejected: { clickable: false, suppressOnEventPage: false },
 };
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
@@ -189,6 +179,27 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
    */
   const welcomeReplayedRef = useRef<string | null>(null);
 
+  // The on-screen stack (oldest → newest). NotificationStack renders
+  // the newest as the front card; the rest peek behind it.
+  const [items, setItems] = useState<StackItem[]>([]);
+  // Monotonic counter for client-only cards (no DB row id to dedupe on).
+  const localIdRef = useRef(0);
+
+  const removeItem = useCallback((id: string) => {
+    setItems((prev) => prev.filter((it) => it.id !== id));
+  }, []);
+
+  const pushItem = useCallback((item: StackItem) => {
+    setItems((prev) => {
+      // Replace an existing card with the same id (paranoia against a
+      // double realtime delivery slipping past the seenIds dedupe).
+      const without = prev.filter((it) => it.id !== item.id);
+      const next = [...without, item];
+      // Drop the oldest beyond the cap so the deck stays bounded.
+      return next.length > MAX_STACK ? next.slice(next.length - MAX_STACK) : next;
+    });
+  }, []);
+
   const renderRow = useCallback(
     (row: NotificationRow) => {
       // Dedupe on row id.
@@ -231,32 +242,15 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           : undefined;
 
       const push = () => {
-        toast.custom(
-          (toastId) => (
-            <NotificationToastCard
-              toastId={toastId}
-              type={row.type}
-              title={row.title}
-              body={row.body ?? null}
-              eventId={row.event_id ?? null}
-              clickable={behaviour.clickable}
-              onDismiss={onDismiss}
-            />
-          ),
-          {
-            duration: behaviour.durationMs,
-            // unstyled drops Sonner's DEFAULT container styling,
-            // but the global toastOptions.classNames.toast in
-            // App.tsx (!border, !shadow-2xl, !rounded-2xl, !p-4)
-            // still paints a thin white-bordered wrapper around
-            // our card. Override per-custom-toast: zero border /
-            // background / shadow / padding / radius so the
-            // NotificationToastCard's own styling is the ONLY
-            // visible silhouette.
-            unstyled: true,
-            classNames: TOAST_OVERRIDE_CLASSES,
-          },
-        );
+        pushItem({
+          id: row.id,
+          type: row.type,
+          title: row.title,
+          body: row.body ?? null,
+          eventId: row.event_id ?? null,
+          clickable: behaviour.clickable,
+          onDismiss,
+        });
       };
 
       // Pair stream-ended with a just-fired bet-result for the same
@@ -302,7 +296,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         void queryClient.invalidateQueries({ queryKey: betsKeys.mine() });
       }
     },
-    [queryClient],
+    [queryClient, pushItem],
   );
 
   // Subscribe once per user — opens a realtime channel filtered by
@@ -355,6 +349,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       // populated so a sticky welcome can't double-toast.
       seenIdsRef.current.clear();
       recentBetResultsRef.current.clear();
+      // Drop any on-screen cards so one account's notifications don't
+      // linger into the next account's session.
+      setItems([]);
       // Reset welcome-replay marker so a different account signing
       // in can see their own welcome toast.
       welcomeReplayedRef.current = null;
@@ -425,31 +422,20 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     };
   }, [loading, userId, renderRow]);
 
-  const pushLocalToast = useCallback((input: LocalToastInput) => {
-    const duration = input.durationMs ?? 3000;
-    toast.custom(
-      (toastId) => (
-        <NotificationToastCard
-          toastId={toastId}
-          type={input.type}
-          title={input.title}
-          body={input.body ?? null}
-          eventId={input.eventId ?? null}
-          clickable={false}
-        />
-      ),
-      // Same `Infinity → sticky` semantic as the realtime path
-      // above. Don't normalise to MAX_SAFE_INTEGER — that gets
-      // clamped to ~1ms by the browser's setTimeout. unstyled
-      // + the override classNames suppress Sonner's outer
-      // container (see realtime path for the full rationale).
-      {
-        duration,
-        unstyled: true,
-        classNames: TOAST_OVERRIDE_CLASSES,
-      },
-    );
-  }, []);
+  const pushLocalToast = useCallback(
+    (input: LocalToastInput) => {
+      localIdRef.current += 1;
+      pushItem({
+        id: `local-${localIdRef.current}`,
+        type: input.type,
+        title: input.title,
+        body: input.body ?? null,
+        eventId: input.eventId ?? null,
+        clickable: false,
+      });
+    },
+    [pushItem],
+  );
 
   const value = useMemo<NotificationsContextValue>(
     () => ({ pushLocalToast }),
@@ -459,6 +445,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   return (
     <NotificationsContext.Provider value={value}>
       {children}
+      <NotificationStack items={items} onClose={removeItem} />
     </NotificationsContext.Provider>
   );
 }

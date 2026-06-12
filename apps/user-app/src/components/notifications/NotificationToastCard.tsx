@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import { toast } from "sonner";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -11,47 +10,60 @@ import {
 import { renderWithCoins } from "./renderWithCoins";
 
 /**
- * Custom toast card rendered via `toast.custom()` from
- * NotificationsContext. Geometry follows the reference screenshot:
+ * Custom notification card rendered by NotificationStack. Geometry
+ * follows the reference screenshot:
  *   • Icon-tinted avatar circle on the left (40 × 40, type-coloured)
  *   • Title + body stacked in the centre, body inlined with
  *     coin glyphs via renderWithCoins
- *   • X close button on the right (`toast.dismiss(toastId)`)
+ *   • X close button on the right
  *
- * Sticky variants (event_starting, round_starting) are clickable —
- * the whole card becomes a <Link> to /event/<id> that dismisses on
- * navigation. Non-sticky variants are static; the X button is the
- * only escape.
+ * Cards no longer auto-dismiss — the X button (or, for clickable
+ * variants, navigating into the event) is the only way to close one.
+ * `onClose` removes the card from the on-screen stack; `onDismiss` is
+ * an optional side-effect that runs first (e.g. the welcome card marks
+ * its DB row read so it doesn't re-fire on the next page load).
+ *
+ * The card itself is always "wired" — NotificationStack gates which
+ * card is interactive by toggling `pointer-events` on the wrapper, so
+ * only the front card's X / link actually receive clicks.
  */
 
 interface NotificationToastCardProps {
-  toastId: string | number;
   type: ToastType;
   title: string;
   body: string | null;
   eventId: string | null;
   /** When true, the entire card is a navigation link. */
   clickable?: boolean;
+  /** Remove this card from the on-screen stack. */
+  onClose: () => void;
   /**
-   * Optional side-effect to run when the user dismisses or
-   * navigates away from the toast. Used by sticky DB-backed
-   * notifications (e.g. welcome) to mark the underlying row as
-   * read so the toast doesn't re-fire on the next page load.
+   * Optional side-effect to run when the user dismisses or navigates
+   * away from the card. Used by sticky DB-backed notifications (e.g.
+   * welcome) to mark the underlying row as read so the card doesn't
+   * re-fire on the next page load.
    */
   onDismiss?: () => void;
 }
 
 export function NotificationToastCard({
-  toastId,
   type,
   title,
   body,
   eventId,
   clickable = false,
+  onClose,
   onDismiss,
 }: NotificationToastCardProps) {
   const meta = TYPE_META[type] ?? DEFAULT_META;
   const Icon = meta.icon;
+
+  // Run the optional side-effect (welcome → mark read) BEFORE removing
+  // the card from the stack so the closure still has its context.
+  const close = () => {
+    onDismiss?.();
+    onClose();
+  };
 
   const inner = (
     <>
@@ -82,18 +94,14 @@ export function NotificationToastCard({
       </div>
 
       {/* X close — stopPropagation so the surrounding Link doesn't
-          fire a navigation when the user explicitly dismissed.
-          Runs the optional onDismiss side-effect FIRST so the
-          mark-read RPC fires before the toast unmounts and we
-          lose context. */}
+          fire a navigation when the user explicitly dismissed. */}
       <button
         type="button"
         aria-label="Dismiss notification"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          onDismiss?.();
-          toast.dismiss(toastId);
+          close();
         }}
         className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
@@ -111,14 +119,17 @@ export function NotificationToastCard({
   // two stack naturally without overlapping. Both reference the
   // same primary token so the colours stay in lockstep with the
   // brand even if design-tokens.css evolves later.
+  //
+  // `w-full` fills the fixed-width NotificationStack wrapper so every
+  // card in the stack shares one silhouette.
   const baseClasses =
-    "flex w-[min(420px,calc(100vw-32px))] items-start gap-3 rounded-2xl border-2 border-primary/30 ring-4 ring-primary/15 bg-card p-4 shadow-xl";
+    "flex w-full items-start gap-3 rounded-2xl border-2 border-primary/30 ring-4 ring-primary/15 bg-card p-4 shadow-xl";
 
   if (clickable && eventId) {
     return (
       <Link
         to={`/event/${eventId}`}
-        onClick={() => toast.dismiss(toastId)}
+        onClick={() => close()}
         // Hover affordance is a ring + shadow lift rather than a
         // background tint — `hover:bg-secondary/30` painted a
         // 30%-alpha overlay on top of `bg-card`, which Tailwind's

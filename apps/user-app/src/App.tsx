@@ -66,9 +66,13 @@ const App = () => (
         />
         {/* NotificationsProvider opens one Realtime channel against
             public.notifications (filtered by user_id = auth.uid()) and
-            renders a custom card via toast.custom() for every new row.
-            Must sit inside BrowserRouter (it uses useLocation()) and
-            inside AuthProvider (it reads the user). Wraps <Routes>
+            pushes every new row onto its own on-screen card stack
+            (<NotificationStack/>, rendered inside the provider). Those
+            cards never auto-dismiss — the viewer closes the front card
+            with its X. (Sonner above is still used for transient
+            success/error feedback toasts elsewhere — auth, checkout,
+            chat.) Must sit inside BrowserRouter (it uses useLocation())
+            and inside AuthProvider (it reads the user). Wraps <Routes>
             because the provider relies on the router context to read
             the current pathname for "suppress on event page" logic. */}
         <NotificationsProvider>
